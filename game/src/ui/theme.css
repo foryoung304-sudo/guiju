@@ -1,0 +1,235 @@
+/* 精细扁平（赛璐璐平涂）呈现层口径：纯色平涂 + 每物 1–2 层平涂阴影 + 中等粗细干净墨线。
+   禁：渐变、肌理、纸纹、写实光影、模糊阴影。色板照 STYLE-FLATPLUS：奶油底 + 番茄红 + 芥末黄 + 青绿 + 墨蓝。 */
+:root {
+  --cream: #fbf3e4;
+  --cream-2: #f3e6cf;
+  --ink: #1b2a4a;
+  --tomato: #e24b33;
+  --mustard: #f2b233;
+  --teal: #2e9e8f;
+  --paper: #fffaf0;
+  --ink-2: rgba(27, 42, 74, .18);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+body {
+  background: var(--cream);
+  color: var(--ink);
+  font: 15px/1.5 "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  letter-spacing: .01em;
+}
+
+#app { max-width: 520px; margin: 0 auto; min-height: 100vh; padding: 0 12px 96px; }
+
+/* ── 平涂面板：墨线 + 硬边二层阴影 ───────────────────────── */
+.panel {
+  background: var(--paper);
+  border: 2px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--ink-2), 8px 8px 0 var(--cream-2);
+  padding: 12px;
+  margin-bottom: 14px;
+}
+.panel.accent { border-left: 10px solid var(--tomato); }
+.panel.good { border-left: 10px solid var(--teal); }
+.panel.warn { border-left: 10px solid var(--mustard); }
+
+/* ── 顶栏（第 1 步晨间结转常驻）───────────────────────────── */
+.hud {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--ink); color: var(--paper);
+  border: 2px solid var(--ink); margin: 0 -12px 14px;
+  padding: 8px 12px; display: flex; flex-wrap: wrap; gap: 4px 14px;
+  font-size: 13px;
+}
+.hud b { color: var(--mustard); font-weight: 600; }
+.hud .neg { color: #ff9b8a; }
+
+h1 { font-size: 26px; line-height: 1.25; letter-spacing: .04em; }
+h2 { font-size: 17px; margin-bottom: 8px; letter-spacing: .06em; }
+h3 { font-size: 14px; letter-spacing: .08em; }
+.muted { color: rgba(27, 42, 74, .62); font-size: 12px; }
+.big { font-size: 22px; font-weight: 700; }
+.num { font-variant-numeric: tabular-nums; }
+.row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.row.tight { margin-bottom: 6px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.stack > * + * { margin-top: 8px; }
+
+/* ── 按钮 ────────────────────────────────────────────────── */
+button {
+  font: inherit; cursor: pointer; color: var(--ink);
+  background: var(--mustard); border: 2px solid var(--ink);
+  box-shadow: 3px 3px 0 var(--ink);
+  padding: 9px 14px; letter-spacing: .04em;
+}
+button:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--ink); }
+button[disabled] { background: var(--cream-2); color: rgba(27, 42, 74, .4); box-shadow: 3px 3px 0 rgba(27, 42, 74, .25); cursor: not-allowed; }
+button.go { background: var(--tomato); color: var(--paper); width: 100%; padding: 13px; font-size: 16px; }
+button.ghost { background: var(--paper); box-shadow: 3px 3px 0 var(--ink-2); }
+button.mini { padding: 4px 9px; font-size: 13px; background: var(--paper); }
+button.sel { background: var(--teal); color: var(--paper); }
+
+/* ── 货架卡片（招牌画面：市场采购）───────────────────────── */
+.shelf { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sku {
+  background: var(--paper); border: 2px solid var(--ink); padding: 6px;
+  display: flex; flex-direction: column; gap: 4px; position: relative;
+}
+.sku img { width: 100%; height: 62px; object-fit: contain; background: var(--cream); border: 2px solid var(--ink); }
+.sku .price { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sku .src { font-size: 11px; color: rgba(27, 42, 74, .62); }
+.sku .desc { font-size: 11px; line-height: 1.35; min-height: 3em; }
+.sku .qty { display: flex; align-items: center; gap: 4px; }
+.sku .qty input { width: 100%; min-width: 0; text-align: center; }
+.sku.on { background: #fff3d6; box-shadow: 4px 4px 0 var(--tomato); }
+.sku.absent { opacity: .55; }
+.tag { font-size: 10px; padding: 1px 5px; border: 1.5px solid var(--ink); display: inline-block; }
+.tag.credit { background: var(--teal); color: var(--paper); }
+.tag.cash { background: var(--paper); }
+.tag.ticket { background: var(--mustard); }
+.tag.nodoc { background: var(--cream-2); }
+.tag.due { background: var(--tomato); color: var(--paper); }
+.tag.keep { background: var(--paper); }
+
+input[type=number], input[type=text] {
+  font: inherit; padding: 6px; border: 2px solid var(--ink); background: var(--paper);
+  color: var(--ink); font-variant-numeric: tabular-nums;
+}
+
+/* ── 试算条（附录 C 明账）────────────────────────────────── */
+.forecast { background: var(--ink); color: var(--paper); border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink-2); padding: 10px 12px; }
+.forecast .k { font-size: 11px; color: rgba(255, 250, 240, .7); letter-spacing: .06em; }
+.forecast .v { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.forecast .low { background: var(--tomato); color: var(--paper); font-size: 11px; padding: 1px 6px; }
+
+/* ── 吸底汇总条（实测反馈 #8：改数量时总额要一直看得见）─────── */
+.stickfoot {
+  position: sticky; bottom: 0; z-index: 4;
+  background: var(--ink); color: var(--paper);
+  margin: 0 -12px; padding: 9px 12px calc(9px + env(safe-area-inset-bottom));
+  border-top: 2px solid var(--ink);
+  display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px;
+  font-size: 12px; font-variant-numeric: tabular-nums;
+}
+.stickfoot b { color: var(--mustard); font-weight: 600; }
+.stickfoot .mini { margin-left: auto; }
+
+/* ── 电子秤（第 7 步亲手单）─────────────────────────────── */
+.scale { display: flex; gap: 10px; }
+.scale img { width: 92px; height: 72px; object-fit: contain; background: var(--cream); border: 2px solid var(--ink); }
+.readout {
+  flex: 1; background: var(--ink); color: #7dffb0; border: 2px solid var(--ink);
+  font-family: ui-monospace, Consolas, monospace; font-size: 24px; font-weight: 700;
+  display: flex; align-items: center; justify-content: flex-end; padding: 0 12px;
+}
+.readout .u { font-size: 12px; margin-left: 6px; opacity: .72; }
+/* 预检应修⑦：克是秤面主读数，斤换算常驻角标（买菜论斤、称重论克） */
+.readout .jin { font-size: 11px; margin-left: 10px; padding-left: 10px; border-left: 1px solid rgba(125, 255, 176, .35); opacity: .78; }
+/* 「正好」标记（signoff-weighing-finestep）：落点与目标差 ≤ max(1 克, 目标 1%) 时点一下，只做呈现 */
+.readout .exact { margin-left: 8px; padding: 0 5px; font-size: 11px; font-weight: 700; color: var(--ink); background: var(--mustard); border: 1px solid var(--ink); }
+.readout .exact[hidden] { display: none; }
+.scale.ok .readout .exact { background: var(--ink); color: var(--mustard); }
+/* 双读数条（实测反馈 #2）：顾客要的与你实际称的必须同时在场 */
+.dual { font-size: 12px; margin-bottom: 8px; letter-spacing: .02em; }
+/* 称重手感：按住抓菜 / 松手定格 / 捏出一点（滑杆已删）
+   窄屏（390px）下一行要放下「图+名 / 你称 / 捏出」，三列都用 auto、只有按钮列可缩，
+   否则贪心列会把按钮挤到 100px 以下，图被拉成扁条、标签溢出到邻列。 */
+.grabrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; margin-top: 6px; }
+.grab {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px; text-align: left;
+  min-width: 0; overflow: hidden;
+  background: var(--cream); border: 2px solid var(--ink); box-shadow: 2px 2px 0 var(--ink-2);
+  touch-action: none; user-select: none; -webkit-user-select: none; cursor: grab;
+}
+.grab.on { background: var(--mustard); transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--ink-2); cursor: grabbing; }
+.grab .grabname { min-width: 0; font-size: 12px; font-weight: 700; line-height: 1.25; }
+.grab .want { display: block; font-weight: 400; font-size: 11px; color: rgba(27, 42, 74, .6); white-space: nowrap; }
+/* 分段步长必须可见（signoff-weighing-finestep）：>20 克写 +5，≤20 克写 +1，随克数实时换 */
+.grab .step { display: block; font-size: 10px; font-weight: 700; color: var(--ink); opacity: .62; white-space: nowrap; }
+/* 食材缩略：近方形（同市场 SKU 格），用双类压过 .skuimg 的 width:100% —— 扁条就是那条规则压出来的
+   恒 40×40：不随克数、不随行状态缩放，碗里堆多堆少都看得清 */
+.grab .bowlchip { width: 40px; height: 40px; flex: none; border: 2px solid var(--ink); }
+.grabrow .gave { text-align: right; font-size: 12px; white-space: nowrap; }
+.pinch {
+  padding: 8px 4px; font-size: 11px; font-weight: 700; white-space: nowrap; color: var(--ink);
+  background: transparent; border: 2px dashed var(--ink-2); cursor: pointer;
+}
+.pinch:active, .pinch.on { background: var(--cream); }
+/* 捏回教学（spec-weighing-hint-20261031）：只在松手定格 ≥110% 且从未捏回时露一次，不挡操作 */
+.pinchhint { margin: -2px 0 8px; padding: 4px 8px; font-size: 11px; background: var(--cream-2); border-left: 3px solid var(--mustard); }
+/* 足称带（≥98%）：秤面由绿转黄，数字压深 */
+.scale.ok .readout { color: #1b2e4e; background: var(--mustard); }
+.scale.ok .readout .jin { border-left-color: rgba(27, 42, 74, .35); }
+
+/* ── 结算页账目 ─────────────────────────────────────────── */
+table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+th, td { text-align: left; padding: 4px 6px; border-bottom: 1.5px solid var(--ink-2); }
+th { font-size: 11px; letter-spacing: .06em; color: rgba(27, 42, 74, .68); }
+td.r, th.r { text-align: right; }
+.pos { color: var(--teal); font-weight: 700; }
+.negv { color: var(--tomato); font-weight: 700; }
+
+/* ── 留言（3.4 配比；不许出现品质数字）───────────────────── */
+.comment {
+  background: var(--cream); border-left: 6px solid var(--teal); padding: 7px 10px;
+  font-size: 13px; margin-bottom: 6px;
+}
+.comment.hot { border-left-color: var(--tomato); }
+
+/* ── 事件弹层（立绘 + 对话框，不做动画）──────────────────── */
+.overlay {
+  position: fixed; inset: 0; background: rgba(27, 42, 74, .55);
+  display: flex; align-items: flex-end; justify-content: center; z-index: 20; padding: 10px;
+}
+.event { background: var(--paper); border: 2px solid var(--ink); box-shadow: 6px 6px 0 var(--ink); max-width: 500px; width: 100%; }
+.event .art { width: 100%; aspect-ratio: 5 / 2; object-fit: cover; object-position: center; border-bottom: 2px solid var(--ink); background: var(--cream-2); display: block; }
+.event .body { padding: 12px; }
+.event .who { background: var(--tomato); color: var(--paper); display: inline-block; padding: 2px 10px; font-size: 12px; letter-spacing: .08em; }
+.event .text { margin: 8px 0 12px; font-size: 14px; line-height: 1.75; }
+.event .acts { display: grid; gap: 8px; }
+
+/* 场景头图：定版素材都是竖构图，横幅裁切会把人物切成半截（实测反馈 §二.1、§二.4）。
+   这里按 4:3 / 16:9 取景保住人物完整，出图前先垫一层色块，不让玩家看见空白。 */
+.scene {
+  width: 100%; aspect-ratio: 16 / 9; object-fit: cover; object-position: center 26%;
+  border: 2px solid var(--ink); margin-bottom: 12px; background: var(--cream-2); display: block;
+}
+.scene.hero { aspect-ratio: 4 / 3; object-position: center 22%; }
+
+/* 情报条里的配图：事件素材已按 5:2 定好取景，这里同比例，免得再裁一次把人脸切掉。 */
+.inlineart {
+  width: 100%; aspect-ratio: 5 / 2; object-fit: cover; object-position: center;
+  border: 2px solid var(--ink); margin-bottom: 8px; background: var(--cream-2); display: block;
+}
+
+/* ── 拼版素材切片（ui-spec §五：24 款 SKU 图标、8 款顾客头像）── */
+/* 六品类各一张 2×2 拼版：档1 左上 / 档2 右上 / 档3 左下 / 强哥特供 右下 */
+.skuimg {
+  width: 100%; aspect-ratio: 1 / 1; border: 2px solid var(--ink);
+  background-color: var(--cream); background-size: 200% 200%; background-repeat: no-repeat;
+}
+.skuimg[data-cell="tl"] { background-position: 0% 0%; }
+.skuimg[data-cell="tr"] { background-position: 100% 0%; }
+.skuimg[data-cell="bl"] { background-position: 0% 100%; }
+.skuimg[data-cell="br"] { background-position: 100% 100%; }
+/* 亲手单头像：4 列 × 2 行拼版，格序 = c01…c08 */
+.ava {
+  width: 46px; aspect-ratio: 3 / 4; flex: none; background-color: var(--cream);
+  background-size: 400% 200%; background-repeat: no-repeat;
+}
+.ava-c01 { background-position: 0% 0%; }
+.ava-c02 { background-position: 33.333% 0%; }
+.ava-c03 { background-position: 66.667% 0%; }
+.ava-c04 { background-position: 100% 0%; }
+.ava-c05 { background-position: 0% 100%; }
+.ava-c06 { background-position: 33.333% 100%; }
+.ava-c07 { background-position: 66.667% 100%; }
+.ava-c08 { background-position: 100% 100%; }
+.cust { display: flex; align-items: center; gap: 10px; }
+.face { width: 54px; aspect-ratio: 3 / 4; object-fit: cover; object-position: top; border: 2px solid var(--ink); background: var(--cream-2); }
+.whoimg { display: flex; align-items: center; gap: 8px; font-size: 12px; letter-spacing: .04em; }
+.kind-bad { color: var(--tomato); }
+.kind-good { color: var(--teal); }
+ hr { border: 0; border-top: 2px solid var(--ink-2); margin: 10px 0; }

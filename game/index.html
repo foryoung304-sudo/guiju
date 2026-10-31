@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <title>先把规矩立住！</title>
+  <link rel="stylesheet" href="./src/ui/theme.css" />
+  <!-- 复验 #24：七张场景头图在 HTML 解析阶段就开始取，不等 JS 启动，首进不出现米色空框 -->
+  <link rel="preload" as="image" href="./img/business.webp" />
+  <link rel="preload" as="image" href="./img/stall.webp" />
+  <link rel="preload" as="image" href="./img/market.webp" />
+  <link rel="preload" as="image" href="./img/pricing.webp" />
+  <link rel="preload" as="image" href="./img/weighing.webp" />
+  <link rel="preload" as="image" href="./img/settlement.webp" />
+  <link rel="preload" as="image" href="./img/night.webp" />
+</head>
+<body>
+  <div id="app"></div>
+  <script type="module" src="./src/ui/main.js"></script>
+</body>
+</html>
