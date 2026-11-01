@@ -90,6 +90,11 @@ function chooseFor(ev, strategy) {
     case 'evt_d_001': return yieldAll ? 'record' : 'settle_now';
     case 'evt_d_002': return yieldAll ? 'rectify' : 'fine';   // 让步 = 免费整改（当日客流 ×0.6）；不让步 = 掏罚款
     case 'evt_d_031': return 'accept';                        // 好事两条线都接
+    // E.6 大检查：让步 = 销毁无票货（资产项记负、现金不动）换 Score 里的销毁比例 +15；不让步 = 不销毁
+    case 'evt_s_insp': return yieldAll ? 'destroy' : 'keep';
+    // E.9 挖角：让步 = 当场掏 1,800 再加每日 15 元；不让步 = 让他走（缺席 14 日 + 产能 ×0.90 + Rep −2）
+    case 'evt_s_poach': return yieldAll ? 'raise' : 'let_go';
+    // evt_s_insp2 两分支同账、evt_d_021 两分支逐字一样 → 走 default 取第一条（出示票据 / 登记）
     default: return ev.actions[0].id;
   }
 }
@@ -107,7 +112,8 @@ const CLOSER = {
 
 // M3 跑表口径（正文第八节 / 定稿 §七.2）：升级不变式 = 升级时点现金 ≥ 下一级价 ×1.3；
 // 设施按同一倍数、由便宜到贵买（正文 3.4：每件 +1 L，L 是盘店结局的门槛，跑表不买设施就永远摸不到结局 #3）；
-// 解锁条件走 FACILITIES.unlock 的 DSL 原文，M1 事件表里抽不到的那几张（evt_d_021 / 员工合同）自然永远锁着
+// 解锁条件走 FACILITIES.unlock 的 DSL 原文；用料展示柜（evt_d_021 立账）与员工合同（evt_s_poach 挖角）
+// 两把前置都在 M2 事件池里，eventScope:'m1' 的口径下这两条抽不到 → 那两件设施在已签发带上依旧锁着（与签发前一致）
 // 盘店只在真能给出结局 #3/#4/#5 时才按（判空即过 = 只升档，玩家不会为拿"平庸收摊"而提前离场）
 function investPhase(state, strategy, invests) {
   const cushion = strategy.upgradeAt ?? 1.3;
@@ -147,6 +153,9 @@ export function simulate(seed, days, strategy, closer = 'headless', opts = {}) {
   // 竞争层口径开关：同一条理由（3.5:141 的 M1 构建「无竞争（S ≡ 1）」）——已签发带一律传 competition:false，
   // M2 在场带店主还没签，只在 sweep 证据段出数。关掉时整层不抽 `rival` 子流，随机流与 M1 完全同轨。
   if (opts.competition !== undefined) state.competitionOn = !!opts.competition;
+  // 事件池口径开关：同 3.5:141 那条理由 —— 已签发带跑 M1 构建（正文 §八 M1 行「特殊事件、完整事件池」全在 M2），
+  // 传 eventScope:'m1' 后 drawEvent 只放行 ship='M1' 的四条，M2 新增行不进池、随机流与 M1 同轨。
+  if (opts.eventScope !== undefined) state.eventScope = opts.eventScope;
   // 试吃 / 显多秤探针（回归 §10 用）：直接给到"已置办"的前置，只验开与关的账面差别，不模拟攒钱买的过程
   if (opts.tasting) { state.Facilities.push('fac_taste'); state.TastingCount = opts.tasting; }
   if (opts.scale) { state.Tools.push('JI_SCALE'); state.ScaleShowOn = true; }
@@ -197,6 +206,9 @@ export function simulate(seed, days, strategy, closer = 'headless', opts = {}) {
       netOps: state.today.netOpsCents / 100, eventNet: state.today.eventNetCents / 100,
       // 3.12 生产链前段第三批：显多秤虚增斤数 ΔJ / 当日工资 / 试吃净额（三项都是"当日账面上多出来"的数）
       deltaJ: state.today.deltaJ || 0, labor: state.LaborCost / 100,
+      // 3.14 第 11 步事件账的资产项与当晚检查判定（附录 E.6：销毁只动库存不动现金；判定式不掷随机）
+      assetLoss: (state.today.eventAssetLoss || 0) / 100, insp: state.today.inspection || null,
+      notes: [...(state.today.notes || [])],
       tasting: (state.today.tastingIncomeCents || 0) / 100 - (state.today.tastingCostCents || 0) / 100,
       cash: state.Cash / 100, debt: state.DebtSupplier / 100, NP: state.NP / 100,
       Rep: +state.Rep.toFixed(2), Risk: +state.Risk.toFixed(2),

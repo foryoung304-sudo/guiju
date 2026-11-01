@@ -11,7 +11,8 @@ import {
 } from '../engine/day.js';
 import { additiveUnlocked, prepBudget, prepGridUsed, xiaodouPresent, laborCostCents, tastingConvert } from '../engine/production.js';
 import { effectivePrice, skuAvailable, creditAvailable, buyFacility, rampCoef, ownsTool, buyTool, sellBackTool } from '../engine/market.js';
-import { drawEvent, resolveChoice } from '../engine/events.js';
+import { drawEvent, resolveChoice, isActionAvailable, isActionAffordable } from '../engine/events.js';
+import { ticketlessCostCents } from '../engine/inspection.js';
 import { competitionOn, streetBoard } from '../engine/competition.js';
 import { evalCondition } from '../engine/dsl.js';
 import { EVENTS } from '../data/events.js';
@@ -758,6 +759,9 @@ const VIEWS = {
         : '<p class="muted">今晚没人说话。</p>'}
       ${t.reserveResult ? `<p class="muted">社团那单预订${t.reserveResult.delivered ? '按数出满了。' : '没出满。'}</p>` : ''}
     </div>
+      ${t.notes.length ? `<div class="panel"><h3>今晚记下的</h3>
+        ${t.notes.map(n => `<p class="muted">${esc(n)}</p>`).join('')}
+        ${t.eventAssetLoss ? `<p class="muted">柜里销毁的货按成本记 ${y(t.eventAssetLoss)}，现金没动。</p>` : ''}</div>` : ''}
     ${state.EndingId ? `<div class="panel accent"><h2 class="kind-bad">${ENDING_NAMES[state.EndingId]}</h2>
       <p>这一局到这儿。剩下的就是你那张进货单。</p>
       <button class="go" style="margin-top:10px" data-nav="ledger">看进货单</button></div>`
@@ -996,15 +1000,24 @@ function eventOverlay() {
   const ev = pendingEvent;
   const acts = (ev.actions || []).length
     ? (ev.actions || []).map(a => {
+      // 正文 :169「分支可用性写死」+ ui-spec UI-11：前置未满足 / 现金不足只置灰，按钮不藏起来
+      const avail = isActionAvailable(state, a);
+      const afford = isActionAffordable(state, a);
       const net = (a.open || []).reduce((s, o) => s + (o.cash || 0), 0);
       const after = state.Cash + net;
-      return `<button data-act="choose" data-choice="${a.id}">${esc(a.label)}${net && after < 0 ? `（现金要变 ${y(after)}）` : ''}</button>`;
+      const owed = (a.open || []).reduce((s, o) => s + (o.cash && o.cash < 0 ? -o.cash : 0), 0);
+      const hint = !avail ? '（现在办不了）' : !afford ? `（现金不够，还差 ${y(owed - state.Cash)}）` : net && after < 0 ? `（现金要变 ${y(after)}）` : '';
+      return `<button ${avail && afford ? '' : 'disabled'} data-act="choose" data-choice="${a.id}">${esc(a.label)}${hint}</button>`;
     }).join('')
     : '<button data-act="choose">知道了</button>';
+  // E.6 的销毁决策要在点下去之前看得见数额：无票货按成本记多少，全从自己那张进货单的「票」列推出来
+  const risk = ev.scoreCheck === 'big' ? ticketlessCostCents(state) : 0;
   return `<div class="overlay"><div class="event">
     <img class="art" src="./img/${EVENT_ART[ev.id] || 'chenshi'}.webp" alt="" />
     <div class="body"><span class="who">${esc(ev.kind)} · ${ev.timing === 'evening' ? '打烊后' : '清早'}</span>
-      <p class="text">${esc(ev.text)}</p><div class="acts">${acts}</div></div>
+      <p class="text">${esc(ev.text)}</p>
+      ${risk ? `<p class="muted">按成本记，无票的货是 ${y(risk)}——销毁不动现金，动的是柜里的货。</p>` : ''}
+      <div class="acts">${acts}</div></div>
   </div></div>`;
 }
 

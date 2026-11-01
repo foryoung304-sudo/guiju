@@ -137,8 +137,9 @@ export function settleWriteoff(state) {
 // 否则玩家在结算屏点开进货单会看到一个等于当日净额的假桥差（预检 seed 36832 的 −75 就是固定支出）。
 export function bridgeCheck(state) {
   const t = state.today || {};
+  // 销毁无票库存不改现金、只减库存资产，但它按附录 B :442 进事件账净额 → 第 11 步过账前的窗口里同样要补这一项
   const pendingCents = t.eventNetCents !== undefined ? 0
-    : (t.netOpsCents || 0) + (t.eventCashMorning || 0) + (t.eventCashEvening || 0);
+    : (t.netOpsCents || 0) + (t.eventCashMorning || 0) + (t.eventCashEvening || 0) - (t.eventAssetLoss || 0);
   const rhs = START_CASH_CENTS + state.NP + pendingCents - state.NetInvestSpent + state.DebtSupplier + state.DebtAd
     + state.AdBonusTotal - inventoryValueCents(state);
   return { ok: state.Cash === rhs, cash: state.Cash, bridge: rhs, diff: state.Cash - rhs, pendingCents };

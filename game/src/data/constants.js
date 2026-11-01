@@ -104,6 +104,12 @@ export const SCALE_RISK_PER_JIN = 0.3;    // Risk += ΔJ × 0.3（裁定 9a959bd
 export const LABOR = {
   perDay: 6000, highTierPerDay: 9000, contractPerDay: 12000, highTierFrom: 5,
   capMul: 1.10, contractCapMul: 1.15, gridBonus: 1,
+  // 附录 E.9 evt_s_poach「让他走 → 产能 ×0.90 …… 14 日后回来」：被挖走的缺席比请假的缺席多一条产能惩罚
+  //（正文 :137 的「小豆请假一天」只写「既不计人工也不给产能加成」，没有惩罚项）。两种成因共用 `XiaodouAbsentDays`，
+  // 由 `PoachedAway` 区分；「14 日后回来」按第 1 步递减的现行口径 = 缺席 13 个营业日、第 14 日在场，已登记回报。
+  poachedCapMul: 0.90,
+  // 勘误批 signoff-v492-audit-errata-20261031 b 项：涨薪留住的加薪 +5 元/日 → **+15 元/日**（E.9 :305 的旧字面 −600/+500 分作废）
+  raisePerDay: 1500,
 };
 
 // 正文 3.6 注 / 附录 D.5：试吃份数 n ∈ 3–6（第 5 步定版、不掷随机）；一份 = 0.3 碗的料；1 元/份；转化 = floor(n ÷ 3)
@@ -132,6 +138,26 @@ export const RIVAL_INDIRECT = [
   { id: 'liangpi', name: '凉皮叔', price: 15.8, p: 36, divert: { sunny: 1.0, cloudy: 1.0, rain: 1.0, heat: 1.3 } },
 ];
 
+// ── 附录 E.6 / E.9 两条检查事件共用的判定表（正文 :315 / :316 为权威；M2 第五批接线）──
+// Score = 票据覆盖率 × 60 + 设施分（证件墙 25 / 用料展示柜 10，可加总）+ 销毁比例 × 15 − Risk × 0.3
+// 三处「现金不足」走法分属两条事件、两个数（×0.6/1 日 是整改本 effect、×0.7/2 日 是大检查的待签兜底、
+// ×0.8/2 日 是例行检查的已签兜底），不是一个数抄三遍，故逐个写死、不做派生。
+export const INSPECTION = {
+  facScore: { fac_cert: 25, fac_display: 10 },
+  // 大检查（evt_s_insp）三档：≥55 通过 / 35–55 整改 / <35 直接进结局 #1
+  passAt: 55, rectifyAt: 35,
+  rectifyFineCents: 20000, rectifyRep: -2,
+  riskAfterPass: 30, riskAfterRectify: 40,
+  rectifyBuff: { mult: 0.6, days: 1 },
+  // §〇.1 第 8 条待签（附录 E.6 :239 明写「默认按前者施工、开关做成一处常量」）：
+  // 'buff' = 现金不足 200 时改 d0_buff ×0.7 持续 2 日、不扣负；'greyout' = 不扣钱也不给 buff（整改档不可选）
+  shortCashMode: 'buff',
+  shortCashBuff: { mult: 0.7, days: 2 },
+  // 例行检查（evt_s_insp2）：同式、门槛 ≥40；未过罚款 = 勘误批 a 项 50 → **100 元**（E.9 :283 / 正文 :315 的旧字面作废）
+  routinePassAt: 40, routineFineCents: 10000, routineRep: -1,
+  routineShortCashBuff: { mult: 0.8, days: 2 },
+};
+
 // 附录 J：结局判定用的量纲（ui-spec §一换算表：盘店价 60,000 / 金盆洗手 300,000 / 烧心 Wmax 210 斤）
 export const BUYOUT_PRICE_CENTS = 6000000;
 export const RETIRE_NP_CENTS = 30000000;
@@ -156,6 +182,10 @@ export const CONFIG = {
   flavor: true,
   // 正文 3.5 / 3.12 人工线：M2 第三批接线（小豆在场 +1 格工时、产能 ×1.10/×1.15、日结 60·90·120）
   labor: true,
+  // 事件范围：正文 §八 M1 行把「特殊事件、完整事件池」整体划进「明确不做（全部 M2 接入）」，
+  // 所以复现已签发的 M1 带时必须只放行 M1 的那四条日常行（与 labor:false / competition:false 同一条理由）。
+  // 'm1' = 只认 data/events.js 里 ship='M1' 的行；'full' = 全池（M2 构建的默认）。
+  eventScope: 'full',
   capacityTruncation: true,
   packingTier: 'normal',
   additiveTier: 'none',

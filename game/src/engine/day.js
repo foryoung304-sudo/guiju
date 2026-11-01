@@ -22,7 +22,11 @@ export function beginDay(state) {
   state.dayStarted = true;
   state.risk_100_pending = false;
   // 附录 E evt_s_poach「让他走 → 14 日后回来」/「小豆请假一天」：缺席按第 1 步递减，减到 0 即恢复在场
-  if (state.XiaodouAbsentDays > 0) state.XiaodouAbsentDays -= 1;
+  if (state.XiaodouAbsentDays > 0) {
+    state.XiaodouAbsentDays -= 1;
+    // 计数器归零那天人在场，被挖走的 ×0.90 产能惩罚同一天解除（E.9 只写「14 日后回来」，没写第二天的惩罚余量）
+    if (state.XiaodouAbsentDays <= 0) state.PoachedAway = false;
+  }
   // 正文 3.6 注：试吃转化「每转化 1 人次日 R +1」——当日第 8 步记下，第二天第 1 步进存量
   if (state.tasting_pending_R > 0) {
     state.R += state.tasting_pending_R;
@@ -172,7 +176,10 @@ export function nightClose(state, rng, ev, actionId) {
   const evening = ev ? { event: ev, choice: resolveChoice(state, ev, actionId) } : null;
 
   // 第 11 步：事件账净额（晨间已扣不重复）+ NP + 现金结转标记 + 全日唯一一次结局检查
-  const eventNetCents = state.today.eventCashMorning + state.today.eventCashEvening;
+  // 附录 B :442：事件账净额 = 现金收入 − 现金支出 + 非现金资产净变化（销毁记负），销毁一分现金不动、
+  // 但库存资产同步减等额 → 桥两端一起动，恒等式不破
+  const eventNetCents = state.today.eventCashMorning + state.today.eventCashEvening
+    - (state.today.eventAssetLoss || 0);
   state.NP += state.today.netOpsCents + eventNetCents;
   state.today.eventNetCents = eventNetCents;
   // 附录 F.6 `RivalSuppressedDays` 在第 11 步记（份额取第 7b 步存档值，正文 3.13）
@@ -217,7 +224,8 @@ export function closeDay(state, rng, chooseEvening) {
 
 // 附录 G.4：结局判定只在第 11 步走一次；3/4/5 由玩家主动盘店当刻判（见 closeShop）
 export function checkEndings(state) {
-  if (state.risk_100_pending || state.Risk >= 100) return ENDING.CRASH;
+  // §六 #1 的两条被动路径：Risk 到 100（含当日曾到）、卫生大检查 Score < 35（附录 E.6 当晚判，见 inspection.js）
+  if (state.risk_100_pending || state.Risk >= 100 || state.today?.inspectionCrash) return ENDING.CRASH;
   if (state.NegativeCashStreak >= 3) return ENDING.BANKRUPT;
   return 0;
 }
@@ -243,7 +251,10 @@ export function dailyReport(state) {
     tastingConvert: t.tastingConvert, deltaJ: t.deltaJ,
     netOpsCents: t.netOpsCents,
     eventCashMorning: t.eventCashMorning, eventCashEvening: t.eventCashEvening,
+    eventAssetLossCents: t.eventAssetLoss || 0,
     eventNetCents: t.eventNetCents, cash: state.Cash, debt: state.DebtSupplier,
+    // 附录 E 的「结算页多一行」文字与检查当晚的判定留痕（Score 与档位属明账，Risk/Rep 的数值不进面板）
+    notes: [...(t.notes || [])], inspection: t.inspection || null,
     comments: t.comments.map(c => c.text),
     soldOut: [...t.soldOutCats], spillBowls: t.spillBowls, shortWeighCount: t.shortWeighCount,
     soldJin: { ...t.soldJin }, soupUsed: t.soupUsed,

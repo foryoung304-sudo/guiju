@@ -9,16 +9,17 @@ import { newGame, roundJin, loadGame, STORAGE_KEY } from './src/engine/state.js'
 import { effectivePrice, buildBasket, planPayment, recomputeStock, buyTool, sellBackTool, ownsTool } from './src/engine/market.js';
 import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, PACKING_SPILL, CONFIG, SAVE_VERSION,
   ADDITIVE, PREP_LEVELS, LABOR, TASTING, TOOLS, SCALE_DELTA_J_SHARE, SCALE_C_PER_JIN, SCALE_RISK_PER_JIN,
-  COMPETITION } from './src/data/constants.js';
+  COMPETITION, INSPECTION, FACILITIES, ENDING } from './src/data/constants.js';
 import { SKU_BY_ID } from './src/data/skus.js';
 import { scenarioOf, WEATHER } from './src/data/scenario.js';
 import { evalCondition } from './src/engine/dsl.js';
 import { EVENTS } from './src/data/events.js';
-import { beginDay, morningPreEvent, submitBasket, previewBasket, commitPrep, lockTradingDay, morningEvent, runDay, nightSettle, eveningDraw, nightClose } from './src/engine/day.js';
+import { beginDay, morningPreEvent, submitBasket, previewBasket, commitPrep, lockTradingDay, morningEvent, runDay, nightSettle, eveningDraw, nightClose, checkEndings } from './src/engine/day.js';
 import { additiveOf, additiveUnlocked, capacityJin, computeMBase, prepBudget, prepGridUsed, qTaste, washSkipped,
   xiaodouPresent, laborCapMul, laborCostCents, tastingConvert } from './src/engine/production.js';
 import { drawHandOrders, handOrderCount } from './src/engine/weigh.js';
-import { applyHidden, resolveChoice, weightOf } from './src/engine/events.js';
+import { applyHidden, resolveChoice, weightOf, drawEvent, isActionAvailable, isActionAffordable } from './src/engine/events.js';
+import { inspectionScore, ticketlessCostCents, destroyTicketless, judgeBigInspection, judgeRoutineInspection } from './src/engine/inspection.js';
 import { morningRivals, priceWarReprice, sharesAndS, tallySuppression, rivalPriceCoef, previewShare } from './src/engine/competition.js';
 import { applyShadow, computeQ } from './src/engine/shadow.js';
 import { makeRng } from './src/engine/rng.js';
@@ -37,9 +38,10 @@ const NEAR = (a, b, eps = 1) => Math.abs(a - b) <= eps;
 
 // ── 1. 三条极端玩法 ───────────────────────────────────────────────
 // M1 口径：正文 3.5:141 明写压力测试带跑在 M1 构建（无小豆人工、无竞争，S ≡ 1），「人工与产能数值不参与本区间判定」。
-// M2 开人工线 / 竞争层后本段一律传 labor:false + competition:false 复现签发时的口径；
+// M2 开人工线 / 竞争层 / 完整事件池后本段一律传 labor:false + competition:false + eventScope:'m1' 复现签发时的口径
+// （§八 M1 行把「特殊事件、完整事件池」整体划给 M2，eventScope:'m1' 只挡 ship='M2' 的数据行，不改任何数值）；
 // M2 在场口径的另立区间店主还没给，只作证据不套带。
-const M1 = { labor: false, competition: false };
+const M1 = { labor: false, competition: false, eventScope: 'm1' };
 const runs = {};
 for (const [key, strategy] of Object.entries(STRATEGIES)) runs[key] = simulate(SEED, 10, strategy, 'headless', M1);
 
@@ -258,7 +260,7 @@ for (const [key, run] of Object.entries(runs)) {
 const SHORT_LINE = { tier: 1, price: 'standard', weigh: 0.85, yieldAll: true,
   buyFacilities: false, upgrade: false, buyout: false };
 for (const seed of [SEED, 7979, 36832]) {
-  const { log } = simulate(seed, 50, SHORT_LINE, 'headless', { competition: false });
+  const { log } = simulate(seed, 50, SHORT_LINE, 'headless', { competition: false, eventScope: 'm1' });
   const rep60 = log.findIndex(d => d.Rep >= 60);
   const slope = [...new Set(log
     .map((d, i) => (i > 1 && log[i - 1].Rep >= 60 ? +(d.Risk - log[i - 1].Risk).toFixed(2) : null))
@@ -623,7 +625,7 @@ for (const seed of [SEED, 7979, 36832]) {
     absent.XiaodouAbsentDays === 0 && xiaodouPresent(absent) === true, `递减后 ${absent.XiaodouAbsentDays} 日`);
 
   // 钱：工资既扣现金又进经营净额，逐日恒等式与桥都要平
-  const laborOn5 = simulate(SEED, 5, STRATEGIES.clean, 'headless', { labor: true, competition: false });
+  const laborOn5 = simulate(SEED, 5, STRATEGIES.clean, 'headless', { ...M1, labor: true });
   const reps = laborOn5.state.DailyReports;
   const idOK = reps.every(r => r.grossCents - r.writeoffCents - r.fixedCents - r.laborCents
     + r.tastingNetCents === r.netOpsCents);
@@ -771,7 +773,7 @@ for (const seed of [SEED, 7979, 36832]) {
     `十日晚间事件 ${off.log.map(d => d.evening || '—').join('/')}`);
 
   // 在场口径：竞争只改需求这一条腿，账目口径一律不动
-  const on = simulate(SEED, 10, STRATEGIES.mid, 'headless', { labor: false, competition: true });
+  const on = simulate(SEED, 10, STRATEGIES.mid, 'headless', { labor: false, competition: true, eventScope: 'm1' });
   const onBridge = bridgeCheck(on.state);
   check('在场竞争层：十日现金桥与 NP 逐日对平（竞争不改账，只改需求）',
     onBridge.ok && on.state.DailyReports.reduce((s, r) => s + r.netOpsCents + r.eventNetCents, 0) === on.state.NP,
@@ -786,7 +788,7 @@ for (const seed of [SEED, 7979, 36832]) {
       COMPETITION.inertiaBand[0], COMPETITION.inertiaBand[1])),
     `份额 ${on.state.Share.map(x => x.toFixed(4)).join('/')} → 惯性 ${on.state.QueueInertia.map(x => x.toFixed(4)).join('/')}`);
   check('在场十日同种子逐字复现（竞争层的随机全在命名子流里）',
-    JSON.stringify(simulate(SEED, 10, STRATEGIES.mid, 'headless', { labor: false, competition: true }).log)
+    JSON.stringify(simulate(SEED, 10, STRATEGIES.mid, 'headless', { labor: false, competition: true, eventScope: 'm1' }).log)
     === JSON.stringify(on.log));
 
   // 附录 C 的份额两项（正文 :451 主式「今日预估份额 ÷ 昨日实际份额」、回退式「× 今日预估份额 ÷ 0.25」）：
@@ -832,7 +834,7 @@ for (const seed of [SEED, 7979, 36832]) {
       const f = previewBasket(ratio, [], 'qinmin').forecast;
       return f.lowConfidence === true && Number.isFinite(f.estBowls); })(),
     `回退式给 ${previewBasket(ratio, [], 'qinmin').forecast.estBowls.toFixed(2)} 碗并标低置信度`);
-  const onClean = simulate(SEED, 10, STRATEGIES.clean, 'headless', { labor: false, competition: true });
+  const onClean = simulate(SEED, 10, STRATEGIES.clean, 'headless', { labor: false, competition: true, eventScope: 'm1' });
   const offClean = simulate(SEED, 10, STRATEGIES.clean, 'headless', M1);
   check('接线这两项要解决的问题：在场首日不再按「无竞争的需求」进货，第一天的报损与不在场逐分相等（差额登记在 delta §二十四.4）',
     onClean.log[0].writeoff === offClean.log[0].writeoff && onClean.log[0].bought < offClean.log[0].bought,
@@ -1015,7 +1017,7 @@ for (const seed of [SEED, 7979, 36832]) {
     `冻结末日 R ${lastFrozenDay} → 次日 R ${fr2.R}（上限 ${Math.floor(fr2.BaseSales * 0.6)}）`);
 
   // 强制留言排第一且不占概率类名额（正文 3.4 ①类优先级）
-  const cmt = simulate(SEED, 10, STRATEGIES.mid, 'headless', { labor: false, competition: true });
+  const cmt = simulate(SEED, 10, STRATEGIES.mid, 'headless', { labor: false, competition: true, eventScope: 'm1' });
   const forcedDay = cmt.log.find(d => d.evening === 'evt_s_return');
   check('事件写的固定文案进的是 ① 类强制信号（正文 3.4 优先级第一档，不掷随机选材）',
     forcedDay === undefined || forcedDay.comments.some(c => c.startsWith('forced:')),
@@ -1035,6 +1037,317 @@ for (const seed of [SEED, 7979, 36832]) {
   check('价格战式钳制带照已签勘误 c 落 [17.0, 28.9]：下界在亲民价 19.2×0.78=14.976 处真咬，上界只在合成价 40 处才够得着',
     wb2.RivalPrice === COMPETITION.warBand[0] && wb.RivalPrice === COMPETITION.warBand[1],
     `19.2 → ${wb2.RivalPrice}（钳下界）、40 → ${wb.RivalPrice}（钳上界；三档定价最高 32.2×0.78=25.116，够不到上界）`);
+}
+
+// ── 12. M2 第五批：附录 E 余六行 + 检查判定式（正文 :315–:317 / 附录 E.4、E.6、E.7、E.9、E.10）──
+{
+  const row = id => EVENTS.find(e => e.id === id);
+  const REP0 = newGame(SEED).Rep;          // 口碑初值从 newGame 读，断言不写死（正文 3.4 的初值由定稿文档给）
+  const INSP = row('evt_s_insp'), ROUT = row('evt_s_insp2'), POACH = row('evt_s_poach'),
+    PROMO = row('evt_s_promo'), FLAG = row('evt_s_flag'), LEDGER = row('evt_d_021');
+
+  // 1) 六条数据行照附录原文逐字段（数值只有已签勘误的 100 / −1,800 / +15，其余一字不动）
+  check('E.6 大检查行 = special/evening/坏事/weight 100/硬触发/condition「Risk>=70 | C>=8」/冷却 30',
+    INSP.pool === 'special' && INSP.timing === 'evening' && INSP.kind === '坏事' && INSP.weight === 100
+    && INSP.hard === true && INSP.condition === 'Risk>=70 | C>=8' && INSP.cooldown === 30
+    && INSP.scoreCheck === 'big' && INSP.actions.map(a => a.label).join('/') === '销毁全部无票库存/不销毁',
+    `实际 ${INSP.pool}/${INSP.timing}/${INSP.kind}/${INSP.weight}/${INSP.condition}/${INSP.cooldown}`);
+  check('E.9 例行检查行 = 软触发 weight 8、condition「Risk>=40」、冷却 12、两分支同账',
+    ROUT.weight === 8 && ROUT.hard === undefined && ROUT.condition === 'Risk>=40' && ROUT.cooldown === 12
+    && ROUT.scoreCheck === 'routine' && JSON.stringify(ROUT.actions[0].open) === JSON.stringify(ROUT.actions[1].open),
+    `weight ${ROUT.weight} / condition ${ROUT.condition} / cooldown ${ROUT.cooldown}`);
+  check('E.9 挖角行三个数按已签勘误 b 落：现金 −1,800 元、每日 +15 元、让他走缺席 14 日',
+    POACH.condition === 'Tier>=3 & EVT?evt_s_pricewar' && POACH.cooldown === 999
+    && POACH.actions[0].open.some(o => o.cash === -180000) && POACH.actions[0].open.some(o => o.wageRaise === LABOR.raisePerDay)
+    && POACH.actions[2].open.some(o => o.xiaodouAbsentDays === 14 && o.poached === true)
+    && POACH.actions[2].hidden.some(h => h.Rep === -2),
+    `加薪 ${POACH.actions[0].open.map(o => JSON.stringify(o)).join('+')}、让他走 ${JSON.stringify(POACH.actions[2].open)}`);
+  check('E.10 宣传队行 = 好事、weight 10、condition 走 readVar 别名 FacilityCount、无分支纯演出',
+    PROMO.kind === '好事' && PROMO.weight === 10 && PROMO.condition === 'Rep>=60 & FacilityCount>=2 & !EVT?evt_s_promo'
+    && PROMO.actions.length === 0 && PROMO.open.some(o => o.d0Buff && o.d0Buff.mult === 1.15 && o.d0Buff.days === 4)
+    && PROMO.effect_hidden.map(h => Object.keys(h)[0]).join('/') === 'Rep/R/L',
+    `暗线 ${JSON.stringify(PROMO.effect_hidden)}`);
+  check('E.7 锦旗行 = 硬触发一次性、窗口 SemesterDay 24–28 且 Rep>=55',
+    FLAG.hard === true && FLAG.cooldown === 999 && FLAG.weight === 100
+    && FLAG.condition === 'SemesterDay>=24 & SemesterDay<=28 & Rep>=55 & !EVT?evt_s_flag'
+    && FLAG.effect_hidden.some(h => h.Rep === 5) && FLAG.effect_hidden.some(h => h.L === 1));
+  check('E.4 立账行 = 中性、Day>=10 & Tier>=2、两分支的明账与暗账逐字一样（原文「两分支相同」）',
+    LEDGER.kind === '中性' && LEDGER.condition === 'Day>=10 & Tier>=2' && LEDGER.pool === 'daily'
+    && JSON.stringify(LEDGER.actions[0].open) === JSON.stringify(LEDGER.actions[1].open)
+    && JSON.stringify(LEDGER.actions[0].hidden) === JSON.stringify(LEDGER.actions[1].hidden),
+    `两分支 ${JSON.stringify(LEDGER.actions.map(a => a.hidden))}`);
+
+  // 2) 口径关：正文 §八 M1 行把「特殊事件、完整事件池」整体划给 M2 → 已签发带只放行 ship='M1'
+  {
+    const s = newGame(SEED);
+    s.Risk = 80;                                   // 大检查的硬触发条件成立
+    s.eventScope = 'm1';
+    const off = drawEvent(s, 'evening', makeRng(s));
+    s.eventScope = 'full';
+    const on = drawEvent(s, 'evening', makeRng(s));
+    check('eventScope= m1 挡住 M2 特殊行（Risk 80 也抽不到大检查）；= full 时硬触发不走概率门',
+      (!off || off.ship === 'M1') && on.id === 'evt_s_insp',
+      `关 → ${off ? off.id : '无'}｜开 → ${on.id}`);
+    const m2Rows = EVENTS.filter(e => e.ship !== 'M1');
+    check('池子按 ship 分档：M1 四条 + M2 八条 = 十二条（正文 :362 的 ≥18 仍差 6 条，缺的是附录里没有数据行的条目）',
+      EVENTS.length === 12 && m2Rows.length === 8 && EVENTS.every(e => e.ship === 'M1' || e.ship === 'M2'),
+      `M1 ${EVENTS.length - m2Rows.length} / M2 ${m2Rows.length}`);
+  }
+
+  // 3) 判定式（正文 :316）：Score = 覆盖率×60 + 设施分（25/10，可加总）+ 销毁比例×15 − Risk×0.3
+  {
+    const s = newGame(SEED);                      // 无采购 → 覆盖率按正文 :91 取 1.0
+    const cases = [
+      { fac: [], ratio: 0, risk: 20, want: 60 - 6 },
+      { fac: ['fac_cert'], ratio: 0, risk: 20, want: 60 + 25 - 6 },
+      { fac: ['fac_cert', 'fac_display'], ratio: 0, risk: 20, want: 60 + 35 - 6 },
+      { fac: ['fac_display'], ratio: 1, risk: 20, want: 60 + 10 + 15 - 6 },
+      { fac: ['fac_cert', 'fac_display'], ratio: 1, risk: 100, want: 60 + 35 + 15 - 30 },
+    ];
+    const got = cases.map(c => { s.Facilities = c.fac; s.Risk = c.risk; return inspectionScore(s, c.ratio) - c.want; });
+    check('Score 逐项对得上（设施分可加总、销毁比例给满 15、Risk 权重 0.3、覆盖率无采购取 1.0）',
+      got.every(d => Math.abs(d) < 1e-9), cases.map((c, i) => `${c.want}→${(c.want + got[i]).toFixed(2)}`).join(' '));
+    s.Facilities = [];
+    check('显多秤不算设施分：FacilityCount 别名读的是 Facilities 元素个数（附录 E.10 约束 2、F.5）',
+      evalCondition('FacilityCount>=1', s) === false
+        && (s.Tools.push('JI_SCALE'), evalCondition('FacilityCount>=1', s)) === false
+        && (s.Facilities.push('fac_display'), evalCondition('FacilityCount>=1', s)) === true);
+    s.Facilities = []; s.Tools = [];
+    check('三档门槛照正文 :316：≥55 通过 / 35–55 整改 / <35 翻车；例行检查同式门槛 ≥40',
+      INSPECTION.passAt === 55 && INSPECTION.rectifyAt === 35 && INSPECTION.routinePassAt === 40
+      && INSPECTION.rectifyFineCents === 20000 && INSPECTION.routineFineCents === 10000
+      && INSPECTION.facScore.fac_cert === 25 && INSPECTION.facScore.fac_display === 10,
+      `整改罚 ${INSPECTION.rectifyFineCents / 100} 元、例行罚 ${INSPECTION.routineFineCents / 100} 元（勘误批 a 项 50→100）`);
+  }
+
+  // 4) 无票库存的计价与销毁（附录 E.6「按成本记」+ 附录 B :442 的资产项）
+  {
+    const stocked = () => {
+      const s = newGame(SEED);
+      s.Batches = [
+        { cat: 'MB', sku: 'MB1', tier: 1, qty: 5, unit: '斤', q: 95, costPerUnit: 24, hasReceipt: 1, day: 1 },
+        { cat: 'MB', sku: 'MB3', tier: 3, qty: 5, unit: '斤', q: 55, costPerUnit: 24, hasReceipt: 0, day: 1 },
+        { cat: 'SP', sku: 'SP1', tier: 1, qty: 10, unit: '份', q: 95, costPerUnit: 1.2, hasReceipt: 0, day: 1 },
+      ];
+      s.CostPool = { ...s.CostPool, MB: 24000, SP: 1200 };
+      recomputeStock(s);
+      return s;
+    };
+    const a = stocked();
+    check('无票计价走库存资产值（CostPool × 无票斤数 ÷ 在柜斤数），SP1 自家汤底两头都不进（正文 :91 / 附录 D.1）',
+      ticketlessCostCents(a) === 12000 && a.StockSolid.MB === 10 && a.StockSoup === 10,
+      `柜里 MB 10 斤（票 5 无票 5）池值 240 元 → 无票 120 元；汤底 ${a.StockSoup} 份不计`);
+    const b = stocked();
+    const cashBefore = b.Cash;
+    const ratio = inspectionScore(b, 0);
+    destroyTicketless(b);
+    check('销毁 = 扣实物 + 扣等额池值 + 现金一分不动，且销毁比例进判定式（+15 分）',
+      b.Cash === cashBefore && b.today.eventAssetLoss === 12000 && b.StockSolid.MB === 5
+      && b.Batches.filter(x => x.cat === 'MB').length === 1 && b.today.eventDestroyedRatio === 1
+      && Math.abs(inspectionScore(b, 1) - (ratio + 15)) < 1e-9,
+      `库存 10→${b.StockSolid.MB} 斤、池值 240→${(b.CostPool.MB / 100).toFixed(2)} 元、现金 ${b.Cash / 100} 元不变`);
+    const empty = newGame(SEED);
+    destroyTicketless(empty);
+    check('柜里没有无票货：销毁比例按原文取 0（不是 1），资产项 0',
+      empty.today.eventDestroyedRatio === 0 && empty.today.eventAssetLoss === 0);
+  }
+
+  // 5) 大检查三档（含 Risk 清至、d0_buff 乘入、现金不足兜底、结局 #1）
+  {
+    const judged = (risk, cash, fac = []) => {
+      const s = newGame(SEED);
+      s.Risk = risk; s.Cash = cash; s.Facilities = fac;
+      return { s, j: judgeBigInspection(s) };
+    }
+    const p = judged(50, 100000, ['fac_cert', 'fac_display']);   // 60 + 35 − 15 = 80 → 通过档
+    check('Score ≥55 → 通过：Risk 清至 30、现金与 d0_buff 一动不动、结算页一句「检查合格」',
+      p.j.band === 'pass' && p.s.Risk === INSPECTION.riskAfterPass && p.s.Cash === 100000
+      && p.s.d0_buff_mult === 1.0 && p.s.d0_buff_days === 0 && p.s.Rep === REP0
+      && p.s.today.notes.some(x => x.includes('检查合格')),
+      `Score ${p.j.score.toFixed(1)}｜Risk ${p.s.Risk}｜备注 ${p.s.today.notes.join('/')}`);
+    const r = judged(70, 100000);                    // 60 − 21 = 39 → 整改档
+    check('35 ≤ Score < 55 → 整改：事件账现金 −200、次日 D0 ×0.6 持续 1 日、Risk 清至 40、Rep −2',
+      r.j.band === 'rectify' && r.s.Cash === 80000 && r.s.today.eventCashEvening === -20000
+      && r.s.d0_buff_mult === INSPECTION.rectifyBuff.mult && r.s.d0_buff_days === 1
+      && r.s.Risk === INSPECTION.riskAfterRectify && r.s.Rep === REP0 + INSPECTION.rectifyRep,
+      `Score ${r.j.score.toFixed(1)}｜现金 ${r.s.Cash / 100}｜buff ${r.s.d0_buff_mult}/${r.s.d0_buff_days} 日｜Risk ${r.s.Risk}｜Rep ${r.s.Rep}`);
+    const sc = judged(70, 10000);                    // 现金 100 < 200 → §〇.1 第 8 条默认走法
+    check('整改档现金不足（§〇.1 第 8 条默认签法）：不扣负，改 D0 ×0.7 持续 2 日（开关 INSPECTION.shortCashMode 一处可翻）',
+      INSPECTION.shortCashMode === 'buff' && sc.s.Cash === 10000 && sc.s.today.eventCashEvening === 0
+      && sc.s.d0_buff_mult === 0.7 && sc.s.d0_buff_days === 2 && sc.s.Risk === 40,
+      `mode ${INSPECTION.shortCashMode}｜现金 ${sc.s.Cash / 100}｜buff ${sc.s.d0_buff_mult}/${sc.s.d0_buff_days} 日`);
+    const c = judged(90, 100000);                    // 60 − 27 = 33 → <35，且 Risk 本身没到 100
+    check('Score < 35 → 当晚进结局判定 #1（附录 G.4 第 1 行的第三条入口：Risk 90 时只有这一条能判翻车）',
+      c.j.band === 'crash' && c.s.Risk === 90 && c.s.today.inspectionCrash === true
+      && checkEndings(c.s) === ENDING.CRASH,
+      `Score ${c.j.score.toFixed(1)}｜Risk ${c.s.Risk} → 结局 ${checkEndings(c.s)}`);
+    const low = judged(20, 100000, ['fac_cert', 'fac_display']);   // 89 → 通过，但 Risk 20 已低于「清至 30」
+    low.s.RiskShort = 20;
+    check('「Risk 清至」= 只降不升：Risk 低于目标值时原样留着，受保护池跟着钳（裁定 9a959bd §二）',
+      low.j.band === 'pass' && low.s.Risk === 20 && low.s.RiskShort === 20,
+      `Risk 20 → ${low.s.Risk}（目标 30）`);
+    const stack = judged(70, 100000);
+    stack.s.d0_buff_mult = 1.15; stack.s.d0_buff_days = 4;
+    judgeBigInspection(stack.s);
+    check('检查 buff 与既有 d0_buff 按附录 E 表前 :127 合并：新值乘入、天数取最大（不是覆盖）',
+      Math.abs(stack.s.d0_buff_mult - 1.15 * 0.6) < 1e-9 && stack.s.d0_buff_days === 4,
+      `×1.15/4 日 + ×0.6/1 日 → ${stack.s.d0_buff_mult.toFixed(4)}/${stack.s.d0_buff_days} 日`);
+  }
+
+  // 6) 例行检查（门槛 40）与 fac_cert 上架
+  {
+    const s = newGame(SEED);
+    s.Risk = 70; s.Cash = 50000; s.Rep = REP0;
+    const j = judgeRoutineInspection(s);
+    check('例行检查：同式门槛 40、未过罚款 100 元（勘误批 a 项）、Rep −1、首次触发写 seen_routine_inspection',
+      j.band === 'fine' && s.Cash === 40000 && s.today.eventCashEvening === -10000
+      && s.Rep === REP0 - 1 && s.seen_routine_inspection === true,
+      `Score ${j.score.toFixed(1)}（门槛 ${INSPECTION.routinePassAt}）→ 现金 ${s.Cash / 100}、Rep ${s.Rep}`);
+    check('seen_routine_inspection 放行 fac_cert（附录 D.3 的 unlock 原文，2,700 元）',
+      evalCondition(FACILITIES.fac_cert.unlock, s) === true && FACILITIES.fac_cert.price === 270000,
+      `${FACILITIES.fac_cert.unlock} → ${evalCondition(FACILITIES.fac_cert.unlock, s)}（价 ${FACILITIES.fac_cert.price / 100} 元）`);
+    const t = newGame(SEED);
+    t.Risk = 70; t.Cash = 5000;
+    judgeRoutineInspection(t);
+    check('例行检查现金不足：按原文走 D0 ×0.8 持续 2 日、不扣负',
+      t.Cash === 5000 && t.today.eventCashEvening === 0
+      && t.d0_buff_mult === INSPECTION.routineShortCashBuff.mult && t.d0_buff_days === 2,
+      `现金 ${t.Cash / 100}｜buff ${t.d0_buff_mult}/${t.d0_buff_days} 日`);
+    const ok = newGame(SEED);
+    ok.Risk = 40;                                    // 60 − 12 = 48 ≥ 40
+    const oj = judgeRoutineInspection(ok);
+    check('例行检查过了：不罚、Rep 不动，但仍写 seen_routine_inspection（fac_cert 的上架条件是「见过」不是「没过」）',
+      oj.band === 'pass' && ok.Cash === newGame(SEED).Cash && ok.Rep === REP0 && ok.seen_routine_inspection === true,
+      `Score ${oj.score.toFixed(1)}`);
+  }
+
+  // 7) 挖角三分支 + 人工线的两条新读数（涨薪累加 / 被挖走的产能惩罚）
+  {
+    const s = newGame(SEED);
+    s.laborOn = true; s.Tier = 3; s.EventHistory.push('evt_s_pricewar'); s.PricewarDays = 0;
+    check('挖角入池条件 = Tier>=3 & EVT?evt_s_pricewar（正文 :362 之后才有的第二波压力）',
+      evalCondition(POACH.condition, s) === true && evalCondition(POACH.condition, newGame(SEED)) === false);
+    const raise = newGame(SEED);
+    raise.laborOn = true; raise.Cash = 200000;
+    resolveChoice(raise, POACH, 'raise');
+    check('涨薪留住：当场 −1,800 元 + 此后每日工钱 +15 元（laborCostCents 读出 60+15）',
+      raise.Cash === 20000 && raise.WageRaiseCents === LABOR.raisePerDay
+      && laborCostCents(raise) === LABOR.perDay + LABOR.raisePerDay
+      && raise.today.eventCashEvening === -180000,
+      `现金 ${raise.Cash / 100}｜日结 ${laborCostCents(raise) / 100} 元`);
+    const acc = newGame(SEED);
+    acc.laborOn = true; acc.Cash = 500000;
+    acc.WageRaiseCents = LABOR.raisePerDay;          // 假想已有一笔加薪在场，再看第二次写入
+    resolveChoice(acc, POACH, 'raise');
+    check('加薪 op 是累加不是覆盖（两笔 15 元/日 → 日结 60 + 30）',
+      acc.WageRaiseCents === 3000 && laborCostCents(acc) === LABOR.perDay + 3000,
+      `WageRaiseCents ${acc.WageRaiseCents}｜日结 ${laborCostCents(acc) / 100}`);
+    const gone = newGame(SEED);
+    gone.laborOn = true; gone.Tier = 3; gone.Cash = 1000;
+    const base = { cap: capacityJin(gone), grid: prepBudget(gone) };
+    resolveChoice(gone, POACH, 'let_go');
+    check('让他走：缺席 14 日 + 产能 ×0.90 + 工时那一格随在场一起消失 + Rep −2',
+      gone.XiaodouAbsentDays === 14 && gone.PoachedAway === true && gone.Rep === REP0 - 2
+      && laborCapMul(gone) === LABOR.poachedCapMul
+      && prepBudget(gone) === base.grid - LABOR.gridBonus
+      && Math.abs(capacityJin(gone) - base.cap * LABOR.poachedCapMul / LABOR.capMul) < 1e-9
+      && laborCostCents(gone) === 0,
+      `产能 ${base.cap.toFixed(2)}→${capacityJin(gone).toFixed(2)} 斤｜工时 ${base.grid}→${prepBudget(gone)} 格`);
+    const leave = newGame(SEED);
+    leave.laborOn = true; leave.XiaodouAbsentDays = 1;      // 「请假一天」：只退加成，不吃 ×0.90
+    check('请假一天与被挖走分开记：同一天不在场，成因不同 → 产能一个 ×1.00、一个 ×0.90',
+      laborCapMul(leave) === 1.0 && leave.PoachedAway === false,
+      `请假 laborCapMul ${laborCapMul(leave)}｜挖角 ${LABOR.poachedCapMul}`);
+    const back = newGame(SEED);
+    back.laborOn = true; back.XiaodouAbsentDays = 14; back.PoachedAway = true;
+    const days = [];
+    for (let i = 0; i < 14; i++) { beginDay(back); days.push(xiaodouPresent(back)); }
+    check('缺席 14 日 = 第 1 步每日减一：人不在 13 个营业日、第 14 个营业日回来（PoachedAway 随归零一起清）',
+      days.filter(x => !x).length === 13 && days[13] === true && back.PoachedAway === false,
+      `不在场 ${days.filter(x => !x).length} 日／在场 ${days.filter(x => x).length} 日`);
+    const locked = newGame(SEED);
+    check('「签合同」分支要 fac_contract 才可选（引擎与界面同一判据；两互为前置的死锁已登记回报）',
+      isActionAvailable(locked, POACH.actions[1]) === false
+      && isActionAvailable(locked, POACH.actions[0]) === true
+      && (locked.Facilities.push('fac_contract'), isActionAvailable(locked, POACH.actions[1])) === true);
+  }
+
+  // 8) 界面侧的现金门（正文 :169 分支可用性 + ui-spec UI-11 置灰；引擎侧不拦，已登记回报）
+  {
+    const s = newGame(SEED);
+    s.Cash = 100000;
+    check('涨薪 1,800 的按钮：现金 1,000 元时置灰、2,000 元时可点（isActionAffordable 只认 gate:afford）',
+      isActionAffordable(s, POACH.actions[0]) === false && (s.Cash = 200000, isActionAffordable(s, POACH.actions[0])) === true
+      && isActionAffordable(s, LEDGER.actions[0]) === true,
+      `afford gate = ${POACH.actions[0].gate}`);
+  }
+
+  // 9) 宣传队 / 锦旗 / 立账的落地
+  {
+    const p = newGame(SEED);
+    p.Rep = 60; p.Facilities = ['fac_display', 'fac_contract']; p.d0_buff_mult = 1.2; p.d0_buff_days = 3;
+    check('宣传队 condition 读 FacilityCount 别名（两件设施过门、一件不过）',
+      evalCondition(PROMO.condition, p) === true && (p.Facilities = ['fac_display'], evalCondition(PROMO.condition, p)) === false);
+    p.Facilities = ['fac_display', 'fac_contract'];
+    const r = resolveChoice(p, PROMO, null);
+    check('宣传队无分支：明账 ×1.15/4 日乘入既有 buff（天数取最大）+ ① 类强制留言，暗账 Rep+3/R+10/L+1',
+      Math.abs(p.d0_buff_mult - 1.2 * 1.15) < 1e-9 && p.d0_buff_days === 4
+      && p.today.forcedComments.length === 1 && p.Rep === 63 && p.R === 10 && p.L === 1 && r.action === null,
+      `buff ${p.d0_buff_mult.toFixed(4)}/${p.d0_buff_days} 日｜Rep ${p.Rep} R ${p.R} L ${p.L}`);
+    const f = newGame(SEED);
+    f.SemesterDay = 25; f.Rep = 60; f.Risk = 0;
+    const picked = drawEvent(f, 'evening', makeRng(f));
+    resolveChoice(f, picked, null);
+    check('锦旗：窗口内硬触发当晚必来（不走 35% 门），L +1 且留言位多一条',
+      picked.id === 'evt_s_flag' && f.L === 1 && f.Rep === 65 && f.today.forcedComments.length === 1,
+      `第 ${f.SemesterDay} 学期日 → ${picked.id}｜L ${f.L}｜留言 ${f.today.forcedComments.join('/')}`);
+    const out = newGame(SEED);
+    out.SemesterDay = 29; out.Rep = 90;
+    check('窗口外（第 29 学期日）锦旗不入池：一次性事件只在 SemesterDay 24–28',
+      !drawEvent(out, 'evening', makeRng(out)) || drawEvent(out, 'evening', makeRng(out)).id !== 'evt_s_flag',
+      `抽到 ${drawEvent(out, 'evening', makeRng(out))?.id || '无'}`);
+    const led = newGame(SEED);
+    led.Day = 10; led.Tier = 2;
+    resolveChoice(led, LEDGER, 'skip');
+    check('立账两条分支同账：Rep +2 与「今日已立账」一样给，且 EVT?evt_d_021 当场放行用料展示柜（附录 D.3 unlock）',
+      led.Rep === REP0 + 2 && led.today.notes.join('/') === '今日已立账'
+      && evalCondition(FACILITIES.fac_display.unlock, led) === true && FACILITIES.fac_display.price === 120000,
+      `Rep ${led.Rep}｜unlock ${FACILITIES.fac_display.unlock} → ${evalCondition(FACILITIES.fac_display.unlock, led)}`);
+  }
+
+  // 10) 销毁进账后现金桥仍平（附录 B :442 的「非现金资产净变化」与 NP 同源）
+  {
+    const s = newGame(SEED);
+    s.eventScope = 'full';
+    let bridged = 0, ran = 0, destroyed = 0, inspNight = 0, band = '', diff = 0;
+    for (let i = 0; i < 12 && !s.EndingId; i++) {
+      const r = beginDay(s);
+      morningPreEvent(s, r);
+      // NS2 是 keep:true 的无票可抽签货：买得比卖得多 → 隔夜留得下来，晚上才有东西可销
+      submitBasket(s, [{ sku: 'MB1', qty: 4 }, { sku: 'NS2', qty: 20 }, { sku: 'SP1', qty: 12 }], r);
+      lockTradingDay(s, { priceTier: 'qinmin' });
+      morningEvent(s, r, () => null);
+      runDay(s, drawHandOrders(s, r), o => Object.fromEntries(o.lines.map(l => [l.cat, l.grams])), r);
+      nightSettle(s, r);
+      // 硬触发只在「柜里确实还剩无票货」的第一晚点亮（走 C>=8 那条，不抬 Risk，免得多判一次结局）
+      if (inspNight === 0 && ticketlessCostCents(s) > 0) s.C = 8;
+      const ev = eveningDraw(s, r);
+      const choice = ev && ev.id === 'evt_s_insp' ? 'destroy' : null;
+      const close = nightClose(s, r, ev, choice);
+      ran += 1;
+      if (ev && ev.id === 'evt_s_insp') {
+        inspNight += 1;
+        destroyed += s.today.eventAssetLoss || 0;
+        const jd = close.evening.choice.judgment;
+        band = `${jd.band}（Score ${jd.score.toFixed(1)}、销毁 ${jd.destroyedCents / 100} 元）`;
+      }
+      const bc = bridgeCheck(s);
+      if (bc.ok) bridged += 1; else diff = bc.diff;
+    }
+    check('销毁当日现金桥逐日平（含大检查那一晚）：资产项在 NP 与库存两端同幅出现，现金一分不动',
+      ran > 0 && inspNight === 1 && destroyed > 0 && bridged === ran,
+      `跑了 ${ran} 日、大检查 ${inspNight} 晚 ${band}、累计销毁 ${destroyed / 100} 元、桥平 ${bridged}/${ran}（末次差 ${diff / 100} 元）`);
+  }
 }
 
 // ── 输出 ─────────────────────────────────────────────────────────

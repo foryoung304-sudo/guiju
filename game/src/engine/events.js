@@ -1,6 +1,7 @@
 import { EVENTS, DRAW_GATE } from '../data/events.js';
 import { evalCondition } from './dsl.js';
 import { toCents } from './state.js';
+import { destroyTicketless, judgeBigInspection, judgeRoutineInspection } from './inspection.js';
 
 const TIMING_STREAM = { morning_pre: 'event_morning_pre', morning: 'event_morning', evening: 'event_evening' };
 const ONCE = 999;
@@ -10,8 +11,15 @@ function inCooldown(state, ev) {
   return until !== undefined && state.Day < until;
 }
 
+// 正文 §八 M1 行「明确不做（全部 M2 接入）：…特殊事件、完整事件池」→ 复现已签发 M1 带时只放行 ship='M1' 的四条。
+// 关掉整层不改变任何数值，只把 M2 新增行挡在抽取池外（与 laborOn / competitionOn 同一条理由）。
+function inScope(state, ev) {
+  return state.eventScope !== 'm1' || ev.ship === 'M1';
+}
+
 function eligible(state, ev, timing) {
   return ev.timing === timing
+    && inScope(state, ev)
     && evalCondition(ev.condition, state)
     && !inCooldown(state, ev);
 }
@@ -106,12 +114,38 @@ export function applyOps(state, ops, slot) {
     if (op.rFrozenDays !== undefined) state.R_frozen_days = op.rFrozenDays;
     // E.7/E.8/E.10 的「结算页留言位多一条（① 类强制信号）」：固定文案，不走第 12 步的随机选材
     if (op.forcedComment) state.today.forcedComments.push(op.forcedComment);
+    // E.4「结算页多一行“今日已立账”」一类的明账文字（正文 3.7：疼的数字要在结算里列明）
+    if (op.dayNote) { if (!state.today.notes.includes(op.dayNote)) state.today.notes.push(op.dayNote); }
+    // E.6 销毁决策：按成本记非现金资产损失并扣库存，现金一分不动（正文 3.14 第 11 步）
+    if (op.destroyUnticketed) destroyTicketless(state);
+    // E.9 涨薪留住：此后每日工钱 +15 元（勘误批 b 项），持续到本局结束
+    if (op.wageRaise) state.WageRaiseCents = (state.WageRaiseCents || 0) + op.wageRaise;
+    // E.9 让他走：缺席 14 日，且带一条「请假」没有的产能惩罚 ×0.90（成因记在 PoachedAway 上）
+    if (op.xiaodouAbsentDays !== undefined) {
+      state.XiaodouAbsentDays = op.xiaodouAbsentDays;
+      if (op.poached) state.PoachedAway = true;
+    }
   }
+}
+
+// 分支可用性（正文 :169「分支可用性写死」的两类前置）：
+// · requires = 硬前置（E.9「签合同」须已购 fac_contract）——引擎侧也拒绝，选了等于没选；
+// · gate:'afford' = 现金不足时置灰（E.2 罚款 150 / E.9 涨薪 1800）。这条按正文只写在界面那一侧，
+//   无头模拟的代选不按它改道（否则已签发的 M1 带会因「模拟线被迫走另一分支」而整体漂移），差异已登记回报。
+export function isActionAvailable(state, action) {
+  return !action?.requires || evalCondition(action.requires, state);
+}
+
+export function isActionAffordable(state, action) {
+  if (action?.gate !== 'afford') return true;
+  const owed = (action.open || []).reduce((s, o) => s + (o.cash && o.cash < 0 ? -o.cash : 0), 0);
+  return state.Cash >= owed;
 }
 
 // 第 10 步（或第 6 步）玩家选择落地：明账 + 暗线 + 历史 / 冷却 / weight_shift
 export function resolveChoice(state, ev, actionId) {
-  const action = (ev.actions || []).find(a => a.id === actionId) || null;
+  const picked = (ev.actions || []).find(a => a.id === actionId) || null;
+  const action = picked && isActionAvailable(state, picked) ? picked : null;
   const slot = ev.timing === 'evening' ? 'eventCashEvening' : 'eventCashMorning';
   // 玩家不做选择的事件（E.8「按 Rep 自动分版」）走 auto_branch：条件式命中第一条即该档
   const branch = !action && Array.isArray(ev.auto_branch) ? ev.auto_branch.find(b => evalCondition(b.cond, state)) || null : null;
@@ -119,12 +153,15 @@ export function resolveChoice(state, ev, actionId) {
   applyOps(state, set ? set.open : ev.open, slot);
   const hidden = (set ? set.hidden : ev.effect_hidden || []).filter(h => !h.when);
   for (const h of hidden) applyHidden(state, h);
+  // E.6 / E.9 的公式判定挂在明账之后：流程写死「通知 → 玩家销毁决策 → 公式判定」，销毁先进账才能进销毁比例
+  const judgment = ev.scoreCheck === 'big' ? judgeBigInspection(state)
+    : ev.scoreCheck === 'routine' ? judgeRoutineInspection(state) : null;
   state.EventHistory.push(ev.id);
   delete state.WeightShifts[ev.id];                       // 5.3：shift 持续到目标事件被触发为止
   state.Cooldowns[ev.id] = state.Day + (action?.cooldown ?? ev.cooldown ?? ONCE);
   const shift = action?.weightShift ?? ev.weightShift;
   if (shift) shiftWeight(state, shift.target, shift.weight, shift.days ?? 7);
-  return { event: ev, action, branch };
+  return { event: ev, action, branch, judgment };
 }
 
 export function applyHidden(state, h) {

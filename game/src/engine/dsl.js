@@ -95,5 +95,8 @@ function evalNode(node, s) {
 
 export function readVar(name, s) {
   if (name === 'FacilityF') return s.F;
+  // 附录 E.10 的 `count(Facilities)>=2`：本 DSL 的词法器不认函数调用（附录 A 只定义 `!` `&` `|` `>=`… 与 HAS?/EVT? 两种探针），
+  // 故按施工口径落一个只读别名。count 取附录 F.5 的 Facilities 元素个数——JI_SCALE 是器具、不在其中（E.10 约束第 2 条）。
+  if (name === 'FacilityCount') return s.Facilities.length;
   return s[name];
 }

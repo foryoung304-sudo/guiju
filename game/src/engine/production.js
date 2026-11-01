@@ -37,16 +37,20 @@ export function xiaodouPresent(state) {
 }
 
 // 附录 G.2 第 7 步产能式：在场 → 合同 ? ×1.15 : ×1.10（覆盖不叠加）
+// 不在场分两种成因：「请假一天」只是没有加成（正文 :137），被挖角「让他走」还要吃 ×0.90 的产能惩罚（附录 E.9）
 export function laborCapMul(state) {
-  if (!xiaodouPresent(state)) return 1.0;
+  if (!xiaodouPresent(state)) return state.PoachedAway ? LABOR.poachedCapMul : 1.0;
   return state.Facilities.includes('fac_contract') ? LABOR.contractCapMul : LABOR.capMul;
 }
 
-// 附录 F.7 `LaborCost` 行：日结 60（三轮车—档口）/ 90（门面—双店），合同后 120 覆盖不分档；不在场 0
+// 附录 F.7 `LaborCost` 行：日结 60（三轮车—档口）/ 90（门面—双店），合同后 120 覆盖不分档；不在场 0。
+// 勘误批 b 项：evt_s_poach「涨薪留住」在此后每日加 +15 元（= 1500 分），持续到本局结束；
+// 加薪跟的是在场工资本身（正文 :137「请假当日不计人工」），人不在场时这一项也一并落空。
 export function laborCostCents(state) {
   if (!xiaodouPresent(state)) return 0;
-  if (state.Facilities.includes('fac_contract')) return LABOR.contractPerDay;
-  return state.Tier >= LABOR.highTierFrom ? LABOR.highTierPerDay : LABOR.perDay;
+  const base = state.Facilities.includes('fac_contract') ? LABOR.contractPerDay
+    : state.Tier >= LABOR.highTierFrom ? LABOR.highTierPerDay : LABOR.perDay;
+  return base + (state.WageRaiseCents || 0);
 }
 
 export function capacityJin(state) {

@@ -14,9 +14,12 @@ import { WEATHER } from './src/data/scenario.js';
 import { EVENTS } from './src/data/events.js';
 import { ENDING, RETIRE_NP_CENTS, COMPETITION } from './src/data/constants.js';
 
-// M1 口径（正文 3.5:141：压力测试带跑在 M1 构建，「人工与产能数值不参与本区间判定」「无竞争（S ≡ 1）」）：
-// 本脚本凡是压到已签发带的线一律关人工、关竞争，M2 在场口径的区间店主还没签 → 只在文末 H 段出证据，不在此套带。
-const simulate = (seed, days, strat, closer, opts) => simRaw(seed, days, strat, closer, { labor: false, competition: false, ...opts });
+// M1 口径（正文 3.5:141：压力测试带跑在 M1 构建，「人工与产能数值不参与本区间判定」「无竞争（S ≡ 1）」；
+// §八 M1 行把「特殊事件、完整事件池」整体划给 M2）：
+// 本脚本凡是压到已签发带的线一律关人工、关竞争、关 M2 事件池，M2 在场口径的区间店主还没签
+// → 只在文末 H / I / J 三段出证据，不在此套带。
+const simulate = (seed, days, strat, closer, opts) =>
+  simRaw(seed, days, strat, closer, { labor: false, competition: false, eventScope: 'm1', ...opts });
 
 const BAND = [-450, 360];
 const SEEDS = [20261031, 7979, 12345, 4242, 90210];
@@ -416,6 +419,66 @@ function sweepI() {
   console.log('  ⚠️ 竞争在场口径要店主另立区间才进验收门；本段只说明「S ≡ 1 → S 实算」这一步的盘面代价有多大。');
 }
 
+// ── J. M2 事件池在场证据（附录 E 十二条全开，区间未签 → 只出数不判红绿）──
+// 第五批把池子从 6 行扩到 12 行：事件会改需求（d0_buff）、改现金（罚款/涨薪）、改库存资产（销毁）、
+// 还能当晚直接进结局判定 #1（大检查 Score<35）。基线取「人工 + 竞争都在场、池子仍是 M1 四条」，两边只差事件层。
+// 但位移不等于事件层自身的代价：特殊池过门要多掷一次 chance(DRAW_GATE) 与一次 pickWeighted，
+// 随机流消耗一变，同日抽到的日常、抽签给的票、Risk 的逐日路径都会错开 → 本段只摆出「撞上检查之后盘面变成什么样」，
+// 不当杠杆归因用（真正的归因要把两条线的 rng 流对齐，属另一件事）。
+function sweepJ() {
+  console.log(`\n${line(100)}\nJ. M2 在场口径证据（事件池十二条全开，区间未签 → 只出数不判红绿）\n${line(100)}`);
+  const pool = ['m1', 'full'].map(k => EVENTS.filter(e => (k === 'm1' ? e.ship === 'M1' : true)));
+  const byKind = arr => ['坏事', '好事', '中性'].map(k => `${k} ${arr.filter(e => e.kind === k).length}`).join(' / ');
+  console.log(`  池子现状：ship='M1' ${pool[0].length} 条（${byKind(pool[0])}）｜全池 ${pool[1].length} 条（${byKind(pool[1])}）`);
+  console.log(`  正文 :362 上线必需 = 事件池 ≥18（坏 ≥10 / 好 ≥5 / 中 ≥3）；首更 = ≥30 且逐条数值（正文 :41 列为未定项）`);
+  console.log(`  ⊘ 全池 ${pool[1].length} 条距 ≥18 还差 ${18 - pool[1].length} 条，缺的都是附录 E 里没有数据行的条目 —— 不自行发明数值，已回报待店主给数`);
+
+  for (const strat of Object.values(STRATEGIES)) {
+    const rows = SEEDS.map(s => {
+      const off = simulate(s, 30, strat, 'headless', { labor: true, competition: true });
+      const on = simulate(s, 30, strat, 'headless', { labor: true, competition: true, eventScope: 'full' });
+      const fired = on.state.EventHistory.filter(id => !off.state.EventHistory.includes(id));
+      return {
+        d: cum(on.log, 30) - cum(off.log, 30),
+        eventNet: cumField(on.log, 'eventNet', 30) - cumField(off.log, 'eventNet', 30),
+        destroy: cumField(on.log, 'assetLoss', 30),
+        onDays: on.log.length, offDays: off.log.length,
+        end: END_NAME[on.state.EndingId] || '—',
+        fired: fired.join('→') || '无新增',
+      };
+    });
+    const dec = deciles(rows.map(r => r.d));
+    console.log(`  ${strat.name}｜30 日累计位移（事件池在场 − 不在场）：`
+      + `${rows.map(r => f2(r.d)).join(' / ')}　元｜最小 ${f2(dec.min)} 中位 ${f2(dec.p50)} 最大 ${f2(dec.max)}`);
+    console.log(`     存续（在场/不在场）：${rows.map(r => `${r.onDays}/${r.offDays} 日`).join('　')}`
+      + `｜在场结局 ${rows.map(r => r.end).join('/')}`);
+    console.log(`     事件账净额差 ${f2(rows.reduce((a, r) => a + r.eventNet, 0))} 元（含 M1 四条与 M2 新增两笔）`
+      + `｜销毁库存 ${f2(rows.reduce((a, r) => a + r.destroy, 0))} 元（非现金）`);
+    console.log(`     新增触发：${rows.map(r => r.fired).join('　')}`);
+  }
+  // 时序后果（读法问题，不是数值问题）：E.6 的销毁决策落在第 10 步，而第 9 步的隔夜报损先把 keep:false 的剩货清出柜
+  // → tier3 六款 + 强哥货全不在场，检查时点能看见的无票货只剩批发档 BF2/NS2 且要抽到无票那一次
+  console.log(`  ⊘ 上表「销毁库存」那一列：第 9 步隔夜报损先清 keep:false 的剩货（附录 D.1：tier3 六款与强哥货全在这一类），`
+    + `第 10 步的「销毁全部无票库存」只剩批发档 BF2/NS2 里抽到无票的那点，判定式中那 15 分几乎拿不到（全特价线恒 0）。`
+    + `这是步序问题而不是数值问题：要让它咬得动，得把通知挪到第 9 步之前，或店主另签一条口径 —— 未裁之前按正文步序实现，不在代码里替正文发明。`);
+  // 事件在场 → 随机流消耗多寡会变（特殊池过门要多掷一次 chance），Risk 的逐日路径也跟着错开：
+  // 五颗种子的首检全落在第 8 日、当日 Risk 都在 43 上下（远不到 70）→ 硬触发点亮的是「C>=8」那一条，不是 Risk 那条。
+  // 这条线本批不作验收（区间未签），但它把「事件池在场会让别的暗线时也飘」这件事摆明了，故写进回报。
+  const probe = SEEDS.map(s => {
+    const on = simulate(s, 60, STRATEGIES.cheap, 'headless', { labor: true, competition: true, eventScope: 'full' });
+    const inspDay = on.log.findIndex(d => d.insp);
+    const at = inspDay < 0 ? null : on.log[inspDay];
+    return `seed ${s}：${on.log.length} 日、检查 ${on.state.EventHistory.filter(id => id.startsWith('evt_s_insp')).length} 次`
+      + (at ? `（首检第 ${inspDay + 1} 日 Score ${at.insp.score.toFixed(2)} ${at.insp.band}，当日 Risk ${at.Risk} / C ${at.C} → 点亮的是「C>=8」）` : '')
+      + `、结局 ${END_NAME[on.state.EndingId] || '—'}`;
+  });
+  console.log(`  60 日探针（全特价线，池子在场看检查事件真会不会撞上）：`);
+  for (const c of probe) console.log(`     ${c}`);
+  console.log('  ⚠️ 本段全部数字不进任何验收门：M2 在场区间未签发，且池子还缺 6 条（缺数不缺口，缺的是数）。');
+  console.log('  ⚠️ 上面三行的位移不等于「事件层的代价」：特殊池过门要多掷一次随机，随机流一变、同日抽到的日常与抽签给的票都错开。'
+    + '　要看事件层本身值多少钱，得把两条线的随机流对齐了再比（另事）。');
+}
+
 console.log(`M1 定稿 §七.2 回签证据表｜验收带 ${BAND} 元｜种子 ${SEEDS.join('/')}`);
 sweepA();
 sweepB();
@@ -426,3 +489,4 @@ sweepF();
 sweepG();
 sweepH();
 sweepI();
+sweepJ();

@@ -34,6 +34,9 @@ export function newGame(seed) {
     Prep: ['将就', '将就', '将就'], WorkGridUsed: 0, WakeEarly: false,
     Facilities: [], CapacityBase: TIERS_STALL[0].capacity, F: 1.0,
     Tools: [], XiaodouAbsentDays: 0, tasting_pending_R: 0, laborOn: CONFIG.labor,
+    // 附录 E.9 evt_s_poach：涨薪留住的加薪（分/日，持续到本局结束）与被挖走成因（区别于「请假一天」的产能惩罚开关）
+    WageRaiseCents: 0, PoachedAway: false,
+    eventScope: CONFIG.eventScope,
 
     EventHistory: [], Cooldowns: {}, WeightShifts: {}, PricewarDays: 0,
     seen_routine_inspection: false, dayStarted: false, pendingReserve: null,
@@ -81,7 +84,16 @@ export function blankToday() {
     jRevenue: 0,
     eventCashMorning: 0,
     eventCashEvening: 0,
+    // 正文 3.14 第 11 步 / 附录 B :442：库存销毁按成本记「非现金资产损失」，走事件账、不改现金，
+    // 但同步减少库存资产值 → 第 11 步的事件账净额 = 晨间 + 晚间现金 − 本项
     eventAssetLoss: 0,
+    // 附录 E.6 的销毁比例（只有「全销毁 / 不销毁」两个按钮 → 0 或 1），Score 式第 15 分项的输入
+    eventDestroyedRatio: 0,
+    // 检查两行（E.6/E.9）的当晚判定留痕：{ id, score, band, destroyedCents }，只在结算页与逐日账出文字，不露暗线数值
+    inspection: null,
+    inspectionCrash: false,
+    // 附录 E 的「结算页多一行」类明账文字（今日已立账 / 检查合格…），按正文 3.7「疼的数字要列明」进面板
+    notes: [],
     comments: [],
     // 附录 E.8/E.7/E.10 的「① 类强制留言」：事件写的固定文案，不掷随机、第 12 步排在概率类信号之前
     forcedComments: [],
@@ -139,6 +151,11 @@ export function loadGame() {
   if (!Array.isArray(parsed.Share) || parsed.Share.length !== 4) parsed.Share = [0.25, 0.25, 0.25, 0.25];
   if (!Array.isArray(parsed.QueueInertia) || parsed.QueueInertia.length !== 4) parsed.QueueInertia = [1, 1, 1, 1];
   if (!Array.isArray(parsed.today?.forcedComments)) parsed.today = { ...(parsed.today || {}), forcedComments: [] };
+  // M2 第五批（附录 E 余六行）新带的字段：旧档按「没被挖过、没检查过」补初值，不动任何已签数值
+  if (typeof parsed.WageRaiseCents !== 'number' || !Number.isFinite(parsed.WageRaiseCents)) parsed.WageRaiseCents = 0;
+  if (typeof parsed.PoachedAway !== 'boolean') parsed.PoachedAway = false;
+  if (parsed.eventScope !== 'm1' && parsed.eventScope !== 'full') parsed.eventScope = CONFIG.eventScope;
+  if (!Array.isArray(parsed.today?.notes)) parsed.today = { ...(parsed.today || {}), notes: [] };
   parsed.saveVersion = SAVE_VERSION;
   return parsed;
 }
