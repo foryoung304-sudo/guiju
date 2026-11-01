@@ -1607,7 +1607,7 @@ for (const seed of [SEED, 7979, 36832]) {
       fixedCost: [75, 135, 240, 420, 780, 1440],
       creditCap: [600, 1500, 2500, 4000, 6500, 10000],
       capacity: [130, 260, 460, 790, 1300, 2160],
-      upgradePrice: [1050, 4500, 13500, 27000, 60000],
+      upgradePrice: [800, 4500, 13500, 27000, 60000],
     };
     for (let i = 0; i < 6; i++) {
       const t = TIERS_STALL[i];
@@ -1634,7 +1634,7 @@ for (const seed of [SEED, 7979, 36832]) {
         }
         return steps === 5 && u.Tier === 6 && u.BaseSales === 1500 && u.FixedCost === 144000
           && u.CreditCap === 1000000 && u.CapacityBase === 2160 && u.tierName === '整街双店'
-          && acc === (1050 + 4500 + 13500 + 27000 + 60000) * 100;
+          && acc === (800 + 4500 + 13500 + 27000 + 60000) * 100;   // 首档 800 = 定稿修订 R11
       })());
     const broke = newGame(SEED);
     const cashBefore = broke.Cash;

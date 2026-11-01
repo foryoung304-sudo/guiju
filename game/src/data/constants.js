@@ -30,8 +30,10 @@ export const PRICE_TIERS = {
 };
 
 // 定稿 §一 + 修订记录 R6：赊购额度两档改六档阶梯（约各档日货款 4 成，依据正本「熟人信用随生意长」）
+// 修订记录 R11（源 signoff-m3-round2-rulings-20261101 ①）：档 2 升级价 1,050 → 800 元，即时对代码生效；
+// 正文与附录 G.5 的文本按签发口径在下一次整合时改字，那段期间正本里的 1,050 是旧值、以本格为准。
 export const TIERS_STALL = [
-  { level: 1, name: '三轮车', baseSales: 90, fixedCost: 7500, capacity: 130, workGrid: 4, creditCap: 60000, upgradePrice: 105000 },
+  { level: 1, name: '三轮车', baseSales: 90, fixedCost: 7500, capacity: 130, workGrid: 4, creditCap: 60000, upgradePrice: 80000 },
   { level: 2, name: '二手餐车', baseSales: 180, fixedCost: 13500, capacity: 260, workGrid: 4, creditCap: 150000, upgradePrice: 450000 },
   { level: 3, name: '固定摊位', baseSales: 320, fixedCost: 24000, capacity: 460, workGrid: 5, creditCap: 250000, upgradePrice: 1350000 },
   { level: 4, name: '后门档口', baseSales: 550, fixedCost: 42000, capacity: 790, workGrid: 5, creditCap: 400000, upgradePrice: 2700000 },

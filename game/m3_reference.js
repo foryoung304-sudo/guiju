@@ -456,43 +456,65 @@ for (const seed of [SEEDS[0], SEEDS[1], SEEDS[2]]) {
 }
 console.log(`  复核结论：3 个种子里 ${kOrders.filter(o => o.ok).length} 个次序不翻转${kOrders.filter(o => !o.ok).length ? `，翻转的是 ${kOrders.filter(o => !o.ok).map(o => o.seed).join('／')}（逐场死因见【B】【H】）` : ''}。`);
 
-// 裁定③（signoff-m3-gate-rulings-20261101 二③）授权的测量轮：只测不改。
-// tier-2 升级价 = TIERS_STALL[0].upgradePrice（三轮车那一格 =「升到档 2」的价，已签 105,000 分 = 1,050 元，constants.js:33）。
-// 覆盖只发生在探针进程的内存里：constants.js 与 src/ 一个字节都没动，跑完立刻还原并自检。
-// 还原自检走指纹比对（log + invests 全量 JSON），比「看起来一样」硬。
-console.log(`\n${line(100)}\n【L】裁定③ 测量轮：档 2 升级价覆盖为 800 / 650 元两档，各跑参考① 五种子（只测不改）\n${line(100)}`);
-const T2 = 0, SIGNED_T2 = TIERS_STALL[T2].upgradePrice;
+// 定稿修订 R11（源 signoff-m3-round2-rulings-20261101 ①）：档 2 升级价 1,050 → 800 已落码，本段从「测量轮」改成「签发后核账」。
+// 预注册标准照 signoff-m3-gate-rulings 二③ 原文不动：a 首结局 #3 ≥4/5｜b #3 落点不早于第 35 天｜c 已签带与 D.5 锚点不受扰（c 在批末 sweep 比）。
+// 探针方向反过来：出厂值已是新价，这里在内存里覆盖回旧已签值 1,050 跑五种子，跑完还原并比指纹——
+// 这样签发前后的差是本批实测出来的，不是抄 §三十一 那张表；对不上就说明两轮之间引擎被动过。
+console.log(`\n${line(100)}\n【L】R11 签发后核账：档 2 升级价 新已签（现读）↔ 旧已签 1,050（内存覆盖回看），各跑参考① 五种子\n${line(100)}`);
+const T2 = 0, SIGNED_T2 = TIERS_STALL[T2].upgradePrice, OLD_T2 = 105000;
 const sigOf = r => JSON.stringify([r.log, r.invests]);
-console.log(`  已签值现读：TIERS_STALL[0].upgradePrice = ${SIGNED_T2} 分 = ${SIGNED_T2 / 100} 元（本脚本不改这个格子出厂的值）`);
-const baseline = SEEDS.map(s => sigOf(kRun('ref1', s)));
-console.log(`  预先写死的成功标准（裁定③ 原话）：a 首结局 #3 ≥4/5；b #3 落点不早于第 35 天；c ③÷① 已签带与 D.5 锚点不受扰（c 不在本脚本里测，另跑 sweep 逐字节比）`);
-for (const price of [80000, 65000]) {
-  TIERS_STALL[T2].upgradePrice = price;
-  console.log(`\n  ── 档 2 升级价覆盖为 ${price / 100} 元（已签 ${SIGNED_T2 / 100} 元之下的第${price === 80000 ? '一' : '二'}档；investPhase 的 ×1.3 门槛随之下移到 ≥${f2(price * 1.3 / 100)} 元）`);
-  let n3 = 0, earliest3 = null, broke = 0;
+console.log(`  现读已签值：TIERS_STALL[0].upgradePrice = ${SIGNED_T2} 分 = ${SIGNED_T2 / 100} 元（R11 落码后本段跑完必须还原到这一格）`);
+function t2Scan(tag) {
+  let n3 = 0, earliest3 = null, starveRuns = 0, broke = 0; const sigs = [];
   for (const s of SEEDS) {
     const r = kRun('ref1', s), last = r.log.at(-1);
     const inv = r.invests.filter(i => i.kind === 'stall');
+    const starved = r.log.filter(d => d.starved).length;
+    sigs.push(sigOf(r));
     if (last.ending === ENDING.RULES) { n3 += 1; earliest3 = earliest3 === null ? last.day : Math.min(earliest3, last.day); }
-    const bad = inv.filter(i => i.cashAt < i.price * 1.3).length;
-    broke += bad;
-    report(`① 档2价${price / 100} 种子 ${s}`, r,
-      `｜本档换档不变式：${bad ? `破 ${bad} 处` : '全守'}`);
-    console.log(`      换档账（价是本档探针价、非已签值）：${inv.length ? inv.map(i => `第 ${i.day} 天 ${i.to - 1}→${i.to} 档花 ${i.price / 100} 元；时点现金 ${f2(i.cashAt / 100)} → 剩 ${f2(i.cashAfter / 100)}（门槛 ≥${f2(i.price * 1.3 / 100)}）`).join('；') : '未换档'}` +
-      `｜升级后头三天净额 ${inv.length ? inv[0] && r.log.slice(inv[0].day, inv[0].day + 3).map(d => f2(d.netOps)).join(' ') : '—'}` +
-      `｜空篮天数 ${r.log.filter(d => d.starved).length}｜缩量天数 ${r.log.filter(d => d.shortBuy).length}`);
+    broke += inv.filter(i => i.cashAt < i.price * 1.3).length;
+    if (starved) starveRuns += 1;
+    console.log(`    ${tag}｜种子 ${String(s).padEnd(8)}：首结局 ${END_NAME[last.ending] || '无（120 天跑满）'}@${last.day}` +
+      `｜换档 ${inv.length ? inv.map(i => `${i.to - 1}→${i.to} 档第 ${i.day} 天花 ${i.price / 100} 元，时点 ${f2(i.cashAt / 100)} → 剩 ${f2(i.cashAfter / 100)}（门槛 ≥${f2(i.price * 1.3 / 100)}）`).join('；') : '未换档'}` +
+      `｜空篮 ${starved} 天｜缩量 ${r.log.filter(d => d.shortBuy).length} 天｜升级后头三天净额 ${inv.length ? r.log.slice(inv[0].day, inv[0].day + 3).map(d => f2(d.netOps)).join(' ') : '—'}`);
   }
   const a = n3 >= 4, b = earliest3 !== null && earliest3 >= 35;
-  console.log(`    成功标准逐条：a #3 ${n3}/5 → ${a ? '达标' : '不达标'}｜b #3 最早落点 ${earliest3 ?? '无'} 天 → ${b ? '达标' : '不达标'}` +
-    `｜c 见批末 sweep 比对｜换档不变式 ${broke ? `破 ${broke} 处` : '五场全守'}`);
-  console.log(`    → 本档综合判：${a && b ? '达标（按裁定③：达标再签新价——签不签归店主，本批只回报）' : '不达标（回裁定③ 再议；下一候选是档 2 固定支出台阶，裁定写明不许跳过价格先动它，本批没动）'}`);
+  console.log(`  ${tag}汇总：#3 ${n3}/5 → a ${a ? '达标' : '不达标'}｜#3 最早落点 ${earliest3 ?? '无'} 天 → b ${b ? '达标' : '不达标'}` +
+    `｜空篮场数 ${starveRuns}｜换档不变式 ${broke ? `破 ${broke} 处` : '五场全守'}`);
+  return sigs;
 }
+const sigNew = t2Scan(`新已签 ${SIGNED_T2 / 100} 元`);
+TIERS_STALL[T2].upgradePrice = OLD_T2;
+const sigOld = t2Scan('旧已签 1050 元');
 TIERS_STALL[T2].upgradePrice = SIGNED_T2;
-const sameBack = SEEDS.map((s, i) => sigOf(kRun('ref1', s)) === baseline[i]);
-console.log(`\n  还原自检：现读 ${TIERS_STALL[T2].upgradePrice} 分（应等已签 ${SIGNED_T2} 分）→ ${TIERS_STALL[T2].upgradePrice === SIGNED_T2 ? '一致' : '不一致，这是事故'}` +
-  `｜还原后 ① 五种子与覆盖前的指纹逐场比对：${sameBack.map(x => x ? '·' : '✗').join(' ')}（${sameBack.filter(x => x).length}/5 相同）`);
-console.log(`  口径提醒：探针覆盖只活在本进程，sweep_calibration.js / test_regression.js 各起进程、读的是 constants.js 出厂值，所以已签带与 D.5 锚点按构造不受扰；`);
-console.log(`  本批仍按这条构造另跑一遍 sweep 与回归作实证（见 delta §三十一 第 4 小节），不靠「构造上应该」收工。`);
+const sameBack = SEEDS.map((s, i) => sigOf(kRun('ref1', s)) === sigNew[i]);
+console.log(`  还原自检：现读 ${TIERS_STALL[T2].upgradePrice} 分（应等已签 ${SIGNED_T2} 分）→ ${TIERS_STALL[T2].upgradePrice === SIGNED_T2 ? '一致' : '不一致，这是事故'}` +
+  `｜还原后 ① 五种子与覆盖前指纹逐场比对：${sameBack.map(x => x ? '·' : '✗').join(' ')}（${sameBack.filter(x => x).length}/5 相同）`);
+console.log(`  与 §三十一 第 5 小节登记的 r13 旧价读数对账：那张表记的是 #3 3/5、最早落点 @41、空篮 2 场（破产 @10、@14）；本段实测须逐字复现，复现不了=两轮之间引擎被动过，先停下回报。`);
+console.log(`  口径提醒：覆盖只活在本进程，sweep_calibration.js / test_regression.js 各起进程、读的是 constants.js 出厂值（=R11 落码后的新价）。`);
+console.log(`  所以本批 c 项问的不再是「探针有没有漏进已签带」，而是「新价落进已签带之后带还在不在」——那一比对在批末 sweep 逐行做，见 delta §三十二。`);
+
+// 裁定③（signoff-m3-round2-rulings-20261101 三③）：在场区间随 R11 重基线一并签，本段出的就是待签那张描述性基线。
+// 用途照裁定原文写明：首更回归对照，不是上线判红绿的门；区间值归店主签，脚本只出数、不自造。
+console.log(`\n${line(100)}\n【M】裁定③ 待签的描述性基线（r14 新价口径）：三条参考线首结局类型与落点区间 + 总表分布\n${line(100)}`);
+for (const key of ['ref1', 'ref2', 'ref3']) {
+  const rows = gate3[key].map(([s, r]) => { const l = r.log.at(-1); return { s, e: l.ending, day: l.day }; });
+  const hit = rows.filter(x => x.e), days = hit.map(x => x.day);
+  const cnt = {};
+  for (const x of hit) cnt[END_NAME[x.e]] = (cnt[END_NAME[x.e]] || 0) + 1;
+  console.log(`  ${REF_STRATEGIES[key].name}：${Object.entries(cnt).map(([k, v]) => `${k} ${v}`).join('／') || '无（五场全跑满 120 天）'}` +
+    `｜落点 ${days.length ? `第 ${Math.min(...days)}–${Math.max(...days)} 天` : '—'}` +
+    `｜无头无结局 ${rows.length - hit.length}/5`);
+  console.log(`      逐场：${rows.map(x => `${x.s} ${END_NAME[x.e] || '无结局'}@${x.day}`).join('　')}`);
+}
+console.log(`  总表分布（探针线合计 ${allLines.length} 场 × 120 天上限）：`);
+for (const id of [1, 2, 3, 4, 5]) {
+  const hits = seen[id] || [], d = hits.map(h => +/第(\d+)天/.exec(h)[1]);
+  console.log(`    #${id} ${END_NAME[id].padEnd(6, '　')}${hits.length} 次${d.length ? `｜落点第 ${Math.min(...d)}–${Math.max(...d)} 天` : '｜无头合成式里一次没出现'}`);
+}
+console.log(`    #6 ${END_NAME[6].padEnd(6, '　')}无头 0 次（sim.js:147 判空即过）｜界面轨记账 ${quit6.length} 场` +
+  `（变体 ${quit6.filter(x => x.includes('变体')).length}／普通 ${quit6.filter(x => x.includes('普通')).length}）`);
+console.log(`  两种数不混读（§三十一 第 3 小节同口径）：#1–#5 是无头合成式计数，#6 那格是界面轨记账；首更回归对照要按同一轨取，别把记账场混进无头分布。`);
 
 
 
