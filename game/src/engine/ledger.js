@@ -1,8 +1,9 @@
-import { SOLID_CATS, CAT, PRICE_TIERS, START_CASH_CENTS } from '../data/constants.js';
+import { SOLID_CATS, CAT, CONFIG, PACKING, PRICE_TIERS, PREP_STATIONS, START_CASH_CENTS, WASH_SKIP_WRITEOFF_MUL } from '../data/constants.js';
 import { SKU_BY_ID } from '../data/skus.js';
 import { toCents, roundJin, takeFromCostPool } from './state.js';
 import { recomputeStock, planPayment } from './market.js';
 import { priceCoefFor } from './ops.js';
+import { additiveOf, capacityJin, washSkipped } from './production.js';
 
 const ALL_STOCK_CATS = SOLID_CATS.concat(['SP']);
 
@@ -20,8 +21,8 @@ export function settleDay(state) {
   for (const c of SOLID_CATS) ing[c] = takeFromCostPool(state, c, t.soldJin[c] * avg[c] * 100);
   ing.SP = takeFromCostPool(state, 'SP', t.soupUsed * avg.SP * 100);
   const ingredientCents = ALL_STOCK_CATS.reduce((s, c) => s + ing[c], 0);
-  const additiveCents = state.AdditiveTier === 'none' ? 0
-    : toCents(t.bowls * (state.AdditiveTier === 'more' ? 0.2 : 0.1));
+  // 正文 3.12：掺量按第 7h 步未取整碗数计费（界面展示才取整），零销量日 bowls = 0 → 成本自然为 0
+  const additiveCents = toCents(t.bowls * additiveOf(state).perBowl);
   const cogsCents = ingredientCents + t.packingCents + additiveCents;
   const grossCents = t.revenueCents - cogsCents;
   const writeoff = settleWriteoff(state);
@@ -66,6 +67,24 @@ export function settleWriteoff(state) {
     loss.detail.push({ cat: 'SP', qty: soupQty, cents });
     state.Batches = state.Batches.filter(b => b.cat !== 'SP');
   }
+  // 正文 3.12 / 附录 G.2：跳过洗切 → 青菜 / 豆制品菌菇 / 粉面 隔夜报损额外 +20%（相对值）。
+  // 青菜当日本就全损，这 20% 只能落在上一步之后还留在柜里的货上——按剩余斤数两成损、账实一致。
+  if (CONFIG.prep && washSkipped(state)) {
+    for (const c of PREP_STATIONS[0].cats) {
+      const rest = c === 'SP' ? state.StockSoup : state.StockSolid[c];
+      const extra = roundJin(rest * (WASH_SKIP_WRITEOFF_MUL - 1));
+      if (extra <= 0) continue;
+      const cents = takeFromCostPool(state, c, extra * avg[c] * 100);
+      loss.cents += cents;
+      loss.detail.push({ cat: c, qty: extra, cents, skipWash: true });
+      state.Batches = state.Batches.reduce((keep, b) => {
+        if (b.cat !== c) { keep.push(b); return keep; }
+        b.qty = roundJin(b.qty - b.qty * (WASH_SKIP_WRITEOFF_MUL - 1));
+        if (b.qty > 0.0005) keep.push(b);
+        return keep;
+      }, []);
+    }
+  }
   recomputeStock(state);
   return loss;
 }
@@ -108,11 +127,15 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
   }
 
   const supply = basketSupply(state, basket, scenario);
-  const capped = Math.min(estBowls, supply.bowls);
+  // 附录 C + 3.12：备货可供碗数之外还要过出餐产能这道闸（斤/日 × 备菜连乘，折成碗数）
+  const cap = capacityJin(state);
+  const capBowls = Number.isFinite(cap) ? Math.floor(cap / scenario.avgJin) : Infinity;
+  const capped = Math.min(estBowls, supply.bowls, capBowls);
+  const bottleneck = capBowls < supply.bowls && capBowls <= estBowls ? 'cap' : supply.bottleneck;
   const perJin = PRICE_TIERS[priceTierId].perJin;
   const estRevenueCents = toCents(capped * scenario.avgJin * perJin);
 
-  // 预计 COGS：按品类拆分后的预计售出量 ×（现有库存 + 本篮）混合均价 + 打包
+  // 预计 COGS：按品类拆分后的预计售出量 ×（现有库存 + 本篮）混合均价 + 打包 + 掺量
   const blended = blendedAvgWithBasket(state, basket);
   const omega = {};
   for (const c of SOLID_CATS) omega[c] = CAT[c].share * scenario.catCoef[c];
@@ -121,21 +144,20 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
   let estCogs = 0;
   for (const c of SOLID_CATS) estCogs += (estJin * omega[c] / Omega) * blended[c] * 100;
   estCogs += capped * scenario.T * blended.SP * 100;
-  estCogs += Math.round(capped) * PACKING_UNIT[state.PackingTier] * 100;   // 与结算同口径：元/碗、取整碗数
+  estCogs += Math.round(capped) * PACKING[state.PackingTier] * 100;          // 与结算同口径：元/碗、取整碗数
+  estCogs += Math.round(capped) * additiveOf(state).perBowl * 100;           // 正文 3.12：按售出碗数即时计费
 
   const plan = planPayment(state, basket);
   const remainingCredit = Math.max(0, state.CreditCap - state.DebtSupplier - plan.creditUsed);
   return {
     estBowls, supplyBowls: supply.bowls, capped, lowConfidence,
-    bottleneck: supply.bottleneck, bottleneckBowls: supply.bottleneckBowls,
+    bottleneck, bottleneckBowls: bottleneck === 'cap' ? capBowls : supply.bottleneckBowls,
     estRevenueCents, estCogsCents: Math.round(estCogs),
-    estNetCents: estRevenueCents - Math.round(estCogs) - state.FixedCost,
+    estNetCents: estRevenueCents - Math.round(estCogs) - state.FixedCost - state.LaborCost,
     cashAfterCents: state.Cash - plan.cashUsed, creditRemainingCents: remainingCredit,
     plan,
   };
 }
-
-const PACKING_UNIT = { bag: 0, normal: 0.3, thermal: 0.6 };
 
 function rampNow(state) {
   return { 3: 0.4, 2: 0.6, 1: 0.8 }[state.RampDays] ?? 1.0;

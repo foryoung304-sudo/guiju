@@ -54,9 +54,11 @@ console.log(`  到 Risk 40：新口径 第 ${dayNew40} 天  旧口径 ${dayOld40
     today: { J: 10, consumed: [{ qty: 10, batch: { cat: 'MB', q: 95 } }] },
     Q: 0, C: 0, H: 0, Risk: 0, RiskShort: 0, Rep: 70, R: 0, P: 50, L: 0, Wmax: 0, ReceiptRate: 1,
     ReceiptWindow: [], Facilities: [], AdditiveTier: 'none', R_frozen_days: 0, BaseSales: 90, risk_100_pending: false,
+    // M2 生产链接线后，Q 的算式要读备菜档与配方匹配度：探针按「三项将就 + 默认方子」补齐
+    Prep: ['将就', '将就', '将就'], M_base: 0.867,
   };
   applyShadow(s, { shortOrders: 3, spillBowls: 0 });
-  console.log(`  引擎单日实测（Q=95、3 单短斤、Rep 70）：Risk = ${s.Risk.toFixed(2)}  其中分量作假池 = ${s.RiskShort.toFixed(2)}`);
+  console.log(`  引擎单日实测（原料 Q=95，三项将就 + 默认方子 → 当日 Q=${s.Q.toFixed(2)}；3 单短斤、Rep 70）：Risk = ${s.Risk.toFixed(2)}  其中分量作假池 = ${s.RiskShort.toFixed(2)}`);
 }
 
 console.log('\n=== ④ 参考策略③（全特价 + 多掺 + 亲民）：M3 门 = Risk 第 40 天内破 70 ===');

@@ -1,14 +1,17 @@
-import { CAT, CONFIG } from '../data/constants.js';
+import { CAT, CONFIG, PREP_STATIONS } from '../data/constants.js';
+import { additiveOf, prepStationLevel, qTaste } from './production.js';
 import { roundJin } from './state.js';
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
 
-// 正文 3.4：备菜档位对当日批次品质的修正（认真 +10 / 将就 0 / 跳过 −8），M2 起生效
+// 正文 3.12：三项工作与品类归属写死（洗切 / 腌渍 / 吊汤），品质按 3.4 的备菜修正进当日 Q
+const STATION_BY_CAT = Object.fromEntries(
+  PREP_STATIONS.flatMap((s, i) => s.cats.map(c => [c, i])));
+
 function prepAdjust(state, cat) {
   if (!CONFIG.prep) return 0;
-  const group = cat === 'VG' || cat === 'BF' || cat === 'NS' ? 0 : cat === 'SP' ? 2 : 1;
-  const v = state.Prep[group];
-  return v === '认真' ? 10 : v === '跳过' ? -8 : 0;
+  const i = STATION_BY_CAT[cat];
+  return i === undefined ? 0 : prepStationLevel(state, i).q;
 }
 
 // 当日综合品质 Q = clamp(Q_原料 + Q_调味 + Q_添加剂, 0, 100)；零销量走 3.4 例外记 50
@@ -22,8 +25,8 @@ export function computeQ(state) {
   }
   if (roundJin(state.today.J) <= 0 || den <= 0) return { Q: 50, Qraw: null, zeroSales: true };
   const Qraw = num / den;
-  const Qtaste = CONFIG.flavor ? clamp((state.M_base - 0.70) * 20, -6, 6) : 0;
-  const Qadd = state.AdditiveTier === 'more' ? -8 : state.AdditiveTier === 'less' ? -4 : 0;
+  const Qtaste = CONFIG.flavor ? qTaste(state.M_base) : 0;
+  const Qadd = additiveOf(state).q;
   return { Q: clamp(Qraw + Qtaste + Qadd, 0, 100), Qraw, zeroSales: false };
 }
 
@@ -47,8 +50,9 @@ export function applyShadow(state, { shortOrders, spillBowls }) {
   t.Q = Q;
   t.QZeroSales = zeroSales;
 
-  const addC = zeroSales ? 0 : (state.AdditiveTier === 'more' ? 0.6 : state.AdditiveTier === 'less' ? 0.3 : 0);
-  const addRisk = zeroSales ? 0 : (state.AdditiveTier === 'more' ? 3 : state.AdditiveTier === 'less' ? 2 : 0);
+  const add = additiveOf(state);
+  const addC = zeroSales ? 0 : add.c;
+  const addRisk = zeroSales ? 0 : add.risk;
   const spill = spillRepPenalty(spillBowls);
 
   // 黑心增量只由 Q 驱动；零销量时跳过 Q 驱动项，事件与实际操作增量照常

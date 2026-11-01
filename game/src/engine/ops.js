@@ -1,6 +1,7 @@
 import { CAT, SOLID_CATS, PACKING, PACKING_SPILL } from '../data/constants.js';
 import { toCents, roundJin } from './state.js';
 import { stockAvgCost, takeStock, rampCoef } from './market.js';
+import { capacityJin } from './production.js';
 import { PRICE_TIERS } from '../data/constants.js';
 
 // 正文 3.5 定价档系数（招牌档受 Rep 与考试周修正）
@@ -16,6 +17,8 @@ export function priceCoefFor(state, tierId = state.PriceTier, scenario = state.t
 export function runBusiness(state, handResults, rng) {
   const sc = state.today.scenario;
   const t = state.today;
+  // 3.12 出餐产能（斤/日）× 备菜三项连乘（小豆加成随人工线一起接）；未开截断时为 Infinity
+  const capJin = capacityJin(state);
 
   // 7a 竞争前需求 D0
   const ramp = rampCoef(state);
@@ -30,9 +33,12 @@ export function runBusiness(state, handResults, rng) {
   // 7b 样段期无同行分流
   const S = 1;
 
-  // 7c 需求合成（碗）
+  // 7c 需求合成（碗）：熟客到访量 R_v 与昨日顺延的明日预订合并成当日熟客优先需求，
+  // 合计不超过熟客存量 R（3.14 第 7g 步 / 附录 F.4 reg_reserved_bowls），防积压滚大
   state.R_v = Math.round(state.R * 0.5);
-  const D_pre = D0 * S + state.R_v + state.reg_reserved_bowls + state.event_reserve_bowls;
+  const carriedReserved = state.reg_reserved_bowls;
+  const N_R_want = Math.min(state.R, state.R_v + carriedReserved);
+  const D_pre = D0 * S + N_R_want + state.event_reserve_bowls;
   const D = D_pre * state.event_demand_mult;
   state.event_reserve_bowls = 0;
   state.reg_reserved_bowls = 0;
@@ -53,7 +59,6 @@ export function runBusiness(state, handResults, rng) {
 
   // 7e 三层拆分：先定各层碗数（亲手单优先）→ 折斤 → 按 ω/Ω 拆品类 → 逐层扣库存
   const avgCostBefore = Object.fromEntries(SOLID_CATS.concat(['SP']).map(c => [c, stockAvgCost(state, c)]));
-  const N_R_want = state.R_v;
   const N_hand_want = handResults.reduce((s, o) => s + o.bowls, 0);
   const N_auto_want = Math.max(0, bowlCap - N_hand_want - N_R_want);
 
@@ -80,9 +85,13 @@ export function runBusiness(state, handResults, rng) {
     N_hand += order.bowls;
   }
 
-  // ② 熟客层
-  const N_R = Math.min(N_R_want, bowlBudget);
+  // ② 熟客层（3.14 第 7g 步截断：先保亲手全额 → 熟客超出产能的部分顺延为明日预订，不成交、不记售罄惩罚）
+  const N_R_stock = Math.min(N_R_want, bowlBudget);
+  const capLeftAfterHand = Math.max(0, capJin - handJin);
+  const N_R = Math.min(N_R_stock, Math.floor(capLeftAfterHand / sc.avgJin));
+  const deferredBowls = N_R_stock - N_R;
   bowlBudget -= N_R;
+  const capLeftAfterRegular = Math.max(0, capLeftAfterHand - N_R * sc.avgJin);
   let regularSold = 0;
   const regularShort = {};
   for (const c of SOLID_CATS) {
@@ -94,8 +103,8 @@ export function runBusiness(state, handResults, rng) {
     if (got < want - 0.0005) markSellout(t, c);
   }
 
-  // ③ 自动层
-  const N_auto = Math.min(N_auto_want, bowlBudget);
+  // ③ 自动层（只缩这一层：各品类按同一比例缩到剩余产能，库存按缩放后的斤数扣）
+  const N_auto = Math.min(N_auto_want, bowlBudget, Math.floor(capLeftAfterRegular / sc.avgJin));
   let autoSold = 0;
   const autoShort = {};
   for (const c of SOLID_CATS) {
@@ -105,6 +114,17 @@ export function runBusiness(state, handResults, rng) {
     autoShort[c] = roundJin(want - got);
     soldByCat[c] = roundJin(soldByCat[c] + got);
     if (got < want - 0.0005) markSellout(t, c);
+  }
+
+  // 7g 顺延账（附录 F.6：连两日未满足 → R −1/人、清零）：昨日带进来的预订今天还是没喂到，
+  // 先按人流失那一批，没流失完的继续挂成明日预订
+  if (deferredBowls > 0) {
+    const lost = Math.min(state.R, carriedReserved, deferredBowls);
+    if (lost > 0) {
+      state.R = Math.max(0, state.R - lost);
+      t.regLost = lost;
+    }
+    state.reg_reserved_bowls = deferredBowls - lost;
   }
 
   // 7f 单轮溢出：短货斤数 ×30% 按 ω 比例流向有余货的品类，每品类不超过剩余库存
@@ -131,6 +151,8 @@ export function runBusiness(state, handResults, rng) {
   t.D0 = D0; t.D = D; t.D_eff = D_eff; t.S = S; t.W = roundJin(W);
   t.wants = Wcat;
   t.layerBowls = { hand: N_hand, regular: N_R, auto: N_auto };
+  t.capJin = Number.isFinite(capJin) ? roundJin(capJin) : null;
+  t.deferredBowls = deferredBowls;
   t.soldJin = Object.fromEntries(SOLID_CATS.map(c => [c, roundJin(soldByCat[c])]));
   t.soldJinHand = handJin;
   t.soupUsed = soupTaken;

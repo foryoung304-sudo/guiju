@@ -39,6 +39,45 @@ export const TIERS_STALL = [
 export const PACKING = { bag: 0, normal: 0.3, thermal: 0.6 };
 export const PACKING_SPILL = { bag: 0.12, normal: 0.04, thermal: 0.005 };
 export const TAKEAWAY_SHARE = { base: 0.4, rain: 0.7 };
+// 正文 3.11：打包三档（常驻决策，第 5 步定版）
+export const PACKING_NAMES = { bag: '塑料袋', normal: '普通餐盒', thermal: '保温餐盒' };
+
+// 正文 3.12 备菜（第 4 步）：三站覆盖六品类，认真 2 格 / 将就 1 格 / 跳过 0 格，
+// 品质按 3.4 修正（认真 +10 / 将就 0 / 跳过 −8）只进当日 Q，产能按连乘（1.05 / 1.0 / 0.90）
+export const PREP_STATIONS = [
+  { id: 'wash', name: '洗切', cats: ['VG', 'BF', 'NS'], qGroup: 0 },
+  { id: 'marinate', name: '腌渍', cats: ['MT', 'MB'], qGroup: 1 },
+  { id: 'soup', name: '吊汤', cats: ['SP'], qGroup: 2 },
+];
+export const PREP_LEVELS = [
+  { id: '认真', grid: 2, q: 10, cap: 1.05 },
+  { id: '将就', grid: 1, q: 0, cap: 1.0 },
+  { id: '跳过', grid: 0, q: -8, cap: 0.90 },
+];
+export const WAKE_EARLY_GRID = 1;          // 早起占 1 格工时，换 3.10 晨采好货必到 + 免当日 30% 涨价
+export const WASH_SKIP_WRITEOFF_MUL = 1.2; // 跳过洗切 → 青菜 / 豆制品菌菇 / 粉面 隔夜报损额外 +20%
+
+// 正文 3.12 / 附录 D.2 添加剂（调料摊，摊位 ≥ 二手餐车解锁）：成本是象征性的，真实代价全在 Q/C/Risk。
+// 鲜味留言等效只进口味留言表现，不进 M_base、Q 与销量；Q/C/Risk 增量只在当日有实际售出时产生（附录 G.1 零销量例外）
+export const ADDITIVE = {
+  none: { id: 'none', name: '不掺', goods: null, pitch: '只用当天熬的汤', q: 0, perBowl: 0, c: 0, risk: 0, umami: 0, unlockTier: 1 },
+  less: { id: 'less', name: '少掺', goods: '增香粉', pitch: '一勺香满街', q: -4, perBowl: 0.1, c: 0.3, risk: 2, umami: 1, unlockTier: 2 },
+  more: { id: 'more', name: '多掺', goods: '回味膏', pitch: '后劲足，回头客多', q: -8, perBowl: 0.2, c: 0.6, risk: 3, umami: 2, unlockTier: 2 },
+};
+export const ADDITIVE_TIER_MIN = 2;
+
+// 正文 3.12 调味台：客群构成按情境四行（加总 100%），偏好向量（辣，麻，鲜）；
+// 情境改偏好时先钳制 0–5 再算匹配，m_base = 1 −（三维距离）/15，M_base = Σ 占比 × m_base
+export const CLIENT_MIX = {
+  normal: { 学生: 0.55, 老师: 0.15, 大爷: 0.15, 其他: 0.15 },
+  exam: { 学生: 0.70, 老师: 0.10, 大爷: 0.10, 其他: 0.10 },
+  holiday: { 学生: 0.25, 老师: 0.15, 大爷: 0.35, 其他: 0.25 },
+  school: { 学生: 0.65, 老师: 0.10, 大爷: 0.10, 其他: 0.15 },
+};
+export const CLIENT_PREF = { 学生: [4, 3, 3], 老师: [2, 1, 4], 大爷: [3, 2, 5], 其他: [3, 3, 3] };
+export const FLAVOR_DIMS = ['spicy', 'numbing', 'umami'];
+export const FLAVOR_DIM_NAMES = { spicy: '辣', numbing: '麻', umami: '鲜' };
+export const FLAVOR_DEFAULT = { spicy: 3, numbing: 2, umami: 3 };
 
 export const FACILITIES = {
   fac_prepay: { id: 'fac_prepay', name: '先钱后货牌', price: 15000, unlock: 'EVT?evt_d_001', m1: true },
@@ -67,10 +106,11 @@ export const CONFIG = {
   handOrdersTierFull: 3,
   handOrdersPerDayFull: 4,
   competition: false,
-  prep: false,
-  flavor: false,
+  // 正文 3.12 生产链前段：M2 接线（备菜工时与产能修正、调味台 M_base、添加剂三档、打包三档）
+  prep: true,
+  flavor: true,
   labor: false,
-  capacityTruncation: false,
+  capacityTruncation: true,
   packingTier: 'normal',
   additiveTier: 'none',
 };

@@ -22,9 +22,10 @@ export function calendarPhaseOf(semesterDay) {
 }
 
 // 供应端联动（正文 3.10 表 + 附录 D.1 第 7 条）：只在标价上后乘，不改单价与品质
+// wakeWaived = 正文 3.12 早起勾选换来的「免 3.10 的当日 30% 涨价」；开学周全线小涨不在豁免口径内
 export function supplyPriceMods(weather, calendar) {
   const mods = [];
-  if (weather.id === 'rain') mods.push({ cat: 'VG', tier: 1, mult: 1.3, note: '雨天晨采青菜涨价' });
+  if (weather.id === 'rain') mods.push({ cat: 'VG', tier: 1, mult: 1.3, note: '雨天晨采青菜涨价', wakeWaived: true });
   if (calendar.id === 'school') mods.push({ cat: null, tier: null, mult: 1.1, note: '开学周全线小涨' });
   return mods;
 }

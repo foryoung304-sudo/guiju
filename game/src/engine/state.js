@@ -66,6 +66,7 @@ export function blankToday() {
     priceMultToday: {},
     purchases: [],
     committed: false,
+    prepped: false,
     locked: false,
     handOrders: [],
     soldJin: Object.fromEntries(ALL_CATS.map(c => [c, 0])),

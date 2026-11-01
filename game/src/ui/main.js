@@ -1,12 +1,14 @@
 // 《先把规矩立住！》M1 呈现层：只做 3.14 十二步的界面投影，一切数字来自引擎，界面不许自己算账。
 // 红线照正本 3.1 / 3.4 / 九：不许出现品质数字、不许出现道德标签、不许有一句劝善或劝坏的话。
-import { CAT, SOLID_CATS, ALL_CATS, PRICE_TIERS, FACILITIES, ENDING, CONFIG, TIERS_STALL, START_CASH_CENTS, START_CREDIT_CAP_CENTS } from '../data/constants.js';
+import { CAT, SOLID_CATS, ALL_CATS, PRICE_TIERS, FACILITIES, ENDING, CONFIG, TIERS_STALL, START_CASH_CENTS, START_CREDIT_CAP_CENTS,
+  PACKING, PACKING_NAMES, PREP_STATIONS, PREP_LEVELS, ADDITIVE, FLAVOR_DIMS, FLAVOR_DIM_NAMES, CLIENT_MIX } from '../data/constants.js';
 import { SKUS_BY_CAT, SKU_BY_ID } from '../data/skus.js';
 import { newGame, loadGame, saveGame, clearSave, makeRng, roundJin, centsToYuan } from '../index.js';
 import {
-  beginDay, morningPreEvent, previewBasket, submitBasket, lockTradingDay, runDay,
+  beginDay, morningPreEvent, previewBasket, submitBasket, commitPrep, lockTradingDay, runDay,
   nightSettle, eveningDraw, nightClose, dailyReport, replayPage, closeShop,
 } from '../engine/day.js';
+import { additiveUnlocked, prepBudget, prepGridUsed } from '../engine/production.js';
 import { effectivePrice, skuAvailable, creditAvailable, buyFacility, rampCoef } from '../engine/market.js';
 import { drawEvent, resolveChoice } from '../engine/events.js';
 import { evalCondition } from '../engine/dsl.js';
@@ -32,6 +34,11 @@ let gramsBy = {};        // customerId → { 品类: 克数 }
 let preEvent = null;     // 第 2 步晨间情报（无分支）
 let pendingEvent = null; // 等玩家选的事件（第 6 步 / 第 10 步）
 let pricePick = 'standard';
+let prepPick = ['将就', '将就', '将就'];    // 第 4 步草稿：三站档名
+let wakePick = false;                        // 早起勾选（占 1 格工时）
+let packingPick = CONFIG.packingTier;        // 第 5 步②打包档
+let flavorPick = { spicy: 3, numbing: 2, umami: 3 };   // 第 5 步③调味三维
+let additivePick = CONFIG.additiveTier;      // 第 5 步④添加剂档
 let ledgerBack = 'morning';
 let okRef = {};          // 本日每单是否已进入足称带（只在跨进那一刻震一次）
 
@@ -47,6 +54,7 @@ function saveFlow() {
   localStorage.setItem(FLOW_KEY, JSON.stringify({
     pre: preEvent?.id ?? null, pending: pendingEvent?.id ?? null,
     orders, gramsBy, pricePick, draft,
+    prepPick, wakePick, packingPick, flavorPick, additivePick,
   }));
 }
 
@@ -64,6 +72,22 @@ function restoreFlow() {
   // 预检必修⑤：旧档里可能存着 1.6000000238 这类残留，还原时就按 0.1 斤洗净
   for (const k of Object.keys(draft)) draft[k] = Number.isFinite(draft[k]) ? round01(draft[k]) : 0;
   pricePick = f.pricePick || state.PriceTier;
+  // 生产链前段的草稿（第 4/5 步）：脏值一律退回引擎当前值，界面草稿不许比引擎更野
+  prepPick = Array.isArray(f.prepPick) && f.prepPick.every(l => PREP_LEVELS.some(x => x.id === l))
+    ? f.prepPick : [...state.Prep];
+  wakePick = !!f.wakePick;
+  packingPick = PACKING[f.packingPick] ? f.packingPick : state.PackingTier;
+  flavorPick = { ...state.Flavor, ...(f.flavorPick || {}) };
+  additivePick = ADDITIVE[f.additivePick] ? f.additivePick : state.AdditiveTier;
+}
+
+// 每一天的前段草稿从引擎当前值起（调味是常驻配方，备菜照昨天）
+function syncProdPicks() {
+  prepPick = [...state.Prep];
+  wakePick = state.WakeEarly;
+  packingPick = state.PackingTier;
+  flavorPick = { ...state.Flavor };
+  additivePick = state.AdditiveTier;
 }
 
 function hud() {
@@ -162,6 +186,12 @@ function act(host) {
     case 'shrink': return shrinkToAffordable();
     case 'facility': buyFacility(state, d.fac); return go('market');
     case 'price': pricePick = d.price; return go('lock');
+    case 'pack': packingPick = d.pack; return go('lock');
+    case 'flavor': flavorPick[d.dim] = Math.max(0, Math.min(5, flavorPick[d.dim] + Number(d.delta))); return go('lock');
+    case 'additive': additivePick = d.add; return go('lock');
+    case 'prepLevel': prepPick[Number(d.station)] = d.level; return go('prep');
+    case 'wake': wakePick = !wakePick; return go('prep');
+    case 'prepDone': return commitPrepDraft();
     case 'open': return openShop();
     case 'cook': return cook();
     case 'evening': return afterEvening();
@@ -194,7 +224,8 @@ function resume() {
   if (saved === 'night' || (state.DailyReports.length && state.DailyReports[state.DailyReports.length - 1].day === state.Day)) return go('night');
   if (state.today.revenueCents !== undefined) { orders = state.HandOrders; return go('settle'); }
   if (state.today.locked) return go('weigh');
-  if (state.today.committed) return go('lock');
+  if (state.today.prepped) return go('lock');
+  if (state.today.committed) return go(CONFIG.prep ? 'prep' : 'lock');
   if (saved === 'market' && Object.keys(draft).length) return go('market');
   draft = defaultDraft();
   return go('morning');
@@ -204,6 +235,7 @@ function newDay() {
   rng = makeRng(state);
   orders = []; gramsBy = {}; pendingEvent = null; draft = {}; lastLine = null;   // 昨天的亲手单、待选事件、组篮草稿不带进今天
   beginDay(state);                          // 第 1 步：晨间结转
+  syncProdPicks();
   preEvent = morningPreEvent(state, rng);   // 第 2 步：晨间情报（采购前公布，无分支）
   saveGame(state);
   return go('morning');
@@ -258,11 +290,25 @@ function submitDraft() {
   if (!r.ok) return go('market');
   pricePick = state.PriceTier;
   saveGame(state);
+  return go(CONFIG.prep ? 'prep' : 'lock');
+}
+
+// 第 4 步：备菜分配（工时预算超了不许提交，引擎与界面同一条门）
+function commitPrepDraft() {
+  const r = commitPrep(state, prepPick, wakePick);
+  if (!r.ok) return undefined;                 // 按钮在超预算时已 disabled；直接返回不动流程
+  saveGame(state);
   return go('lock');
 }
 
 function openShop() {
-  if (!state.today.locked) lockTradingDay(state, pricePick);   // 第 5 步：定价定版
+  // 第 5 步：六开关一次性定版（试吃、显多秤两项待生效落点，界面上还没出现）
+  if (!state.today.locked) {
+    lockTradingDay(state, {
+      priceTier: pricePick, packingTier: packingPick,
+      flavor: flavorPick, additiveTier: additivePick,
+    });
+  }
   // 预检必修③：滑杆开局一律空碗（0 克）。原来预填成顾客的要量，核心操作被架空；
   // 顾客要多少仍写在滑杆标签与双读数里，抓多少由玩家自己定。
   if (!orders.length) {                                        // 断点回来不重抽（抽卡会推进随机流）
@@ -570,11 +616,40 @@ const VIEWS = {
       <div id="marketFoot" class="stickfoot">${footStrip(forecast)}</div>`;
   },
 
+  prep() {
+    const used = prepGridUsed(state, prepPick, wakePick);
+    const budget = prepBudget(state);
+    const over = used > budget;
+    const washSkipped = prepPick[0] === '跳过';
+    return hud() + `<img class="scene" src="./img/stall.webp" alt="开卖前的备菜" />
+      <div class="panel ${over ? 'warn' : ''}">
+      <div class="row"><h2>备菜</h2><span class="tag ${over ? 'due' : 'keep'}">工时 ${used} / ${budget} 格</span></div>
+      <p class="muted">认真 2 格 · 将就 1 格 · 跳过 0 格。这一天的活计按摊位档给预算，够不够你自己排。</p>
+      ${PREP_STATIONS.map((s, i) => `<div class="row tight"><b>${s.name}</b><span class="muted">${s.cats.map(c => CAT[c].name).join(' / ')}</span></div>
+        <div class="row">${PREP_LEVELS.map(l => `<button class="${prepPick[i] === l.id ? 'sel' : 'ghost'}" data-act="prepLevel" data-station="${i}" data-level="${l.id}">
+          ${l.id} · ${l.grid} 格</button>`).join('')}</div>`).join('')}
+      <div class="row tight" style="margin-top:10px"><b>早起</b><span class="muted">占 1 格</span></div>
+      <div class="row">
+        <button class="${wakePick ? 'sel' : 'ghost'}" data-act="wake">勾上 · ${wakePick ? '今天五点起' : '不勾'}</button>
+      </div>
+      <p class="muted">早起换"晨采好货必到"：菜农直供与老李的正经货当天不断，免当日 30% 的晨采涨价。</p>
+      ${washSkipped ? '<p class="negv">跳过洗切：青菜 / 豆制品菌菇 / 粉面 隔夜报损多两成。</p>' : ''}
+      <p class="muted">备菜还决定今天出餐的快慢：认真备得多出几碗，跳过备得少出几碗。</p>
+      ${over ? '<p class="negv">工时不够，这一套备不下来。</p>' : ''}
+      <button class="go" style="margin-top:12px" data-act="prepDone" ${over ? 'disabled' : ''}>备完 · 去定版</button>
+    </div>`;
+  },
+
   lock() {
+    const sc = state.today.scenario;
+    const mix = CLIENT_MIX[sc.calendar.id] || CLIENT_MIX.normal;
+    const crowd = Object.entries(mix).sort((a, b) => b[1] - a[1])[0][0];
+    const showAdditive = additiveUnlocked(state);
     return hud() + `<img class="scene" src="./img/pricing.webp" alt="开门前定版" />
       <div class="panel">
       <h2>开门前定版</h2>
-      <p class="muted">定价一锁，今天全天按这一档卖。样段期打包固定普通餐盒（每碗 ${PACKING_UNIT_YUAN} 元）。</p>
+      <p class="muted">下面这几样一锁，今天全天照这一套卖，营业中不许回改。</p>
+      <h3>每斤定价</h3>
       <div class="stack" style="margin-top:10px">
         ${Object.values(PRICE_TIERS).map(t => `<button class="${t.id === pricePick ? 'sel' : 'ghost'}" data-act="price" data-price="${t.id}">
           ${t.name} · 每斤 ${t.perJin.toFixed(1)} 元</button>`).join('')}
@@ -582,6 +657,21 @@ const VIEWS = {
       ${pricePick === 'qinmin' ? '<p class="muted" style="margin-top:8px">亲民价认的人多，单碗剩得薄。</p>'
         : pricePick === 'signature' ? '<p class="muted" style="margin-top:8px">招牌价靠门面与熟人口碑撑，考试周更吃亏。</p>'
           : '<p class="muted" style="margin-top:8px">标准价是这条街的默认档。</p>'}
+      <h3 style="margin-top:14px">打包</h3>
+      <div class="row">${['bag', 'normal', 'thermal'].map(id => `<button class="${packingPick === id ? 'sel' : 'ghost'}" data-act="pack" data-pack="${id}">
+        ${PACKING_NAMES[id]} · ${PACKING[id].toFixed(2)} 元/碗</button>`).join('')}</div>
+      <p class="muted">袋子最省，汤洒得多；保温最贵，洒得最少。</p>
+      <h3 style="margin-top:14px">汤底配方</h3>
+      <p class="muted">今天${sc.label}，街上人多的是${crowd}。</p>
+      ${FLAVOR_DIMS.map(dim => `<div class="row tight"><b>${FLAVOR_DIM_NAMES[dim]}</b>
+        <span><button class="mini ghost" data-act="flavor" data-dim="${dim}" data-delta="-1">−</button>
+        <b class="num">${flavorPick[dim]}</b>
+        <button class="mini ghost" data-act="flavor" data-dim="${dim}" data-delta="1">＋</button></span></div>`).join('')}
+      <p class="muted">各 0–5 格，改完今天生效。</p>
+      ${showAdditive ? `<h3 style="margin-top:14px">调味台</h3>
+        <div class="row">${Object.values(ADDITIVE).map(a => `<button class="${additivePick === a.id ? 'sel' : 'ghost'}" data-act="additive" data-add="${a.id}">
+          ${a.goods || a.name}</button>`).join('')}</div>
+        <p class="muted">「${ADDITIVE[additivePick].pitch}」· 按售出的碗结成本。</p>` : ''}
       <button class="go" style="margin-top:14px" data-act="open">开门营业</button>
     </div>`;
   },
@@ -610,8 +700,8 @@ const VIEWS = {
         <tr><td>卖出</td><td class="r num">${r.bowls} 碗 / ${r.J.toFixed(2)} 斤</td></tr>
         <tr><td>流水</td><td class="r num">${y(r.revenueCents)}</td></tr>
         <tr><td>食材成本（卖掉的才算）</td><td class="r num">−${y(t.ingredientCents)}</td></tr>
-        <tr><td>餐盒费 · ${r.bowls} 碗 × ${PACKING_UNIT_YUAN} 元</td><td class="r num">−${y(t.packingCents)}</td></tr>
-        ${t.additiveCents ? `<tr><td>添加剂</td><td class="r num">−${y(t.additiveCents)}</td></tr>` : ''}
+        <tr><td>${PACKING_NAMES[state.PackingTier]} · ${r.bowls} 碗 × ${PACKING[state.PackingTier].toFixed(2)} 元</td><td class="r num">−${y(t.packingCents)}</td></tr>
+        ${t.additiveCents ? `<tr><td>${ADDITIVE[state.AdditiveTier].goods || '添加剂'}</td><td class="r num">−${y(t.additiveCents)}</td></tr>` : ''}
         <tr><td>成本合计</td><td class="r num">−${y(r.cogsCents)}</td></tr>
         <tr><td>销售毛利</td><td class="r num">${sign(r.grossCents)}</td></tr>
         <tr><td>隔夜报损</td><td class="r num">${sign(-r.writeoffCents)}</td></tr>
@@ -624,6 +714,7 @@ const VIEWS = {
       ${out.length ? `<p class="negv" style="margin-top:8px">今天这些卖断了：${out.join('、')}。</p>` : ''}
       ${(t.handRefused || 0) > 0 ? '<p class="negv">有亲手单没接住（超出当天能出的碗数）。</p>' : ''}
       ${t.spillBowls ? `<p class="muted">外带漏洒 ${t.spillBowls} 碗。</p>` : ''}
+      ${t.deferredBowls ? `<p class="muted">锅出到头了：熟客有 ${t.deferredBowls} 碗当天没排上${t.regLost ? `，走了 ${t.regLost} 位。` : '，留到明天。'}</p>` : ''}
       <button class="go" style="margin-top:12px" data-act="evening">打烊 · 过一遍今晚的事</button>
     </div>`;
   },
@@ -679,7 +770,6 @@ const VIEWS = {
   },
 };
 
-const PACKING_UNIT_YUAN = { bag: '0', normal: '0.30', thermal: '0.60' }[CONFIG.packingTier];
 const ENDING_NAMES = { 1: '翻车', 2: '破产', 3: '规矩立住', 4: '烧心大王', 5: '金盆洗手', 6: '平庸收摊' };
 
 function shelfRow(cat, forecast) {
@@ -750,7 +840,10 @@ function forecastBar(f) {
     </div>
     ${gap > 0 ? `<div class="k" style="margin-top:6px">差 ${gap} 碗——${f.supplyBowls === 0
       ? '今天开空档，这一篮出不了货'
-      : `${CAT[f.bottleneck].name}只够出 ${f.bottleneckBowls} 碗，先补这一类`}</div>` : ''}
+      : f.bottleneck === 'cap'
+        // 3.12 第 7g 步：卡的是出餐产能，不是菜——多买的货今天照样出不掉
+        ? `灶上一天出到 ${f.bottleneckBowls} 碗就满了，多买的菜今天出不掉`
+        : `${CAT[f.bottleneck].name}只够出 ${f.bottleneckBowls} 碗，先补这一类`}</div>` : ''}
     <div class="k" style="margin-top:6px">现金 ${y(state.Cash)} · 走赊 ${y(f.plan.creditUsed)} · 现付 ${y(f.plan.cashUsed)}</div></div>`;
 }
 

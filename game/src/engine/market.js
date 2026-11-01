@@ -6,7 +6,10 @@ import { evalCondition } from './dsl.js';
 // 市场标价 = D.1 单价 × PriceIndex × 情境供应端联动 × 当日事件涨幅（只改价，不改品质/带票/赊购/隔夜规则）
 export function effectivePrice(state, sku) {
   let p = sku.price * state.PriceIndex;
-  for (const mod of state.today.priceMods) if (modMatches(mod, sku)) p *= mod.mult;
+  for (const mod of state.today.priceMods) {
+    if (mod.wakeWaived && state.WakeEarly) continue;   // 3.12 早起：免当日 30% 晨采涨价
+    if (modMatches(mod, sku)) p *= mod.mult;
+  }
   const evMult = state.today.priceMultToday[sku.cat];
   if (evMult) p *= evMult;
   // 标价取两位小数：账面必须能被 单价 × 斤数 复算（附录 B 账目可核）

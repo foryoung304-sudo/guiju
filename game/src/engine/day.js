@@ -1,4 +1,4 @@
-import { CONFIG, PRICE_TIERS, ENDING, SOLID_CATS, BUYOUT_PRICE_CENTS, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN } from '../data/constants.js';
+import { CONFIG, PRICE_TIERS, ENDING, SOLID_CATS, PACKING, ADDITIVE, BUYOUT_PRICE_CENTS, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN } from '../data/constants.js';
 import { blankToday, roundJin } from './state.js';
 import { makeRng } from './rng.js';
 import { buildBasket, commitPurchase, planPayment } from './market.js';
@@ -9,6 +9,7 @@ import { drawEvent, resolveChoice, resolvePendingReserve } from './events.js';
 import { drawHandOrders, settleWeighing } from './weigh.js';
 import { buildComments } from './comments.js';
 import { scenarioOf, forecastLabel } from '../data/scenario.js';
+import { additiveUnlocked, computeMBase, prepBudget, prepFits, prepGridUsed } from './production.js';
 
 // 正文 3.14 第 1 步（晨间结转）+ 明日情境
 export function beginDay(state) {
@@ -64,14 +65,41 @@ export function submitBasket(state, picks, rng = makeRng(state)) {
   return { ok: true, plan };
 }
 
-// 第 5 步：营业前定版（六开关一次性锁定；样段只有定价与打包两项）
-export function lockTradingDay(state, priceTierId) {
+// 第 4 步：备菜分配（M2 起；附录 F.5「工时预算第 4 步校验，超预算不许提交」）
+// prep = 三站档名数组（洗切/腌渍/吊汤，值域 认真/将就/跳过），wakeEarly 占 WAKE_EARLY_GRID 格
+export function commitPrep(state, prep, wakeEarly = state.WakeEarly) {
+  const used = prepGridUsed(state, prep, wakeEarly);
+  const budget = prepBudget(state);
+  if (!prepFits(state, prep, wakeEarly)) return { ok: false, used, budget };
+  state.Prep = [...prep];
+  state.WakeEarly = !!wakeEarly;
+  state.WorkGridUsed = used;
+  state.today.prepped = true;
+  return { ok: true, used, budget };
+}
+
+// 第 5 步：营业前定版（六开关一次性锁定；⑤ 试吃、⑥ 显多秤尚无生效落点，本批只登记不做假开关）
+export function lockTradingDay(state, opts = {}) {
+  const priceTierId = opts.priceTier || state.PriceTier;
+  const packingTier = opts.packingTier || state.PackingTier;
+  const flavor = opts.flavor || state.Flavor;
+  const askedAdditive = opts.additiveTier === undefined ? state.AdditiveTier : opts.additiveTier;
+  if (PACKING[packingTier] === undefined) return { ok: false, reason: 'pack' };   // 塑料袋 0 元也是合法档，别按真值筛掉
+  if (ADDITIVE[askedAdditive] === undefined) return { ok: false, reason: 'add' };
+  // 调料摊未解锁（摊位 < 二手餐车）时开关根本不出现，引擎按「不掺」收
+  const additiveTier = askedAdditive !== 'none' && additiveUnlocked(state) ? askedAdditive : 'none';
+
   state.PriceTier = priceTierId;
   state.PricePerJin = PRICE_TIERS[priceTierId].perJin;
   state.PriceCoefToday = priceCoefFor(state, priceTierId, state.today.scenario);
   state.F = Math.min(1.10, 1 + 0.05 * (state.Facilities.includes('fac_display') ? 1 : 0)
     + 0.05 * (state.Facilities.includes('fac_cert') ? 1 : 0));
+  state.PackingTier = packingTier;
+  state.Flavor = { ...flavor };
+  state.M_base = computeMBase(state.Flavor, state.today.scenario);
+  state.AdditiveTier = additiveTier;
   state.today.locked = true;
+  return { ok: true, M_base: state.M_base };
 }
 
 // 第 6 步：晨间事件（严队长占道）

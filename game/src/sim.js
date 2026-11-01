@@ -7,7 +7,7 @@ import { rampCoef, upgradeStall, buyFacility } from './engine/market.js';
 import { evalCondition } from './engine/dsl.js';
 import { previewBasket } from './engine/day.js';
 import {
-  beginDay, morningPreEvent, submitBasket, lockTradingDay, morningEvent, runDay, closeDay,
+  beginDay, morningPreEvent, submitBasket, commitPrep, lockTradingDay, morningEvent, runDay, closeDay,
   nightSettle, eveningDraw, nightClose, closeShop,
 } from './engine/day.js';
 
@@ -139,6 +139,8 @@ export function simulate(seed, days, strategy, closer = 'headless', opts = {}) {
   if (opts.weather) for (let i = 0; i < state.weatherCycle.length; i++) state.weatherCycle[i] = opts.weather;
   // M3 参考策略③ 的添加剂档（M1 构建按 CONFIG 恒不掺；跑 M3 口径时按 3.12 数值开档）
   if (opts.additive) state.AdditiveTier = opts.additive;
+  // 产能探针（回归 §9 用）：不改数值口径，只把 3.12 的档位斤数临时压小，验第 7g 步截断顺序
+  if (opts.capacity) state.CapacityBase = opts.capacity;
   const buy = opts.buy ?? 'appc';
   const log = [];
   const invests = [];
@@ -152,7 +154,14 @@ export function simulate(seed, days, strategy, closer = 'headless', opts = {}) {
     const { picks, forecast } = chooseBasket(state, strategy, target);
     const submit = submitBasket(state, picks, rng);
 
-    lockTradingDay(state, strategy.price);
+    // 生产链前段（3.12）：策略不写死备菜/调味时沿用存档默认（三项将就 + 默认方子 3/2/3 + 普通餐盒），
+    // 这样 M1 三条参考线只被「新增机制」推动，不被模拟器的替玩家决定推动
+    if (strategy.prep) commitPrep(state, strategy.prep, strategy.wakeEarly ?? false);
+    lockTradingDay(state, {
+      priceTier: strategy.price,
+      packingTier: strategy.packing,
+      flavor: strategy.flavor,
+    });
     const morning = morningEvent(state, rng, ev => chooseFor(ev, strategy));
     const orders = drawHandOrders(state, rng);
     const weigh = order => Object.fromEntries(
@@ -168,6 +177,8 @@ export function simulate(seed, days, strategy, closer = 'headless', opts = {}) {
       bought: submit.plan ? submit.plan.total / 100 : 0,
       est: forecast ? +forecast.estBowls.toFixed(2) : 0,
       bowls: Math.round(state.today.bowls), J: state.today.J, Q: state.today.Q,
+      M_base: +state.M_base.toFixed(3),
+      cap: state.today.capJin ?? null, deferred: state.today.deferredBowls || 0, regLost: state.today.regLost || 0,
       revenue: state.today.revenueCents / 100, cogs: state.today.cogsCents / 100,
       gross: state.today.grossCents / 100, writeoff: state.today.writeoffCents / 100,
       netOps: state.today.netOpsCents / 100, eventNet: state.today.eventNetCents / 100,
