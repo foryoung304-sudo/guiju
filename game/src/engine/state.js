@@ -41,6 +41,8 @@ export function newGame(seed) {
     blanchOn: CONFIG.blanch,
 
     EventHistory: [], Cooldowns: {}, WeightShifts: {}, PricewarDays: 0,
+    // M2 第八批（spec-event-pool-6）：山寨摊存续日 / 次日下架品类 / 次日用汤减半 / 近 3 日信号窗口
+    CopycatDays: 0, pendingDelist: null, pendingSoupHalf: false, Recent3: [],
     seen_routine_inspection: false, dayStarted: false, pendingReserve: null,
     pinchHintUsed: false,
     d0_buff_mult: 1.0, d0_buff_days: 0, next_day_traffic_mult: 1.0, event_demand_mult: 1.0,
@@ -72,6 +74,10 @@ export function blankToday() {
     scenario: null,
     // 竞争层当日三项：S（第 7b 步实际值，只进回放与后台）、四摊份额、价格战当日是否生效
     S: 1, share: null, pricewarActive: false,
+    // spec-event-pool-6 的三条「当日事实」：山寨摊还在不在（第 7b 步读它做惯性封顶）、
+    // 今日哪一档被下架（市场层 skuAvailable 读）、汤底是否只用一半封顶（第 7c-2 步读）。
+    // 三者都由昨日事件写在 state 上、今日第 1 步结转成真，与 pricewarActive 同一条走法。
+    copycatActive: false, delist: null, soupHalf: false,
     priceMods: [],
     priceMultToday: {},
     purchases: [],
@@ -172,6 +178,15 @@ export function loadGame() {
     parsed.today = { ...(parsed.today || {}), blanchCounts: { under: 0, green: 0, best: 0, over: 0 } };
   if (parsed.eventScope !== 'm1' && parsed.eventScope !== 'full') parsed.eventScope = CONFIG.eventScope;
   if (!Array.isArray(parsed.today?.notes)) parsed.today = { ...(parsed.today || {}), notes: [] };
+  // M2 第八批（事件池补六条）新带的字段：旧档按「没被山寨过、今天没断货、近三日用空窗」补初值，不动任何已签数值。
+  // 注意这里只补「缺键」，不补 today.scenario —— 当日情境残缺属裁定 63a2ec8 ⑫ 的脏档兜底，只在晨间屏那一处、
+  // 按「当日尚未 beginDay」路由回引擎入口处理，不在读档里凭空造一份情境。
+  if (typeof parsed.CopycatDays !== 'number' || !Number.isFinite(parsed.CopycatDays)) parsed.CopycatDays = 0;
+  if (!ALL_CATS.includes(parsed.pendingDelist)) parsed.pendingDelist = null;
+  if (typeof parsed.pendingSoupHalf !== 'boolean') parsed.pendingSoupHalf = false;
+  if (!Array.isArray(parsed.Recent3)) parsed.Recent3 = [];
+  if (typeof parsed.today?.copycatActive !== 'boolean')
+    parsed.today = { ...(parsed.today || {}), copycatActive: false, delist: null, soupHalf: false };
   parsed.saveVersion = SAVE_VERSION;
   return parsed;
 }

@@ -1,7 +1,9 @@
-// 附录 A 事件表 Schema + 附录 E 逐字段样例，本表 12 行：M1 四行（E.1 evt_d_001 / E.2 evt_d_002 / E.3 evt_d_011 /
+// 附录 A 事件表 Schema + 附录 E 逐字段样例，本表 18 行：M1 四行（E.1 evt_d_001 / E.2 evt_d_002 / E.3 evt_d_011 /
 // E.5 evt_d_031）、M2 第四批两行（E.8 evt_s_return / E.9 evt_s_pricewar）、M2 第五批六行（E.4 evt_d_021 立账 /
-// E.6 evt_s_insp 大检查 / E.7 evt_s_flag 锦旗 / E.9 evt_s_insp2 例行检查与 evt_s_poach 挖角 / E.10 evt_s_promo 宣传队）。
-// effect 用声明式 op，引擎按 timing 落到对应步号入账；数值全部照附录 E 原文 + 已签勘误，未新增。
+// E.6 evt_s_insp 大检查 / E.7 evt_s_flag 锦旗 / E.9 evt_s_insp2 例行检查与 evt_s_poach 挖角 / E.10 evt_s_promo 宣传队）、
+// M2 第八批六行（spec-event-pool-6：山寨摊 / 收购邀约 / 粉坊断货 / 吃坏肚子 / 汤锅裂了 / 测评号探店）。
+// effect 用声明式 op，引擎按 timing 落到对应步号入账；数值全部照附录 E 原文 + 已签勘误 + 店主签发的那份 spec，未新增。
+// 计数（spec §三 验收口径）：坏 10 / 好 5 / 中 3 = 18 条。
 
 // 回签审复 §一.1（20261031）：三条坏事事件全部后置到第 3 天之后——这是定稿 §四「压力后置」与本稿第 5 行
 // 出货惯例③「负面机制在第 3 天之后才解锁」的完整实现，不是新数值。菜价上涨把 condition 与 must_fire
@@ -270,6 +272,141 @@ export const EVENTS = [
     actions: [],
     open: [{ forcedComment: '门口挂了面锦旗，字比咱家价目牌还大。' }],
     effect_hidden: [{ Rep: 5 }, { L: 1 }],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+  {
+    // spec-event-pool-6 §一.1（正文 5.3 原文照录，不新增数）：软触发过 35% 门、一次性。
+    // 效果只动「排队惯性」这一格（3.13 既有参数）：山寨摊存续 5 日内本摊惯性封顶 1.0，份额再高也不涨，
+    // 应对仍是定价与品质 → 不写现金、不写 Rep/Risk、不碰 S 的钳位带。无竞争层时 S ≡ 1，本条无数值落点（已登记回报）。
+    // 文案 agent 自撰（正本 5.3 只给了「王老板改名蹭名气」这一句事实），待店主审。
+    id: 'evt_s_copycat',
+    pool: 'special',
+    ship: 'M2',
+    timing: 'evening',
+    kind: '坏事',
+    weight: 7,
+    condition: 'Rep>=70 & Tier>=3 & !EVT?evt_s_copycat',
+    cooldown: 999,
+    text: '王老板把招牌换了，字跟你家只差一笔，连价目牌都照着做。有人端着碗走错了队，他也不纠正。',
+    actions: [],
+    open: [{ copycatDays: 5 }],
+    effect_hidden: [],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+  {
+    // spec-event-pool-6 §一.2：纯演出。目标墙「盘下对面铺子」（§六 #3 那一笔）早就在界面上，本条只是把它可见化，
+    // 不是执行前置 → 除了留言不写任何机械效果，不设分支、不设报价数值（48,000 元这个门槛是「累计净赚」的读数，不扣钱）。
+    // 单按钮确认型（actions 空 → 界面只出「知道了」），文案 agent 自撰。
+    id: 'evt_s_buyout',
+    pool: 'special',
+    ship: 'M2',
+    timing: 'evening',
+    kind: '中性',
+    weight: 6,
+    condition: 'NP>=4800000 & !EVT?evt_s_buyout',
+    cooldown: 999,
+    text: '有人递过来一张名片，说对面那间铺子愿意盘给你，价钱咬死不动，说完就走了。',
+    actions: [],
+    open: [{ forcedComment: '听说你要盘对面那间？那以后吃麻辣烫只用排一回队了。' }],
+    effect_hidden: [],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+  {
+    // spec-event-pool-6 §二.3（晨间情报、第 2 步、采购前公布 → 情报价值就在「今天能囤」）：
+    // 次日粉坊 NS 全档下架 = 市场层落点（skuAvailable 认这一格），柜里已有的照卖、不冻结；
+    // 缺口由第 7 步的 ω/Ω 拆分与 7f 单轮溢出吸收，不新造缺货系统。早起「晨采好货必到」只保菜农 / 老李正经货，
+    // 不覆盖粉坊（3.12 口径本就如此，两条不冲突）。文案走 5.2 示例原句。
+    id: 'evt_d_stockout',
+    pool: 'daily',
+    ship: 'M2',
+    timing: 'morning_pre',
+    kind: '坏事',
+    weight: 7,
+    condition: 'Day>=5',
+    cooldown: 9,
+    text: '粉坊机器坏了，明天没粉。',
+    actions: [],
+    open: [{ delistNextDay: 'NS' }],
+    effect_hidden: [],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+  {
+    // spec-event-pool-6 §二.4。入池两条路（正本 5.2 原注「归因暧昧，可能不是你」）：
+    // 近 3 日出了品质问题 → weight 7；什么都没出 → baseWeight 1 的罕见路。weightOf 认 weightCond / baseWeight 两个新键。
+    // 罕见路仍带 Day>=3 这一格地板：定稿 §四「压力后置」+ 回签审复 §一.1「负面机制在第 3 天之后才解锁」是已签口径，
+    // spec 的「无条件」读成「无品质条件」，不读成「可以第 1 天就来一条坏事」（此解已登记回报）。
+    // 赔礼分支的置灰按 spec 明写「照事件通则」落 gate:'afford'；硬扛分支的 Risk +8 走保护池那条清算顺序（裁定 9a959bd §二，applyHidden 已实现）。
+    // 次日 D0 ×0.92 走已签的 next_day_traffic_mult 单发通道（与 evt_d_001「当场要钱」×0.85 同一格，第 7a 步读完即复位）。
+    id: 'evt_d_complaint',
+    pool: 'daily',
+    ship: 'M2',
+    timing: 'evening',
+    kind: '坏事',
+    weight: 7,
+    weightCond: 'MinQ3<45 | Cheap3 | AddMore3',
+    baseWeight: 1,
+    condition: 'Day>=3',
+    cooldown: 7,
+    text: '两个人摸黑回到摊前，说回去就肚子闹，自己也说不清是不是这碗的事。',
+    actions: [
+      { id: 'apologize', label: '赔礼道歉（−260）', gate: 'afford', open: [{ cash: -26000 }, { forcedComment: '他收了东西，走的时候说了句"下回注意点"。' }], hidden: [{ Rep: -2 }] },
+      { id: 'deny', label: '硬扛不认', open: [{ nextDayTrafficMult: 0.92 }], hidden: [{ Risk: 8 }, { Rep: -5 }] },
+    ],
+    effect_hidden: [],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+  {
+    // spec-event-pool-6 §二.5：weight 低、冷却 10。两条分支都不记账外的账：
+    // 补锅 = 一次性现金 −180（明账）；将就 = 次日汤底可售份数上限 ×0.5，
+    // 挂在 3.14 第 7c-2 步那条 soupCapBowls 封顶上（同一格封顶、只是乘个数），不新造库存或损耗系统。
+    // 「花钱补锅」没写 gate:'afford'——spec 只给赔礼那一条点了置灰，本条按字面不替它加通则外的后果（已登记回报）。
+    // spec 原文是「无条件」，这里仍留 Day>=3 一格地板：定稿 §四「压力后置」+ 回签审复 §一.1 是正文级口径
+    // （「负面机制在第 3 天之后才解锁」，M1 三条坏事行就是照它钉的），批内简报不覆盖它；要按字面第 1 晚就能裂锅，把本行 condition 改回 'true' 即可（已登记回报）。
+    id: 'evt_d_pot',
+    pool: 'daily',
+    ship: 'M2',
+    timing: 'evening',
+    kind: '坏事',
+    weight: 5,
+    condition: 'Day>=3',
+    cooldown: 10,
+    text: '收摊才看见汤锅底下裂了一道纹，白天就一直往下洇水。',
+    actions: [
+      { id: 'patch', label: '花钱补锅（−180）', open: [{ cash: -18000 }], hidden: [] },
+      { id: 'improvise', label: '拿盆将就', open: [{ soupHalfNext: true }], hidden: [] },
+    ],
+    effect_hidden: [],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+  {
+    // spec-event-pool-6 §二.6（品质门槛事件、纯奖励向）：Q 不够根本不入池，没有惩罚版。
+    // 错位不重叠：宣传队是 ×1.15 / 4 日（特殊池、Rep 门槛），本条 ×1.10 / 3 日（日常池、Q 门槛），都不给 R、不给 L。
+    // Rep +5 属暗线 → effect_hidden；D0 乘数属明账（次日客流）→ open 里的 d0Buff（E 表前 :127 的合并规则：新值乘入、天数取最大）。
+    // 出场人物用附录 H c05「小刘（测评号，口碑扩音器）」，文案从他的探店口吻写、不影射任何真实测评账号（正文 :372 红线）。
+    id: 'evt_d_blogger',
+    pool: 'daily',
+    ship: 'M2',
+    timing: 'evening',
+    kind: '好事',
+    weight: 6,
+    condition: 'AvgQ3>=65 & Tier>=2',
+    cooldown: 14,
+    text: '小刘举着手机进门，先拍价目牌，又拍你的秤，末了坐下来把一碗粉吃完，没打断。',
+    actions: [],
+    open: [{ d0Buff: { mult: 1.10, days: 3 } }],
+    effect_hidden: [{ Rep: 5 }],
     weightShift: null,
     branch: null,
     must_fire: null,

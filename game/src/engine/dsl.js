@@ -93,10 +93,19 @@ function evalNode(node, s) {
   }
 }
 
+import { windowOf } from './recent.js';
+
 export function readVar(name, s) {
   if (name === 'FacilityF') return s.F;
   // 附录 E.10 的 `count(Facilities)>=2`：本 DSL 的词法器不认函数调用（附录 A 只定义 `!` `&` `|` `>=`… 与 HAS?/EVT? 两种探针），
   // 故按施工口径落一个只读别名。count 取附录 F.5 的 Facilities 元素个数——JI_SCALE 是器具、不在其中（E.10 约束第 2 条）。
   if (name === 'FacilityCount') return s.Facilities.length;
+  // spec-event-pool-6 第 4 / 6 条的「近 3 日」同理：DSL 没有聚合函数，按 FacilityCount 同例落四个只读别名，
+  // 门槛数字（<45 / >=65）留在数据行里，别在引擎里再藏一份。
+  // 窗口恒含当日那一格（recent.js），所以四个别名不会遇到空数组。
+  if (name === 'AvgQ3') { const d = windowOf(s); return d.reduce((x, y) => x + y.q, 0) / d.length; }
+  if (name === 'MinQ3') return Math.min(...windowOf(s).map(d => d.q));
+  if (name === 'Cheap3') return windowOf(s).some(d => d.cheap);
+  if (name === 'AddMore3') return windowOf(s).some(d => d.add);
   return s[name];
 }

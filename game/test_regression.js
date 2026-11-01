@@ -3,18 +3,19 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { simulate, STRATEGIES } from './src/sim.js';
+import { simulate, STRATEGIES, REF_STRATEGIES } from './src/sim.js';
 import { bridgeCheck, settleDay, settleWriteoff, settleTasting } from './src/engine/ledger.js';
 import { newGame, roundJin, loadGame, STORAGE_KEY } from './src/engine/state.js';
-import { effectivePrice, buildBasket, planPayment, recomputeStock, buyTool, sellBackTool, ownsTool, upgradeStall, isFacilityUnlocked } from './src/engine/market.js';
+import { effectivePrice, buildBasket, planPayment, recomputeStock, buyTool, sellBackTool, ownsTool, upgradeStall, isFacilityUnlocked, skuAvailable } from './src/engine/market.js';
 import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, PACKING_SPILL, CONFIG, SAVE_VERSION,
   ADDITIVE, PREP_LEVELS, LABOR, TASTING, TOOLS, SCALE_DELTA_J_SHARE, SCALE_C_PER_JIN, SCALE_RISK_PER_JIN,
-  COMPETITION, INSPECTION, FACILITIES, ENDING, BLANCH, TIERS_STALL,
+  COMPETITION, INSPECTION, FACILITIES, ENDING, BLANCH, TIERS_STALL, SUBSTREAMS,
   BUYOUT_PRICE_CENTS, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN, QUIT_VARIANT_NP_CENTS, QUIT_VARIANT_REP } from './src/data/constants.js';
 import { SKU_BY_ID } from './src/data/skus.js';
 import { scenarioOf, WEATHER } from './src/data/scenario.js';
 import { evalCondition } from './src/engine/dsl.js';
-import { EVENTS } from './src/data/events.js';
+import { EVENTS, EVENT_BY_ID } from './src/data/events.js';
+import { windowOf, pushRecent, todaySignal } from './src/engine/recent.js';
 import { beginDay, morningPreEvent, submitBasket, previewBasket, commitPrep, lockTradingDay, morningEvent, runDay, nightSettle, eveningDraw, nightClose, checkEndings,
   judgeBuyout, judgeRetire, quitVariant, quitBlurb, closeShop } from './src/engine/day.js';
 import { additiveOf, additiveUnlocked, capacityJin, computeMBase, prepBudget, prepGridUsed, qTaste, washSkipped,
@@ -1095,8 +1096,8 @@ for (const seed of [SEED, 7979, 36832]) {
       (!off || off.ship === 'M1') && on.id === 'evt_s_insp',
       `关 → ${off ? off.id : '无'}｜开 → ${on.id}`);
     const m2Rows = EVENTS.filter(e => e.ship !== 'M1');
-    check('池子按 ship 分档：M1 四条 + M2 八条 = 十二条（正文 :362 的 ≥18 仍差 6 条，缺的是附录里没有数据行的条目）',
-      EVENTS.length === 12 && m2Rows.length === 8 && EVENTS.every(e => e.ship === 'M1' || e.ship === 'M2'),
+    check('池子按 ship 分档：M1 四条 + M2 十四条 = 十八条（spec-event-pool-6 落完，正文 :362 的「上线必需 ≥18」达标；坏/好/中计数见 §15）',
+      EVENTS.length === 18 && m2Rows.length === 14 && EVENTS.every(e => e.ship === 'M1' || e.ship === 'M2'),
       `M1 ${EVENTS.length - m2Rows.length} / M2 ${m2Rows.length}`);
   }
 
@@ -1309,9 +1310,12 @@ for (const seed of [SEED, 7979, 36832]) {
       `第 ${f.SemesterDay} 学期日 → ${picked.id}｜L ${f.L}｜留言 ${f.today.forcedComments.join('/')}`);
     const out = newGame(SEED);
     out.SemesterDay = 29; out.Rep = 90;
+    // 抽 20 次而不是抽两次：drawEvent 会推进 evening 子流的计数，「第一次没抽到」不等于「这条不入池」。
+    // 第八批把日常池从 6 行扩到 12 行后，同一张状态的两次抽取能一次中、一次空，旧写法就在自己不该管的格子里翻了车。
+    const draws = [];
+    for (let i = 0; i < 20; i++) { const e = drawEvent(out, 'evening', makeRng(out)); if (e) draws.push(e.id); }
     check('窗口外（第 29 学期日）锦旗不入池：一次性事件只在 SemesterDay 24–28',
-      !drawEvent(out, 'evening', makeRng(out)) || drawEvent(out, 'evening', makeRng(out)).id !== 'evt_s_flag',
-      `抽到 ${drawEvent(out, 'evening', makeRng(out))?.id || '无'}`);
+      !draws.includes('evt_s_flag'), `20 抽里出现 ${draws.filter(x => x !== 'evt_s_flag').length} 次他条、锦旗 0 次`);
     const led = newGame(SEED);
     led.Day = 10; led.Tier = 2;
     resolveChoice(led, LEDGER, 'skip');
@@ -1760,6 +1764,349 @@ for (const seed of [SEED, 7979, 36832]) {
       && runs['清仓特价（无票）'].ending === ENDING.CRASH && runs['强哥无标'].ending === ENDING.CRASH
       && runs['空篮'].ending === ENDING.BANKRUPT && runs['巨量（远超现金 + 赊购额）'].ending === ENDING.BANKRUPT,
       Object.keys(SEQ).map(k => `${k} → #${runs[k].ending || '无'}`).join('　'));
+  }
+}
+
+// ── 15. M2 第八批：事件池补六条（spec-event-pool-6-20261101，Orange 设计签发）+ 裁定 63a2ec8 ⑫ 脏档兜底 ──
+{
+  const EV = id => EVENT_BY_ID[id];
+  const SIX = ['evt_s_copycat', 'evt_s_buyout', 'evt_d_stockout', 'evt_d_complaint', 'evt_d_pot', 'evt_d_blogger'].map(EV);
+  const clone = s => JSON.parse(JSON.stringify(s));
+  // 初值从 newGame 读，不写死（同 §12 的口径；§12 那两个常量在它自己的块作用域里，这里拿不到）
+  const REP0 = newGame(SEED).Rep;
+  const CASH0 = newGame(SEED).Cash;      // 分
+
+  // 1) 池子计数与字段口径（spec §三 验收第一条）
+  const kinds = { 坏事: 0, 好事: 0, 中性: 0 };
+  EVENTS.forEach(e => { kinds[e.kind] = (kinds[e.kind] || 0) + 1; });
+  check('spec §三：池子 18 条 = 坏 10 / 好 5 / 中 3（本批 +4 / +1 / +1）',
+    EVENTS.length === 18 && kinds['坏事'] === 10 && kinds['好事'] === 5 && kinds['中性'] === 3,
+    `坏 ${kinds['坏事']}／好 ${kinds['好事']}／中 ${kinds['中性']}`);
+  check('六条新行齐备、全带 ship="M2"、timing 只落在两条既有子流上（spec §三「不新增子流」）',
+    SIX.length === 6 && SIX.every(e => e.ship === 'M2')
+    && SIX.every(e => SUBSTREAMS.includes(e.timing === 'morning_pre' ? 'event_morning_pre' : 'event_evening')),
+    SIX.map(e => `${e.id}=${e.pool}/${e.timing}/${e.kind}/${e.weight}`).join('　'));
+
+  // 2) 门槛、冷却、数值族逐项对照 spec（引用式断言：spec 改了这里就红）
+  check('门槛照 spec 落行：山寨 Rep≥70 & Tier≥3｜收购 NP≥48,000 元（= 4,800,000 分）｜断货 Day≥5｜探店 近 3 日平均 Q≥65 & Tier≥2',
+    EV('evt_s_copycat').condition === 'Rep>=70 & Tier>=3 & !EVT?evt_s_copycat'
+    && EV('evt_s_buyout').condition === 'NP>=4800000 & !EVT?evt_s_buyout'
+    && EV('evt_d_stockout').condition === 'Day>=5'
+    && EV('evt_d_blogger').condition === 'AvgQ3>=65 & Tier>=2');
+  check('冷却照 spec 落行：断货 9 / 吃坏肚子 7 / 汤锅 10 / 探店 14；山寨与收购一次性（999 + condition 里的 !EVT? 自锁）',
+    EV('evt_d_stockout').cooldown === 9 && EV('evt_d_complaint').cooldown === 7
+    && EV('evt_d_pot').cooldown === 10 && EV('evt_d_blogger').cooldown === 14
+    && EV('evt_s_copycat').cooldown === 999 && EV('evt_s_buyout').cooldown === 999);
+  const opsOf = e => (e.actions || []).flatMap(a => a.open || []).concat(e.open || []);
+  const hidOf = e => (e.actions || []).flatMap(a => a.hidden || []).concat(e.effect_hidden || []);
+  const cashAbs = SIX.flatMap(opsOf).filter(o => o.cash).map(o => Math.abs(o.cash));
+  const d0s = SIX.flatMap(opsOf).map(o => o.nextDayTrafficMult ?? (o.d0Buff ? o.d0Buff.mult : undefined)).filter(x => x !== undefined);
+  const reps = SIX.flatMap(hidOf).filter(o => o.Rep).map(o => o.Rep);
+  const risks = SIX.flatMap(hidOf).filter(o => o.Risk).map(o => o.Risk);
+  check('数值全落在 spec §一 点名的量级族内：现金 150–300｜D0 乘数 0.85–1.15｜Rep ±2–5｜Risk +8 量级（六条里只这两笔钱、两个乘数）',
+    cashAbs.join() === '26000,18000' && cashAbs.every(c => c >= 15000 && c <= 30000)
+    && d0s.join() === '0.92,1.1' && d0s.every(m => m >= 0.85 && m <= 1.15)
+    && reps.join() === '-2,-5,5' && reps.every(r => Math.abs(r) >= 2 && Math.abs(r) <= 5)
+    && risks.join() === '8', `现金 ${cashAbs.join('/')} 分｜D0 ${d0s.join('/')}｜Rep ${reps.join('/')}｜Risk ${risks.join('/')}`);
+  check('六条都不越 3.13 红线、也不动清单外的格子：无 R / 无 L / 无 C / 无 H / 无产能与库存直改',
+    SIX.flatMap(hidOf).every(o => o.R === undefined && o.L === undefined && o.C === undefined && o.H === undefined)
+    && SIX.flatMap(opsOf).every(o => o.reserveBowls === undefined && o.deposit === undefined
+      && o.pricewarDays === undefined && o.destroyUnticketed === undefined && o.wageRaise === undefined),
+    '暗线只有 Rep 与 Risk 两格，明账只有现金 / D0 乘数 / 下架 / 汤封顶 / 惯性封顶');
+
+  // 3) 山寨摊：五条营业日的惯性封顶（spec §一.1「走 3.13 既有参数，加状态 CopycatDays 计数」）
+  {
+    const s = newGame(SEED);
+    resolveChoice(s, EV('evt_s_copycat'), null);
+    const flags = [];
+    for (let i = 0; i < 6; i++) { beginDay(s); flags.push(s.today.copycatActive); }
+    check('山寨摊存续 5 个营业日：第 1 步「先写当日标志再递减」，与 PricewarDays 三日倒计时同一写法',
+      s.CopycatDays === 0 && flags.join() === 'true,true,true,true,true,false', flags.join('/'));
+    const compState = active => {
+      const c = clone(s);
+      c.competitionOn = true; c.P = 90; c.RivalP = 30; c.PricePerJin = 19.2; c.RivalPrice = 28.9;
+      c.QueueInertia = [1.15, 1, 1, 1];      // 昨日惯性带内上沿：份额再高也咬在 1.15（G.1 钳位带）
+      c.today.copycatActive = active;
+      return c;
+    };
+    const off = compState(false), on = compState(true);
+    const offRet = sharesAndS(off), onRet = sharesAndS(on);   // 落账写 state.QueueInertia / state.Share，返回值里没有惯性
+    check('封顶只咬本摊那一格：无山寨时惯性 1.15（带内上沿）→ 存续期内压到 1.0；其余三摊逐字不变',
+      off.QueueInertia.length === 4 && Math.abs(off.QueueInertia[0] - 1.15) < 1e-9 && on.QueueInertia[0] === 1.0
+      && off.QueueInertia.slice(1).join() === on.QueueInertia.slice(1).join(),
+      `惯性 ${off.QueueInertia.map(x => x.toFixed(3)).join('/')} → ${on.QueueInertia.map(x => x.toFixed(3)).join('/')}`);
+    check('封顶不动份额账：山寨只截惯性这一格，S 与四摊 share 逐字不变（3.13 红线：竞争层不许开新口子）',
+      Math.abs(offRet.S - onRet.S) < 1e-12 && offRet.share.join() === onRet.share.join(),
+      `S ${offRet.S.toFixed(6)}｜份额 ${offRet.share.map(x => x.toFixed(4)).join('/')}`);
+  }
+
+  // 4) 收购邀约：纯演出（spec §一.2「无机械效果、配一条留言、不设分支不设报价数值」）
+  {
+    const s = newGame(SEED);
+    s.NP = 4800000;
+    const before = clone(s);
+    const r = resolveChoice(s, EV('evt_s_buyout'), null);
+    const watched = ['Cash', 'NP', 'Rep', 'R', 'R_v', 'L', 'C', 'H', 'Risk', 'RiskShort', 'Q', 'StockSoup',
+      'd0_buff_mult', 'd0_buff_days', 'next_day_traffic_mult', 'event_demand_mult', 'CopycatDays', 'PricewarDays'];
+    const moved = watched.filter(k => JSON.stringify(before[k]) !== JSON.stringify(s[k]));
+    check('收购邀约一分子钱都不动：明账 / 暗线 / 竞争层格子全等，只多一条 ① 类强制留言，且是单按钮（actions 空）',
+      moved.length === 0 && r.action === null && s.today.forcedComments.length === 1
+      && EV('evt_s_buyout').actions.length === 0 && EV('evt_s_buyout').open.length === 1,
+      moved.length ? `动了 ${moved.join('/')}` : `留言「${s.today.forcedComments[0]}」`);
+    check('一次性：触发后 condition 里的 !EVT? 当场自锁（NP 仍达标也抽不到），冷却再兜一层 999 日',
+      evalCondition(EV('evt_s_buyout').condition, s) === false
+      && s.Cooldowns.evt_s_buyout === s.Day + 999);
+  }
+
+  // 5) 粉坊断货：只次日、四档全拒、不掷随机、柜里存量照卖
+  {
+    const s = newGame(SEED);
+    s.Day = 5;
+    resolveChoice(s, EV('evt_d_stockout'), null);
+    check('第 2 步的晨间情报写的是「明天」：落地当刻 today.delist 仍是空的（今日照旧能囤粉）',
+      s.pendingDelist === 'NS' && !s.today.delist);
+    beginDay(s); const d1 = s.today.delist, pending1 = s.pendingDelist;
+    beginDay(s); const d2 = s.today.delist;
+    check('下架只次日：第 1 步结转成真、用完即清', d1 === 'NS' && pending1 === null && d2 === null,
+      `D+1 ${d1 || '无'}｜D+2 ${d2 || '无'}`);
+    const q = newGame(SEED); beginDay(q); q.today.delist = 'NS'; q.C = 5; q.Day = 20;
+    const counters = JSON.stringify(q.streamCounter);
+    const nsOut = ['NS1', 'NS2', 'NS3', 'NS6'].map(k => skuAvailable(q, SKU_BY_ID[k], makeRng(q)));
+    check('「全档下架」= 粉面四档一起不收（正经 / 批发 / 清仓 / 强哥全 false），别的品类不受影响',
+      nsOut.every(v => v === false) && skuAvailable(q, SKU_BY_ID['MB1'], makeRng(q)) === true
+      && skuAvailable(q, SKU_BY_ID['VG3'], makeRng(q)) === true, nsOut.join('/'));
+    check('下架判定不吃随机：四档问一遍，supply 子流一次都没抽（已签带的随机轨不漂）',
+      JSON.stringify(q.streamCounter) === counters);
+    const sell = newGame(SEED); beginDay(sell); sell.today.delist = 'NS';
+    sell.Batches = SOLID_CATS.map(c => ({ cat: c, sku: c + '1', tier: 1, qty: 300, unit: '斤', q: 95,
+      costPerUnit: 5, hasReceipt: 1, day: sell.Day }))
+      .concat([{ cat: 'SP', sku: 'SP1', tier: 1, qty: 400, unit: '份', q: 95, costPerUnit: 1, hasReceipt: 1, day: sell.Day }]);
+    recomputeStock(sell);
+    lockTradingDay(sell, { priceTier: 'standard' });
+    runDay(sell, [], () => ({}), makeRng(sell));
+    check('下架挡买不挡卖：柜里的粉照样在第 7 步出菜（soldJin.NS > 0），缺口由 ω/Ω 与 7f 溢出吸收',
+      sell.today.soldJin.NS > 0 && sell.StockSolid.NS < 300, `售出 NS ${sell.today.soldJin.NS} 斤`);
+  }
+
+  // 6) 跑表线跟着玩家看得见的那面货架走：断货日 NS 零进货，且六条在真实线上确实各自触发过
+  {
+    const M2 = { labor: true, competition: true, eventScope: 'full' };
+    const lines = [...Object.values(REF_STRATEGIES),
+      ...Object.values(STRATEGIES).map(s => ({ ...s, buyFacilities: true, upgrade: true, buyout: false }))];
+    const hits = Object.fromEntries(SIX.map(e => [e.id, 0]));
+    const bad = [];
+    const nsBad = [];
+    let delistDays = 0;
+    for (const strat of lines) {
+      for (let i = 0; i < 6; i++) {
+        const seed = SEED + i * 977;
+        const r = simulate(seed, 200, strat, 'headless',
+          { ...M2, buy: 'appc', additive: strat.key === 'ref3' ? 'more' : 'none' });
+        const seen = new Set();
+        for (const d of r.log) for (const id of [d.pre, d.morning, d.evening]) if (id) seen.add(id);
+        for (const e of SIX) if (seen.has(e.id)) hits[e.id]++;
+        for (const rep of r.state.DailyReports) {
+          if (rep.delist === 'NS') {
+            delistDays += 1;
+            if (rep.purchasedJin.NS > 0) nsBad.push(`${seed}D${rep.day} 买了 ${rep.purchasedJin.NS} 斤`);
+          }
+        }
+        if (!bridgeCheck(r.state).ok) bad.push(`${seed}/${strat.key} 现金桥不平`);
+      }
+    }
+    check('spec §三：六条各自至少 1 次种子实测触发（不造态，6 条线 × 6 颗种子 × 200 日）',
+      SIX.every(e => hits[e.id] > 0) && bad.length === 0,
+      SIX.map(e => `${e.id.replace('evt_', '')} ${hits[e.id]}场`).join('　') + (bad.length ? `／${bad.join('、')}` : ''));
+    check('跑表线不买市场拒收的货：全部断货日 NS 进货为零，且这些日子确实出现过（不是一句空判）',
+      delistDays > 0 && nsBad.length === 0,
+      `${delistDays} 个断货日、NS 零进货${nsBad.length ? '／' + nsBad.join('、') : ''}`);
+  }
+
+  // 7) 汤锅裂了：补锅一笔钱 / 将就次日封顶减半
+  {
+    const mk = on => {
+      const s = newGame(SEED);
+      beginDay(s);
+      s.Batches = SOLID_CATS.map(c => ({ cat: c, sku: c + '1', tier: 1, qty: 300, unit: '斤', q: 95,
+        costPerUnit: 5, hasReceipt: 1, day: s.Day }))
+        .concat([{ cat: 'SP', sku: 'SP1', tier: 1, qty: 20, unit: '份', q: 95, costPerUnit: 1, hasReceipt: 1, day: s.Day }]);
+      recomputeStock(s);
+      s.today.soupHalf = on;
+      lockTradingDay(s, { priceTier: 'standard' });
+      return runDay(s, [], () => ({}), makeRng(s));
+    };
+    const a = mk(false), b = mk(true);
+    check('拿盆将就 = 第 7c-2 步那条「可售份数上限」×0.5（同一格封顶、不新造系统），卖出的碗数跟着减半',
+      a.bowls > 0 && b.bowls > 0 && Math.abs(a.bowls - 2 * b.bowls) < 0.05 && b.soupSoldOut === true,
+      `封顶前 ${a.bowls} 碗 → 封顶后 ${b.bowls} 碗（汤底 20 份）`);
+    const p = newGame(SEED);
+    resolveChoice(p, EV('evt_d_pot'), 'improvise');
+    beginDay(p); const t1 = p.today.soupHalf;
+    beginDay(p); const t2 = p.today.soupHalf;
+    check('将就也只次日：pendingSoupHalf → 第 1 步结转 → 第三天自己清掉',
+      p.pendingSoupHalf === false && t1 === true && t2 === false, `${t1}/${t2}`);
+    const cashBefore = CASH0;
+    const q = newGame(SEED);
+    const r = resolveChoice(q, EV('evt_d_pot'), 'patch');
+    check('花钱补锅走事件账晚间一栏（现金桥口径）：当场 −180 元、eventCashEvening 同步记一笔、NP 在第 11 步才吃这一笔',
+      q.Cash === cashBefore - 18000 && q.today.eventCashEvening === -18000
+      && r.judgment === null && q.NP === 0, `现金 ${(q.Cash / 100).toFixed(2)} 元｜事件账 ${(q.today.eventCashEvening / 100).toFixed(2)}`);
+  }
+
+  // 8) 吃坏肚子来理论：双分支、双入池路、近 3 日窗口
+  {
+    const C = EV('evt_d_complaint');
+    const s = newGame(SEED);
+    s.Cash = 10000;
+    check('赔礼分支 260 元掏不起就置灰（spec「照事件通则」→ gate:afford），硬扛分支不吃这道门',
+      isActionAffordable(s, C.actions[0]) === false && isActionAffordable(s, C.actions[1]) === true
+      && (s.Cash = 30000, isActionAffordable(s, C.actions[0]) === true));
+    const ap = newGame(SEED);
+    resolveChoice(ap, C, 'apologize');
+    check('赔礼道歉：现金 −260 + Rep −2 + 一条致歉向留言，不动次日客流',
+      ap.Cash === CASH0 - 26000 && ap.Rep === REP0 - 2
+      && ap.today.forcedComments.length === 1 && ap.next_day_traffic_mult === 1.0,
+      `Rep ${ap.Rep}｜留言「${ap.today.forcedComments[0]}」`);
+    const dn = newGame(SEED);
+    resolveChoice(dn, C, 'deny');
+    check('硬扛不认：Risk +8、Rep −5、次日 D0 ×0.92（走 next_day_traffic_mult 那一格，与「当场要钱」×0.85 同一条通道）',
+      dn.Risk === 8 && dn.Rep === REP0 - 5 && dn.next_day_traffic_mult === 0.92,
+      `Risk ${dn.Risk}｜Rep ${dn.Rep}｜明日乘数 ${dn.next_day_traffic_mult}`);
+    const d0ratio = mult => {
+      const s2 = newGame(SEED);
+      beginDay(s2);
+      s2.next_day_traffic_mult = mult;
+      s2.Batches = SOLID_CATS.map(c => ({ cat: c, sku: c + '1', tier: 1, qty: 300, unit: '斤', q: 95,
+        costPerUnit: 5, hasReceipt: 1, day: s2.Day }))
+        .concat([{ cat: 'SP', sku: 'SP1', tier: 1, qty: 400, unit: '份', q: 95, costPerUnit: 1, hasReceipt: 1, day: s2.Day }]);
+      recomputeStock(s2);
+      lockTradingDay(s2, { priceTier: 'standard' });
+      runDay(s2, [], () => ({}), makeRng(s2));
+      return s2;
+    };
+    const one = d0ratio(1.0), nine = d0ratio(0.92);
+    check('×0.92 落在第 7a 步的 D0 上、且只用一次就复位',
+      Math.abs(nine.today.D0 - one.today.D0 * 0.92) < 1e-9 && nine.next_day_traffic_mult === 1.0,
+      `D0 ${one.today.D0.toFixed(3)} → ${nine.today.D0.toFixed(3)}`);
+    // 双权重：近 3 日出了品质问题 → weight，没出 → baseWeight（同一条事件的罕见路）
+    const wq = sig => { const s3 = newGame(SEED); s3.Day = 6; Object.assign(s3, sig); return weightOf(s3, C); };
+    const clean = wq({ Q: 80, AdditiveTier: 'none' });
+    const badQ = wq({ Q: 40 });
+    const cheap = (() => { const s4 = newGame(SEED); s4.Day = 6; s4.today.purchases = [{ cat: 'VG', tier: 3 }]; return weightOf(s4, C); })();
+    const more = wq({ Q: 80, AdditiveTier: 'more' });
+    check('spec §二.4 的「双路入池」：近 3 日任一（当日 Q<45 / 特价或特供料 / 多掺）→ weight 7，一条都没出 → baseWeight 1 的罕见路',
+      C.weight === 7 && C.baseWeight === 1 && badQ === 7 && cheap === 7 && more === 7 && clean === 1,
+      `干净 ${clean}｜Q40 ${badQ}｜特价 ${cheap}｜多掺 ${more}`);
+    const hist = w => { const s5 = newGame(SEED); s5.Recent3 = w; s5.Q = 90; return s5; };
+    check('近 3 日窗口读的是「当日 + 前两日」：历史里的坏日子还在窗口内，第三日之后翻篇',
+      evalCondition(C.weightCond, hist([{ day: 1, q: 40, cheap: false, add: false }])) === true
+      && evalCondition(C.weightCond, hist([{ day: 1, q: 40, cheap: false, add: false }, { day: 2, q: 90, cheap: false, add: false }])) === true
+      && evalCondition(C.weightCond, hist([
+        { day: 1, q: 90, cheap: false, add: false }, { day: 2, q: 90, cheap: false, add: false }])) === false,
+      '窗口只数三条，多出来的最老那条自动掉出去');
+    const rolled = newGame(SEED);
+    for (let i = 0; i < 6; i++) { beginDay(rolled); nightClose(rolled, makeRng(rolled), null, null); }
+    check('窗口随第 12 步滚存、长度封顶 3（不随存档越长越大）',
+      rolled.Recent3.length === 3 && rolled.Recent3.every(d => Number.isFinite(d.q)),
+      rolled.Recent3.map(d => `D${d.day}:Q${d.q}`).join(' '));
+    check('罕见路仍带 Day≥3 地板：定稿 §四「压力后置」+ 回签审复 §一.1（负面机制第 3 天之后才解锁）是正文级口径，批内简报不覆盖它',
+      C.condition === 'Day>=3' && evalCondition(C.condition, Object.assign(newGame(SEED), { Day: 1 })) === false
+      && evalCondition(C.condition, Object.assign(newGame(SEED), { Day: 3 })) === true);
+  }
+
+  // 9) 测评号探店：品质门槛 + buff 合并 + 小刘人物
+  {
+    const B = EV('evt_d_blogger');
+    const mkState = (q, tier) => {
+      const s = newGame(SEED);
+      s.Day = 8; s.Tier = tier; s.Q = q;
+      s.Recent3 = [{ day: 6, q, cheap: false, add: false }, { day: 7, q, cheap: false, add: false }];
+      return s;
+    };
+    check('近 3 日平均 Q≥65 且 Tier≥2 才入池：Q 不够根本抽不到（没有惩罚版），档位不够也抽不到',
+      evalCondition(B.condition, mkState(70, 2)) === true && evalCondition(B.condition, mkState(60, 2)) === false
+      && evalCondition(B.condition, mkState(90, 1)) === false,
+      `Q 70/档 2 → ${evalCondition(B.condition, mkState(70, 2))}｜Q 60 → ${evalCondition(B.condition, mkState(60, 2))}`);
+    const s = newGame(SEED);
+    s.d0_buff_mult = 1.2; s.d0_buff_days = 3;
+    resolveChoice(s, B, null);
+    check('探店落地：Rep +5 进暗账、明账是 ×1.10 持续 3 日的 d0Buff，与既有 buff 按 E 表通用规则「乘入 + 天数取最大」合并',
+      s.Rep === REP0 + 5 && Math.abs(s.d0_buff_mult - 1.2 * 1.10) < 1e-9 && s.d0_buff_days === 3,
+      `buff ${s.d0_buff_mult.toFixed(4)}/${s.d0_buff_days} 日｜Rep ${s.Rep}`);
+    check('人物用附录 H 既有 c05「小刘（测评号）」、不新造人；文案与宣传队那条 ① 类留言错位（各写各的）',
+      /小刘/.test(B.text) && B.actions.length === 0 && B.effect_hidden.length === 1 && B.open.length === 1);
+  }
+
+  // 10) 红线：六条新行的玩家可见文本不许出现暗线数值与道德判词
+  {
+    const strings = SIX.flatMap(e => [e.text].concat((e.actions || []).map(a => a.label))
+      .concat((e.actions || []).flatMap(a => (a.open || []).filter(o => o.forcedComment).map(o => o.forcedComment)))
+      .concat((e.open || []).filter(o => o.forcedComment).map(o => o.forcedComment)));
+    const forbidden = /Rep|Rep\s*[≥>=]|Risk|风声|暗线|良心|黑心|缺德|道德|口碑值|概率|权重|触发|系统|判定式|Q\s*[≥><=]|品质分/;
+    const money = strings.filter(x => /[0-9０-９]/.test(x));
+    check('六条新行的可见文本零命中暗线数值与道德判词；带数字的只有两笔明账钱（−260 / −180 在按钮上）',
+      strings.every(x => !forbidden.test(x)) && money.length === 2 && money.every(x => /−\d{3}/.test(x)),
+      money.join(' / '));
+    check('食安题材边界（正文 :370）：吃坏肚子那条只写暧昧归因，不出现呕吐 / 就医 / 确诊字样，也不给可执行暗示',
+      /说不清|是不是/.test(EV('evt_d_complaint').text)
+      && !/呕吐|拉肚子|医院|就医|确诊|输液|中毒|配?方|配比/.test(strings.join('')),
+      EV('evt_d_complaint').text);
+    check('玩梗边界（正文 :372）：小刘那条不影射真实测评账号、不点名任何平台或 UP 主',
+      !/小红书|抖音|B站|微博|快手|UP主|博主|测评号/.test(EV('evt_d_blogger').text), EV('evt_d_blogger').text);
+  }
+
+  // 11) 已签带零扰动：m1 口径下六条新行不进池，抽取序列与本批之前同轨
+  {
+    const s = newGame(SEED);
+    s.eventScope = 'm1'; s.Day = 5; s.Rep = 90; s.NP = 99999999; s.Tier = 6; s.Risk = 90; s.Q = 100;
+    const ids = [];
+    for (let i = 0; i < 60; i++) {
+      const e = drawEvent(s, 'evening', makeRng(s));
+      if (e) ids.push(e.id);
+      s.Day += 1;
+    }
+    check('eventScope="m1" 时六条新行全部进不了池（门槛全造满也不抽）：已签发的 M1 带不受本批影响',
+      ids.every(id => EVENT_BY_ID[id].ship === 'M1'), `60 抽里出现 ${[...new Set(ids)].join('/')}`);
+    const pre = [];
+    for (let i = 0; i < 60; i++) {
+      const e = drawEvent(s, 'morning_pre', makeRng(s));
+      if (e) pre.push(e.id);
+    }
+    check('晨间情报通道同一条理由：m1 口径下断货那条（morning_pre / M2）也不进池',
+      pre.every(id => EVENT_BY_ID[id].ship === 'M1'), `${[...new Set(pre)].join('/') || '无'}`);
+  }
+
+  // 12) 裁定 63a2ec8 ⑫：脏档只兜这一处、只这一种；引擎侧的断言是「读档不许凭空造情境」
+  {
+    const store = new Map();
+    globalThis.localStorage = {
+      getItem: k => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: k => store.delete(k),
+    };
+    const good = newGame(SEED);
+    beginDay(good);
+    good.today.scenario = null;                            // 模拟写坏：当日情境这一格没了
+    const raw = JSON.parse(JSON.stringify(good));
+    raw.saveVersion = 'v4.9.2-cal.1';
+    for (const k of ['CopycatDays', 'pendingDelist', 'pendingSoupHalf', 'Recent3']) delete raw[k];
+    delete raw.today.copycatActive; delete raw.today.delist; delete raw.today.soupHalf;
+    store.set(STORAGE_KEY, JSON.stringify(raw));
+    const back = loadGame();
+    delete globalThis.localStorage;
+    check('旧档缺第八批四样按「没被山寨过、今天没断货、近三日用空窗」补齐，不作废（裁定 9a959bd §一）',
+      back !== null && back.CopycatDays === 0 && back.pendingDelist === null
+      && back.pendingSoupHalf === false && Array.isArray(back.Recent3) && back.Recent3.length === 0
+      && back.today.copycatActive === false && back.today.delist === null && back.today.soupHalf === false);
+    check('兜底不许在读档里凭空造一份情境：today.scenario 缺就让它缺着，界面据此路由回 beginDay（裁定 ⑫ 只许这一处、这一种）',
+      back !== null && (back.today.scenario === null || back.today.scenario === undefined)
+      && back.dayStarted === true, `scenario ${JSON.stringify(back.today.scenario)}`);
+    check('脏档进引擎入口就自愈：beginDay 重跑第 1 步把当日情境补齐，晨间屏读得到东西',
+      (() => {
+        const s = back;
+        beginDay(s);
+        return !!s.today.scenario && !!s.today.forecast && s.today.scenario.weather.id !== undefined;
+      })());
   }
 }
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，

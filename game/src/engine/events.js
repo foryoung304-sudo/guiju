@@ -26,9 +26,12 @@ function eligible(state, ev, timing) {
 
 // weight_shift（正文 5.3「事件结算后立即生效；持续到目标事件被触发为止，或满 7 天自动过期」）：
 // 同目标多份取最大值不叠加，故写入时比大小；读取时过期即当作不存在
+// spec-event-pool-6 §二.4 带来的两个新键（清单外空白，按 hard / auto_branch / scoreCheck 同例扩 Schema）：
+// 行上有 weightCond 时，命中走 weight、没命中走 baseWeight —— 一条事件两条入池路、两个权重，不拆成两行。
 export function weightOf(state, ev) {
   const shift = state.WeightShifts[ev.id];
   if (shift && state.Day <= shift.expireDay) return shift.weight;
+  if (ev.weightCond !== undefined) return evalCondition(ev.weightCond, state) ? ev.weight : ev.baseWeight;
   return ev.weight;
 }
 
@@ -125,6 +128,12 @@ export function applyOps(state, ops, slot) {
       state.XiaodouAbsentDays = op.xiaodouAbsentDays;
       if (op.poached) state.PoachedAway = true;
     }
+    // spec-event-pool-6 §一.1 山寨摊：存续日数记账，实际落点在第 7b 步的排队惯性封顶（competition.js）
+    if (op.copycatDays !== undefined) state.CopycatDays = op.copycatDays;
+    // §二.3 粉坊断货 / §二.5 拿盆将就：两条都是「今日写、次日第 1 步结转成真」的明日效果，
+    // 与 next_day_traffic_mult 同一走法（第 2 / 第 10 步写的东西不许今天就生效）
+    if (op.delistNextDay !== undefined) state.pendingDelist = op.delistNextDay;
+    if (op.soupHalfNext) state.pendingSoupHalf = true;
   }
 }
 

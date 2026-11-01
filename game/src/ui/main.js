@@ -251,6 +251,9 @@ function resume() {
   // 夜里存档（第 11 步已过账）必须先判「今天已经结过」，否则续档落在结算屏、再点一次「打烊」
   // 会把同一天的 NP／固定支出／结局检查重复入账，账本当场不平
   if (saved === 'night' || (state.DailyReports.length && state.DailyReports[state.DailyReports.length - 1].day === state.Day)) return go('night');
+  // 裁定 63a2ec8 ⑫：批准的脏档兜底只有这一处、只有这一种兜法。真机存档写坏 / 写一半时 today.scenario 会缺，
+  // 晨间屏一读到它就崩。缺 → 按「当日尚未 beginDay」处理，走引擎自己的入口（newDay = 第 1–2 步）重跑，不新造行为。
+  if (!state.today || !state.today.scenario) return newDay();
   if (state.today.revenueCents !== undefined) { orders = state.HandOrders; return go('settle'); }
   if (state.today.locked) return go('weigh');
   if (state.today.prepped) return go('lock');
@@ -275,7 +278,11 @@ function defaultDraft() {
   // 附录 D.1 的默认值只是界面初值：照昨天卖掉的斤数起，卖断货的那天得自己往上加
   // 实测问题 #7：初值按 0.1 斤出（1.476 斤不像买菜）；汤底按份出整数
   const out = {};
-  for (const c of SOLID_CATS) out[c + 1] = round01(state.YesterdaySoldJinByCat?.[c] || 0);
+  for (const c of SOLID_CATS) {
+    // spec-event-pool-6 §二.3：今天市场层不收的那一档，草稿也不给它预填（货架上根本没有这一行的按钮）
+    if (c === state.today.delist) continue;
+    out[c + 1] = round01(state.YesterdaySoldJinByCat?.[c] || 0);
+  }
   out.SP1 = Math.round(state.YesterdaySoup || 0);
   return out;
 }
@@ -852,8 +859,12 @@ function shelfRow(cat, forecast) {
   // §七 采购呈现：强哥线开了但今天这一类他没带——只给一句话，不标价、不留能扣钱的按钮
   const absent = all.some(s => s.tier === 6) && state.today.qianggeCats && !list.some(s => s.tier === 6);
   const have = cat === 'SP' ? state.StockSoup : state.StockSolid[cat];
+  // spec-event-pool-6 §二.3 断货日：这一档四家全下架（skuAvailable 已经把按钮都挡了），
+  // 空货架得说清为什么空、以及柜里的货照常卖
+  const delist = state.today.delist === cat
+    ? '<span class="muted">今天全档下架 · 柜里的照卖</span>' : '';
   return `<div class="panel"><div class="row"><h3>${CAT[cat].name}${cat === 'SP' ? '（份）' : '（斤）'}</h3>
-      <span class="muted">柜里 ${have} · 试算今天能出 ${forecast.capped.toFixed(0)} 碗</span></div>
+      <span class="muted">柜里 ${have} · 试算今天能出 ${forecast.capped.toFixed(0)} 碗</span>${delist}</div>
     <div class="shelf">${list.map(s => skuCard(cat, s)).join('')}${absent ? absentCard(cat) : ''}</div></div>`;
 }
 

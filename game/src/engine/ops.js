@@ -51,8 +51,10 @@ export function runBusiness(state, handResults, rng) {
   state.event_reserve_bowls = 0;
   state.reg_reserved_bowls = 0;
 
-  // 7c-2 汤底封顶（耗汤份数 = 情境系数 T）：全日可售碗数（含亲手单）都吃这个上限
-  const soupCapBowls = state.StockSoup / sc.T;
+  // 7c-2 汤底封顶（耗汤份数 = 情境系数 T）：全日可售碗数（含亲手单）都吃这个上限。
+  // spec-event-pool-6 §二.5「拿盆将就」次日 ×0.5 就乘在这一格上限上（正本写的就是「可售份数上限」，
+  // 不动库存、不动 COGS，也不新造一套损耗系统）
+  const soupCapBowls = state.StockSoup / sc.T * (t.soupHalf ? 0.5 : 1);
   const D_eff = Math.min(D, soupCapBowls);
   if (D_eff < D) t.soupSoldOut = true;
   const bowlCap = Math.max(0, Math.round(D_eff));

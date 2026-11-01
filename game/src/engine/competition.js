@@ -87,7 +87,11 @@ export function sharesAndS(state) {
   const share = shareOf(A) ?? state.Share.map(() => C.shareBase);
   const S = clamp((share[0] / C.shareBase), C.sBand[0], C.sBand[1]);
   // 附录 G.1：系数不取整——S、份额、惯性一律留原值，界面显示时再格式化
-  state.QueueInertia = share.map(x => clamp(x / C.shareBase, C.inertiaBand[0], C.inertiaBand[1]));
+  const inertia = share.map(x => clamp(x / C.shareBase, C.inertiaBand[0], C.inertiaBand[1]));
+  // spec-event-pool-6 §一.1 山寨摊：存续日内本摊排队惯性封顶 1.0（份额再高也不涨惯性），其余三摊照旧。
+  // 只改惯性这一格、不碰 S 的钳位带与份额账，也不新增参数（3.13 红线：竞争只走价格 / 排队 / 传闻）
+  if (state.today.copycatActive) inertia[0] = Math.min(inertia[0], 1.0);
+  state.QueueInertia = inertia;
   state.Share = share;
   return { S, A, share };
 }

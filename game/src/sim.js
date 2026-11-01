@@ -36,12 +36,16 @@ const round3 = x => Math.round(x * 1000) / 1000;
 
 // 组篮：按附录 C 的预计碗数，用第 7 步的品类拆分比例（ω/Ω）摊到六品类
 // ——玩家真实的动作是"照试算买"，不是照昨天的售出量抄（D.1 的默认值只是界面初值，卖断货的那天必须手动加）
+// spec-event-pool-6 §二.3 断货日：市场层不收的那一档，模拟线也不买（跑表按玩家看得见的那面货架下单，
+// 引擎侧不校验上架与否 → 界面挡住的货这里必须自己挡，否则跑表拿到的篮子玩家根本组不出来）。
+// 只去掉那一行、不把 ω 重新归一：剩下的四档照原比例买，缺口留给第 7 步与 7f 单轮溢出吸收（= 玩家看得见的少卖）
 function picksFor(state, tier, bowls) {
   const sc = state.today.scenario;
   const omega = {};
   for (const c of SOLID_CATS) omega[c] = CAT[c].share * sc.catCoef[c];
   const Omega = SOLID_CATS.reduce((s, c) => s + omega[c], 0);
-  const picks = SOLID_CATS.map(c => ({ sku: SKU_BY_ID[c + tier], qty: round3(bowls * sc.avgJin * omega[c] / Omega) }));
+  const picks = SOLID_CATS.filter(c => c !== state.today.delist)
+    .map(c => ({ sku: SKU_BY_ID[c + tier], qty: round3(bowls * sc.avgJin * omega[c] / Omega) }));
   picks.push({ sku: SKU_BY_ID['SP' + tier], qty: round3(bowls * sc.T) });
   return picks;
 }
@@ -94,6 +98,10 @@ function chooseFor(ev, strategy) {
     case 'evt_s_insp': return yieldAll ? 'destroy' : 'keep';
     // E.9 挖角：让步 = 当场掏 1,800 再加每日 15 元；不让步 = 让他走（缺席 14 日 + 产能 ×0.90 + Rep −2）
     case 'evt_s_poach': return yieldAll ? 'raise' : 'let_go';
+    // 第八批两条二选一：让步 = 掏钱那一支（赔礼 260 / 补锅 180），不让步 = 扛着那一支（硬扛 / 拿盆将就）。
+    // 写死这两行而不是靠 default，是为了让「不让让步」那条线也摸得到分支；掏不起时跑表不改道（置灰只在界面，事件通则）
+    case 'evt_d_complaint': return yieldAll ? 'apologize' : 'deny';
+    case 'evt_d_pot': return yieldAll ? 'patch' : 'improvise';
     // evt_s_insp2 两分支同账、evt_d_021 两分支逐字一样 → 走 default 取第一条（出示票据 / 登记）
     default: return ev.actions[0].id;
   }

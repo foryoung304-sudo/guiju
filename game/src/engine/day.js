@@ -6,6 +6,7 @@ import { forecastBasket, settleDay, bridgeCheck } from './ledger.js';
 import { runBusiness, priceCoefFor } from './ops.js';
 import { applyShadow } from './shadow.js';
 import { drawEvent, resolveChoice, resolvePendingReserve, expireShifts } from './events.js';
+import { pushRecent } from './recent.js';
 import { drawHandOrders, settleWeighing } from './weigh.js';
 import { REGULAR_SLOTS } from '../data/customers.js';
 import { judgeBlanch, signalTier } from './blanch.js';
@@ -36,6 +37,13 @@ export function beginDay(state) {
   }
   state.PriceIndex = Math.round((state.PriceIndex * (state.Day >= 100 ? 1.003 : 1.0)) * 1000) / 1000;
   state.today = blankToday();
+  // spec-event-pool-6 的三条「昨日写下、今日成真」在第 1 步结转（与 next_day_traffic_mult 同一时点）：
+  // §二.3 明天没粉 / §二.5 拿盆将就都用完即清，§一.1 山寨摊按「存续 N 日」计数、递减写法照抄 PricewarDays
+  // （morningRivals 里先写 today 标志再递减 → 置 N 就生效 N 个营业日，两条同轨）。
+  if (state.pendingDelist) { state.today.delist = state.pendingDelist; state.pendingDelist = null; }
+  if (state.pendingSoupHalf) { state.today.soupHalf = true; state.pendingSoupHalf = false; }
+  state.today.copycatActive = state.CopycatDays > 0;
+  if (state.CopycatDays > 0) state.CopycatDays -= 1;
   // 正文 3.14 第 1 步「公布明日预报及同行信息」+ 附录 G.3：王老板出事抽取、跟价式、价格战倒计时、第 100 天起的加压。
   // 挂在 blankToday 之后：竞争层要往 today 写「今日是否开打」，写在结转之前会被当日空白覆盖掉
   morningRivals(state, rng);
@@ -217,6 +225,8 @@ export function nightClose(state, rng, ev, actionId) {
   }
   state.CommentLog = state.CommentLog.slice(-30);
   state.DailyReports.push(dailyReport(state));
+  // spec-event-pool-6 第 4 / 6 条的「近 3 日」窗口随 DailyReports 同一处滚存（第 12 步）
+  pushRecent(state);
   state.PriceCoefYday = state.PriceCoefToday;
   state.YesterdayScenario = state.today.scenario;
   state.YesterdayRamp = state.today.rampCoef;
@@ -305,6 +315,10 @@ export function dailyReport(state) {
     eventNetCents: t.eventNetCents, cash: state.Cash, debt: state.DebtSupplier,
     // 附录 E 的「结算页多一行」文字与检查当晚的判定留痕（Score 与档位属明账，Risk/Rep 的数值不进面板）
     notes: [...(t.notes || [])], inspection: t.inspection || null,
+    // spec-event-pool-6 的三条当日事实留痕（后台字段，不进任何玩家面板）：
+    // 「哪一天市场拒收粉面」「哪一天汤被封顶了一半」「哪一天山寨摊还站着」要能被逐日账一眼数出来，
+    // 不然验收「六条各自至少 1 次种子实测触发」只能靠翻 EventHistory 猜存续期
+    delist: t.delist || null, soupHalf: !!t.soupHalf, copycatActive: !!t.copycatActive,
     comments: t.comments.map(c => c.text),
     soldOut: [...t.soldOutCats], spillBowls: t.spillBowls, shortWeighCount: t.shortWeighCount,
     soldJin: { ...t.soldJin }, soupUsed: t.soupUsed,

@@ -24,6 +24,10 @@ function modMatches(mod, sku) {
 
 // 附录 D.1 第 2 条：第六档的唯一购买门 = Day >= 8 & C >= 3；上架品类由 supply 子流抽 2–4 个
 export function skuAvailable(state, sku, rng) {
+  // spec-event-pool-6 §二.3「明天没粉」：市场层落点，下架品类四档一起不收（今日第 2 步的晨间情报就是为这一格留的囤货窗口）。
+  // 排在第六档抽取之前且不掷随机 → 断货日与非断货日走同一条 supply 流，已签带的随机轨不漂。
+  // 只挡买、不挡卖：柜里已有的照常在第 7 步出菜。
+  if (state.today.delist && sku.cat === state.today.delist) return false;
   if (sku.tier !== 6) return true;
   if (!evalCondition('Day>=8 & C>=3', state)) return false;
   if (!state.today.qianggeCats) {

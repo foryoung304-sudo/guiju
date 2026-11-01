@@ -1,6 +1,7 @@
 // 定稿 §七.2 + 回签审复 §七 回签证据表：node sweep_calibration.js
 // A. 压力测试①（门 = 本体格 5 种子全落带；72 组合降为诊断）　B. M3 三策略　C. 六条线 120 天结局
 // D. 破产路径诊断 + R8 停滞线观察　E. 节奏对账　F. 坏事事件后置归因　G. 回签审复 §七 七项清单逐项
+// H/I/J/K/L = M2 在场证据（区间未签 → 只出数不判红绿）；其中 L 是第八批事件池补的六条自己
 // 口径登记（正文 §〇.2 空缺，回签审复已签复的部分标注在下列各行）：
 //   · "72 组合" 原文未定义维度，本轮 = 天气 4 × 定价 3 × 货源 3 × 让步 2（审复 §二：作为诊断口径保留并注明定义）
 //   · 进货口径两条都跑：appc = 附录 C 试算碗数（玩家看得见的数）／d0 = 3.14 第 7 步 D0 公开项
@@ -420,19 +421,23 @@ function sweepI() {
   console.log('  ⚠️ 竞争在场口径要店主另立区间才进验收门；本段只说明「S ≡ 1 → S 实算」这一步的盘面代价有多大。');
 }
 
-// ── J. M2 事件池在场证据（附录 E 十二条全开，区间未签 → 只出数不判红绿）──
+// ── J. M2 事件池在场证据（全池开，区间未签 → 只出数不判红绿）──
 // 第五批把池子从 6 行扩到 12 行：事件会改需求（d0_buff）、改现金（罚款/涨薪）、改库存资产（销毁）、
 // 还能当晚直接进结局判定 #1（大检查 Score<35）。基线取「人工 + 竞争都在场、池子仍是 M1 四条」，两边只差事件层。
 // 但位移不等于事件层自身的代价：特殊池过门要多掷一次 chance(DRAW_GATE) 与一次 pickWeighted，
 // 随机流消耗一变，同日抽到的日常、抽签给的票、Risk 的逐日路径都会错开 → 本段只摆出「撞上检查之后盘面变成什么样」，
 // 不当杠杆归因用（真正的归因要把两条线的 rng 流对齐，属另一件事）。
 function sweepJ() {
-  console.log(`\n${line(100)}\nJ. M2 在场口径证据（事件池十二条全开，区间未签 → 只出数不判红绿）\n${line(100)}`);
+  console.log(`\n${line(100)}\nJ. M2 在场口径证据（事件池 ${EVENTS.length} 条全开，区间未签 → 只出数不判红绿）\n${line(100)}`);
   const pool = ['m1', 'full'].map(k => EVENTS.filter(e => (k === 'm1' ? e.ship === 'M1' : true)));
   const byKind = arr => ['坏事', '好事', '中性'].map(k => `${k} ${arr.filter(e => e.kind === k).length}`).join(' / ');
   console.log(`  池子现状：ship='M1' ${pool[0].length} 条（${byKind(pool[0])}）｜全池 ${pool[1].length} 条（${byKind(pool[1])}）`);
   console.log(`  正文 :362 上线必需 = 事件池 ≥18（坏 ≥10 / 好 ≥5 / 中 ≥3）；首更 = ≥30 且逐条数值（正文 :41 列为未定项）`);
-  console.log(`  ⊘ 全池 ${pool[1].length} 条距 ≥18 还差 ${18 - pool[1].length} 条，缺的都是附录 E 里没有数据行的条目 —— 不自行发明数值，已回报待店主给数`);
+  const gap = 18 - pool[1].length;
+  console.log(gap > 0
+    ? `  ⊘ 全池 ${pool[1].length} 条距 ≥18 还差 ${gap} 条，缺的都是附录 E 里没有数据行的条目 —— 不自行发明数值，已回报待店主给数`
+    : `  ✓ 正文 :362 的「上线必需 ≥18」在本批补齐（第八批 +6，坏 +4 / 好 +1 / 中 +1，${byKind(pool[1])} 三档各自过线）；`
+      + `首更那一栏的 ≥30 仍差 ${30 - pool[1].length} 条，那 ${30 - pool[1].length} 条的数值正文 :41 列为未定项，不在本批清单内`);
 
   for (const strat of Object.values(STRATEGIES)) {
     const rows = SEEDS.map(s => {
@@ -475,7 +480,8 @@ function sweepJ() {
   });
   console.log(`  60 日探针（全特价线，池子在场看检查事件真会不会撞上）：`);
   for (const c of probe) console.log(`     ${c}`);
-  console.log('  ⚠️ 本段全部数字不进任何验收门：M2 在场区间未签发，且池子还缺 6 条（缺数不缺口，缺的是数）。');
+  console.log(`  ⚠️ 本段全部数字不进任何验收门：M2 在场区间未签发；池子 ${EVENTS.length} 条已够正文 :362 的上线必需（≥18），`
+    + `首更那 ${Math.max(0, 30 - EVENTS.length)} 条仍缺数、不缺口。`);
   console.log('  ⚠️ 上面三行的位移不等于「事件层的代价」：特殊池过门要多掷一次随机，随机流一变、同日抽到的日常与抽签给的票都错开。'
     + '　要看事件层本身值多少钱，得把两条线的随机流对齐了再比（另事）。');
 }
@@ -528,6 +534,118 @@ function sweepK() {
   console.log('  ⚠️ 本段不进验收门：M2 在场区间未签发；且这里判的是无头线的合成式 closeShop，界面那三个入口各自只判自己那道门（正文 §六 判定归属写死），两者不同轨。');
 }
 
+// ── L. M2 第八批：事件池补六条的在场证据（六条 = spec-event-pool-6，Orange 设计签发；区间未签 → 只出数不判红绿）──
+// J 段问的是「事件池在场，盘面变成什么样」；本段只问第八批这六条自己：
+//   1) 六条在真实线上多久撞一次（触发频次 + 首次落在第几天）
+//   2) 三条「当日事实」类效果在场几天（断货 / 汤封顶 / 山寨存续）—— 这两类不进现金账，只能数留痕
+//   3) 六条在场 vs 六条不在场的账面位移（对照用同一套线、同一批种子；把六条 condition 临时改成永不成立，内存改、跑完还原）
+//   4) 关掉完整池那道开关（eventScope='m1'）后六条的在场次数必须为 0 —— 已签发带的扰动预算是零
+// 读法警告：condition 改判只动「候选清单里有没有这条」，pickWeighted 仍只掷一次随机 →
+//   抽取次数与 A–I 段同轨，但同一个随机数落到的条目会换，故位移里混着「同日抽到别的事件」的错位数。
+function sweepL() {
+  const SIX_IDS = ['evt_s_copycat', 'evt_s_buyout', 'evt_d_stockout', 'evt_d_complaint', 'evt_d_pot', 'evt_d_blogger'];
+  const sixRows = SIX_IDS.map(id => EVENTS.find(e => e.id === id));
+  console.log(`\n${line(100)}\nL. M2 第八批事件池补六条在场证据（人工 + 竞争 + 完整池全开，区间未签 → 只出数不判红绿）\n${line(100)}`);
+  const M2 = { labor: true, competition: true, eventScope: 'full' };
+  const invest = { buyFacilities: true, upgrade: true, buyout: true };
+  const lines = [...Object.values(REF_STRATEGIES), ...Object.values(STRATEGIES).map(s => ({ ...s, ...invest }))];
+  const seeds = SEEDS.slice(0, 3);
+  const opt = strat => ({ buy: 'appc', additive: strat.key === 'ref3' ? 'more' : 'none' });
+  const hist = r => r.state.EventHistory.filter(id => SIX_IDS.includes(id));
+  // 一局 120 日要复用好几次（频次 / 留痕 / 位移 / 存续），先跑一遍存下来
+  const cache = new Map();
+  const full = (li, si) => {
+    const k = `${li}|${si}`;
+    if (!cache.has(k)) cache.set(k, simulate(seeds[si], 120, lines[li], 'headless', { ...M2, ...opt(lines[li]) }));
+    return cache.get(k);
+  };
+
+  // 1) 触发频次
+  console.log(`  口径：${lines.length} 条线 × 种子 ${seeds.join('/')} × 120 日 = ${lines.length * seeds.length} 局，完整事件池在场`);
+  const total = Object.fromEntries(SIX_IDS.map(id => [id, 0]));
+  const firstDay = Object.fromEntries(SIX_IDS.map(id => [id, []]));
+  lines.forEach((strat, li) => {
+    const c = Object.fromEntries(SIX_IDS.map(id => [id, 0]));
+    seeds.forEach((seed, si) => {
+      const r = full(li, si);
+      for (const id of hist(r)) c[id]++;
+      for (const id of SIX_IDS) total[id] += c[id];
+      // 首次触发日只能从逐日留痕反推：log 里带 pre/morning/evening 三格事件号
+      const dayOf = {};
+      r.log.forEach((d, i) => {
+        for (const id of [d.pre, d.morning, d.evening])
+          if (SIX_IDS.includes(id) && dayOf[id] === undefined) dayOf[id] = i + 1;
+      });
+      for (const id of SIX_IDS) if (dayOf[id] !== undefined) firstDay[id].push(dayOf[id]);
+    });
+    console.log(`     ${strat.name.padEnd(24, '　')}${SIX_IDS.map(id => `${id.replace('evt_', '')} ${c[id]}`).join('／')}`);
+  });
+  const med = a => { const s = [...a].sort((x, y) => x - y); return s.length ? `中位第 ${s[Math.floor(s.length / 2)]} 日（最早第 ${s[0]}，共 ${s.length}/${lines.length * seeds.length} 局）` : '未触发'; };
+  console.log(`  合计：${SIX_IDS.map(id => `${id.replace('evt_', '')} ${total[id]} 场`).join('　')}`);
+  console.log(`  首次触发日（各局取最早那一次，再排中位）：${SIX_IDS.map(id => `${id.replace('evt_', '')} ${med(firstDay[id])}`).join('　')}`);
+  console.log(`     山寨 / 收购是一次性（cooldown 999 + condition 里的 !EVT? 自锁），场次 = 走到门槛的那几局；其余四条靠冷却轮回来凑`);
+
+  // 2) 三条「当日事实」的在场日数
+  let delist = 0, soup = 0, copycat = 0, nsBought = 0;
+  lines.forEach((strat, li) => seeds.forEach((seed, si) => {
+    for (const rep of full(li, si).state.DailyReports) {
+      if (rep.delist === 'NS') { delist++; nsBought += rep.purchasedJin.NS || 0; }
+      if (rep.soupHalf) soup++;
+      if (rep.copycatActive) copycat++;
+    }
+  }));
+  console.log(`  当日事实在场日数（同上 ${lines.length * seeds.length} 局）：断货 ${delist} 日｜汤底封顶 ${soup} 日｜山寨存续 ${copycat} 日`);
+  console.log(`     断货日里 NS 实际进货 ${nsBought.toFixed(2)} 斤（挡买不挡卖：柜里存量照旧在第 7 步出菜）`);
+  console.log(`     ⊘ 汤底封顶 0 日不是没接线，是口径：六条线 yieldAll 全为 true ⇒ 抽到汤锅那条恒走「花钱补锅」，将就那一支一次没选。`);
+  // 2b) 将就那一支要在「不让步」对照线上才看得见（同一份引擎代码，只把 yieldAll 翻成 false）
+  const hard = { ...STRATEGIES.mid, name: '对照线：全平价 + 亲民 + 事件全选硬扛那一支', yieldAll: false };
+  let soupHard = 0, potHard = 0, complaintHard = 0;
+  for (const seed of seeds) {
+    const r = simulate(seed, 120, hard, 'headless', { ...M2, buy: 'appc' });
+    for (const rep of r.state.DailyReports) if (rep.soupHalf) soupHard++;
+    potHard += r.state.EventHistory.filter(id => id === 'evt_d_pot').length;
+    complaintHard += r.state.EventHistory.filter(id => id === 'evt_d_complaint').length;
+  }
+  console.log(`     对照线（yieldAll:false，种子 ${seeds.join('/')} × 120 日 = 3 局）：汤锅触发 ${potHard} 次 → 次日封顶 ${soupHard} 日（少的那几次是撞结局当晚就没第二天了）；`);
+  console.log(`     吃坏肚子触发 ${complaintHard} 次走硬扛那一支（Risk +8 / 次日 D0 ×0.92 的引擎侧断言在回归 §15，这一支不在上表的「在场日数」里）`);
+
+  // 3) 六条在场 vs 不在场的位移
+  const orig = sixRows.map(e => [e, e.condition]);
+  for (const e of sixRows) e.condition = 'Day>=100000';
+  const off = lines.map((strat, li) => seeds.map((seed, si) => {
+    const r = simulate(seed, 120, strat, 'headless', { ...M2, ...opt(strat) });
+    return { d: cum(r.log, 120), days: r.log.length, end: END_NAME[r.state.EndingId] || '未触发', fired: hist(r).length };
+  }));
+  for (const [e, cond] of orig) e.condition = cond;
+  console.log(`  位移（六条在场 − 不在场，120 日累计「经营净额 + 事件账净额」，元｜括号里是在场／不在场的存续日数）：`);
+  console.log(`     读法：这栏的差值由存续长度主导 —— 一条线从「第 11 天破产」变成「跑到第 120 天」，差的就是百日流水，不是六条的净代价；`);
+  console.log(`     六条自己的价签是明账那两笔（260 / 180）加下架、封顶、惯性三件当日事实，上面两张表已经逐日数出来了。`);
+  lines.forEach((strat, li) => {
+    const deltas = seeds.map((seed, si) => cum(full(li, si).log, 120) - off[li][si].d);
+    const dec = deciles(deltas);
+    const days = seeds.map((seed, si) => `${full(li, si).log.length}/${off[li][si].days}`).join(' ');
+    console.log(`     ${strat.name.padEnd(24, '　')}${deltas.map(f2).join(' / ')}　最小 ${f2(dec.min)} 中位 ${f2(dec.p50)} 最大 ${f2(dec.max)}｜存续 ${days}`);
+  });
+  console.log(`     还原自检：condition 改判期间六条在场次数 ${off.flat().reduce((a, x) => a + x.fired, 0)}（应为 0），跑完已逐条还原成表内原文`);
+  console.log(`  存续与结局（种子 ${seeds[0]}，在场 → 不在场）：`);
+  lines.forEach((strat, li) => {
+    const a = full(li, 0), b = off[li][0];
+    console.log(`     ${strat.name.padEnd(24, '　')}存续 ${a.log.length}／${b.days} 日｜结局 ${END_NAME[a.state.EndingId] || '未触发'} → ${b.end}`);
+  });
+
+  // 4) 关掉完整池 → 六条零在场
+  let leak = 0;
+  lines.forEach((strat, li) => seeds.forEach((seed, si) => {
+    leak += simulate(seed, 120, strat, 'headless', { labor: true, competition: true, eventScope: 'm1', ...opt(strat) })
+      .state.EventHistory.filter(id => SIX_IDS.includes(id)).length;
+  }));
+  console.log(`  已签发带扰动：eventScope='m1' 下同 ${lines.length * seeds.length} 局里六条在场次数 ${leak}`
+    + '（ship 过滤在任何一次随机抽取之前 → 本批对已签发带的扰动预算是零，A–I 段读数逐字未动，见 r11 与 r10 的前 389 行 md5 相同）');
+  console.log('  ⚠️ 本段不进验收门：M2 在场区间未签发；位移里混着「抽取次数同轨、但同一个随机数落到的条目换了」的错位数，不是六条本身的净代价。');
+  console.log('  ⚠️ 赔礼 260 / 补锅 180 这两笔在跑表口径里恒走「让步 = 掏钱」那一支（六条线 yieldAll 全为 true，sim.chooseFor 里各写了一行 case）；');
+  console.log('     硬扛 / 将就两支的引擎侧断言在回归 §15，界面侧靠点按钮。掏不起时跑表不改道 —— 置灰只属界面（事件通则）。');
+}
+
 console.log(`M1 定稿 §七.2 回签证据表｜验收带 ${BAND} 元｜种子 ${SEEDS.join('/')}`);
 sweepA();
 sweepB();
@@ -540,3 +658,4 @@ sweepH();
 sweepI();
 sweepJ();
 sweepK();
+sweepL();
