@@ -158,6 +158,16 @@ export const INSPECTION = {
   routineShortCashBuff: { mult: 0.8, days: 2 },
 };
 
+// ── 正文 3.11 烫煮手感参数（v4.9 估值起步、M2 真机调，§〇.1 回签第 7 条）──
+// 五个数全部照原文照录：熟度条 0→100 匀速扫过全程 4.0 秒、绿区 55–78（即 2.2–3.12 秒）、
+// 中心 66.5 的 ±3 以内记「最佳+」。本批只做「开关式实现」（§八 排期收口：上线必需 = 建在代码里、默认关闭；
+// 开启与真机调参在首更），开关是 CONFIG.blanch。
+export const BLANCH = {
+  sweepSec: 4.0,
+  greenLow: 55, greenHigh: 78,
+  center: 66.5, centerBand: 3,
+};
+
 // 附录 J：结局判定用的量纲（ui-spec §一换算表：盘店价 60,000 / 金盆洗手 300,000 / 烧心 Wmax 210 斤）
 export const BUYOUT_PRICE_CENTS = 6000000;
 export const RETIRE_NP_CENTS = 30000000;
@@ -177,6 +187,9 @@ export const CONFIG = {
   handOrdersPerDayFull: 4,
   // 正文 3.13 / 3.14 第 7b：M2 第四批接线。已签发的 M1 带（3.5:141「无竞争（S ≡ 1）」）由 harness 传 competition:false 复现
   competition: true,
+  // 正文 3.11 烫煮：§八 排期收口把「开关式实现（在建时默认关闭）」划进上线必需、把「开启与真机调参」划进首更，
+  // 故本批建完即关。关的时候一格动画都不起、一个随机都不掷，亲手单还是「抓菜过称 → 下锅」两步里的前一步。
+  blanch: false,
   // 正文 3.12 生产链前段：M2 接线（备菜工时与产能修正、调味台 M_base、添加剂三档、打包三档）
   prep: true,
   flavor: true,

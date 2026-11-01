@@ -7,6 +7,8 @@ import { runBusiness, priceCoefFor } from './ops.js';
 import { applyShadow } from './shadow.js';
 import { drawEvent, resolveChoice, resolvePendingReserve, expireShifts } from './events.js';
 import { drawHandOrders, settleWeighing } from './weigh.js';
+import { REGULAR_SLOTS } from '../data/customers.js';
+import { judgeBlanch, signalTier } from './blanch.js';
 import { buildComments } from './comments.js';
 import { scenarioOf, forecastLabel } from '../data/scenario.js';
 import { additiveUnlocked, computeMBase, prepBudget, prepFits, prepGridUsed } from './production.js';
@@ -134,16 +136,30 @@ export function morningEvent(state, rng, choose) {
 
 // 第 7 步：称重 → 营业结算。orders 由 drawHandOrders 抽好（界面要先把单子亮出来才让玩家过称）
 // weigh = { customerId: { 品类: 克数 } }（界面）或 (order) => { 品类: 克数 }（无头模拟）
-export function runDay(state, orders, weigh, rng) {
+// blanchBy = { customerId: 熟度读数 }（正文 3.11 烫煮，开关 state.blanchOn 关着一律不传 → 信号档逐字等于过称档）
+export function runDay(state, orders, weigh, rng, blanchBy = null) {
   const gramsFor = typeof weigh === 'function'
     ? weigh
     : (o => (weigh && weigh[o.customerId]) || defaultGrams(o));
   const results = orders.map(o => settleWeighing(o, gramsFor(o)));
   state.HandOrders = results;
   const business = runBusiness(state, results, rng);
+  // 烫煮挪的是「该单信号」那一格，不动 C/H/Risk、不动流水、不进 Q（正文 :213 与 3.4「烫煮表现不进 Q」）
+  const on = !!state.blanchOn;
   for (const r of results) {
     if (r.short) state.today.shortWeighCount += 1;
     else if (r.full) state.today.fullWeighCount += 1;
+    if (on) {
+      const judged = judgeBlanch(blanchBy ? blanchBy[r.customerId] : undefined);
+      if (judged) state.today.blanchCounts[judged.band] += 1;
+      const tier = signalTier(r, blanchBy ? blanchBy[r.customerId] : undefined, true);
+      if (tier === 0) state.today.signalShortCount += 1;
+      else if (tier === 2) state.today.signalFullCount += 1;
+    }
+  }
+  if (!on) {
+    state.today.signalShortCount = state.today.shortWeighCount;
+    state.today.signalFullCount = state.today.fullWeighCount;
   }
   return business;
 }
@@ -191,8 +207,14 @@ export function nightClose(state, rng, ev, actionId) {
   const ending = checkEndings(state);
   if (ending) state.EndingId = ending;
 
-  // 第 12 步：留言 + 存档字段滚动
+  // 第 12 步：留言 + 常客推进判定 + 存档字段滚动
   buildComments(state, rng);
+  // 附录 F.5 :442 与 G.1 :564 把「常客推进」钉在第 12 步：今天上过单的常客线顾客，RegularStory 那一格 +1。
+  // 只推进度、不给奖励、不触发剧情（正文 5.4「不设选项、不给奖励清单」；完整故事弧在首更）
+  for (const r of state.HandOrders) {
+    const slot = REGULAR_SLOTS.indexOf(r.customerId);
+    if (slot >= 0) state.RegularStory[slot] += 1;
+  }
   state.CommentLog = state.CommentLog.slice(-30);
   state.DailyReports.push(dailyReport(state));
   state.PriceCoefYday = state.PriceCoefToday;

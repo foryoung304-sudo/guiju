@@ -37,6 +37,8 @@ export function newGame(seed) {
     // 附录 E.9 evt_s_poach：涨薪留住的加薪（分/日，持续到本局结束）与被挖走成因（区别于「请假一天」的产能惩罚开关）
     WageRaiseCents: 0, PoachedAway: false,
     eventScope: CONFIG.eventScope,
+    // 正文 3.11 烫煮：§八 排期收口「开关式实现（在建时默认关闭）」——关着时一格不渲染、一个随机不掷，与 laborOn / competitionOn 同一套口径开关
+    blanchOn: CONFIG.blanch,
 
     EventHistory: [], Cooldowns: {}, WeightShifts: {}, PricewarDays: 0,
     seen_routine_inspection: false, dayStarted: false, pendingReserve: null,
@@ -99,6 +101,11 @@ export function blankToday() {
     forcedComments: [],
     shortWeighCount: 0,
     fullWeighCount: 0,
+    // 正文 3.11 烫煮（开关式实现、默认关）：过称档经烫煮挪档之后的当日信号计数，第 12 步留言第③层读这一对；
+    // 关着的时候 signal* 逐字等于 short/fullWeighCount，而 C/H/Risk 始终只读过称原档（applyShadow 不变）
+    signalShortCount: 0,
+    signalFullCount: 0,
+    blanchCounts: { under: 0, green: 0, best: 0, over: 0 },
     portionGrudge: false,
     spillBowls: 0,
     takeawayBowls: 0,
@@ -154,6 +161,15 @@ export function loadGame() {
   // M2 第五批（附录 E 余六行）新带的字段：旧档按「没被挖过、没检查过」补初值，不动任何已签数值
   if (typeof parsed.WageRaiseCents !== 'number' || !Number.isFinite(parsed.WageRaiseCents)) parsed.WageRaiseCents = 0;
   if (typeof parsed.PoachedAway !== 'boolean') parsed.PoachedAway = false;
+  // M2 第六批（烫煮开关 + 常客最低实现）新带的字段：旧档按「没烫过、今天还没下过锅」补初值，不动任何已签数值
+  if (typeof parsed.blanchOn !== 'boolean') parsed.blanchOn = CONFIG.blanch;
+  if (!Array.isArray(parsed.RegularStory) || parsed.RegularStory.length !== 4) parsed.RegularStory = [0, 0, 0, 0];
+  if (typeof parsed.today?.signalShortCount !== 'number')
+    parsed.today = { ...(parsed.today || {}), signalShortCount: parsed.today?.shortWeighCount || 0 };
+  if (typeof parsed.today?.signalFullCount !== 'number')
+    parsed.today = { ...(parsed.today || {}), signalFullCount: parsed.today?.fullWeighCount || 0 };
+  if (!parsed.today?.blanchCounts)
+    parsed.today = { ...(parsed.today || {}), blanchCounts: { under: 0, green: 0, best: 0, over: 0 } };
   if (parsed.eventScope !== 'm1' && parsed.eventScope !== 'full') parsed.eventScope = CONFIG.eventScope;
   if (!Array.isArray(parsed.today?.notes)) parsed.today = { ...(parsed.today || {}), notes: [] };
   parsed.saveVersion = SAVE_VERSION;

@@ -2,7 +2,7 @@
 // 红线照正本 3.1 / 3.4 / 九：不许出现品质数字、不许出现道德标签、不许有一句劝善或劝坏的话。
 import { CAT, SOLID_CATS, ALL_CATS, PRICE_TIERS, FACILITIES, ENDING, CONFIG, TIERS_STALL, START_CASH_CENTS, START_CREDIT_CAP_CENTS,
   PACKING, PACKING_NAMES, PREP_STATIONS, PREP_LEVELS, ADDITIVE, FLAVOR_DIMS, FLAVOR_DIM_NAMES, CLIENT_MIX,
-  TASTING, TOOLS, SCALE_AUTO_MUL } from '../data/constants.js';
+  TASTING, TOOLS, SCALE_AUTO_MUL, BLANCH } from '../data/constants.js';
 import { SKUS_BY_CAT, SKU_BY_ID } from '../data/skus.js';
 import { newGame, loadGame, saveGame, clearSave, makeRng, roundJin, centsToYuan } from '../index.js';
 import {
@@ -17,6 +17,8 @@ import { competitionOn, streetBoard } from '../engine/competition.js';
 import { evalCondition } from '../engine/dsl.js';
 import { EVENTS } from '../data/events.js';
 import { drawHandOrders, GRAMS_PER_JIN } from '../engine/weigh.js';
+import { judgeBlanch, blanchValueAt } from '../engine/blanch.js';
+import { regularLine, REGULAR_SLOTS } from '../data/customers.js';
 
 // 美术资产（ui-spec §五）：24 款 SKU 图标 = 六品类各一张 2×2 拼版（档1/档2/档3/强哥特供），同品类三档必须一眼可辨
 const SKU_SHEET = { MB: 'sku-mb', MT: 'sku-mt', VG: 'sku-vg', BF: 'sku-bf', NS: 'sku-ns', SP: 'sku-sp' };
@@ -46,6 +48,8 @@ let tastingPick = 0;                 // 第 5 步⑤试吃份数（挂了试吃�
 let scalePick = false;               // 第 5 步⑥显多秤开关（秤在手才出现）
 let ledgerBack = 'morning';
 let okRef = {};          // 本日每单是否已进入足称带（只在跨进那一刻震一次）
+let blanchBy = {};       // customerId → 夹出时的熟度读数；没这格 = 这单没下手（正文 3.11）
+let blanchRun = {};      // customerId → { t0, raf }：只在活着的那一屏存在，刷新即空（读数已落的走 blanchBy）
 
 const y = c => centsToYuan(c).toFixed(2);
 const sign = c => (c > 0 ? `<span class="pos">+${y(c)}</span>` : c < 0 ? `<span class="negv">${y(c)}</span>` : y(c));
@@ -58,7 +62,7 @@ const round01 = x => Math.round(x * 10) / 10;
 function saveFlow() {
   localStorage.setItem(FLOW_KEY, JSON.stringify({
     pre: preEvent?.id ?? null, pending: pendingEvent?.id ?? null,
-    orders, gramsBy, pricePick, draft,
+    orders, gramsBy, pricePick, draft, blanchBy,
     prepPick, wakePick, packingPick, flavorPick, additivePick, tastingPick, scalePick,
   }));
 }
@@ -88,6 +92,11 @@ function restoreFlow() {
   tastingPick = Number.isInteger(f.tastingPick) && f.tastingPick >= TASTING.min && f.tastingPick <= TASTING.max
     ? f.tastingPick : state.TastingCount;
   scalePick = typeof f.scalePick === 'boolean' ? f.scalePick : state.ScaleShowOn;
+  // 熟度读数只认「今天这张单 + 0–100 之间的数」；正在扫的那一格不还原（刷新后从 0 重扫，已夹出的数照留）
+  blanchBy = {};
+  for (const [k, v] of Object.entries(f.blanchBy || {})) {
+    if (orders.some(o => o.customerId === k) && Number.isFinite(v) && v >= 0 && v <= 100) blanchBy[k] = v;
+  }
 }
 
 // 每一天的前段草稿从引擎当前值起（调味是常驻配方，备菜照昨天）
@@ -123,6 +132,7 @@ app.addEventListener('click', e => {
 });
 
 function render() {
+  stopAllBlanch();   // 换屏就把还在扫的熟度条收掉：没夹出的那一单按「没下手」走，不留着后台跑
   app.innerHTML = (VIEWS[phase] || VIEWS.boot)();
   // 实测问题 #8：数量框一边打字一边刷试算（原来 input 用 change，必须回车/失焦才动）
   app.querySelectorAll('input[data-qty]').forEach(el => {
@@ -209,6 +219,8 @@ function act(host) {
     case 'prepDone': return commitPrepDraft();
     case 'open': return openShop();
     case 'cook': return cook();
+    case 'bstart': return startBlanch(d.cust);
+    case 'bpull': return pullBlanch(d.cust);
     case 'evening': return afterEvening();
     case 'choose': return resolvePending(d.choice);
     case 'next': return newDay();
@@ -249,6 +261,7 @@ function resume() {
 function newDay() {
   rng = makeRng(state);
   orders = []; gramsBy = {}; pendingEvent = null; draft = {}; lastLine = null;   // 昨天的亲手单、待选事件、组篮草稿不带进今天
+  blanchBy = {};                                                                // 昨天的熟度读数同样不带进今天
   beginDay(state);                          // 第 1 步：晨间结转
   syncProdPicks();
   preEvent = morningPreEvent(state, rng);   // 第 2 步：晨间情报（采购前公布，无分支）
@@ -545,7 +558,8 @@ function refreshOrder(cust) {
 }
 
 function cook() {
-  runDay(state, orders, gramsBy, rng);     // 第 7 步：营业
+  stopAllBlanch();
+  runDay(state, orders, gramsBy, rng, blanchBy);   // 第 7 步：营业（烫煮开关关着时 blanchBy 一格都没有，信号档逐字等于过称档）
   nightSettle(state, rng);                 // 第 8–9 步：账目与暗线
   saveGame(state);
   return go('settle');
@@ -703,7 +717,7 @@ const VIEWS = {
       <div class="panel accent">
       <div class="row"><h2>出餐站 · 亲手单 ${orders.length} 单</h2>
         <span class="whoimg"><img class="face" src="./img/chenshi.webp" alt="陈实" /><b>陈实 · 掌秤</b></span></div>
-      <p class="muted">先亮单子，再过称。按住抓菜、松手定格；抓多了就捏出一点。这一屏只用克，一碗标准 ${GRAMS_PER_JIN} 克，秤上是多少就收多少。</p>
+      <p class="muted">先亮单子，再过称。按住抓菜、松手定格；抓多了就捏出一点。这一屏只用克，一碗标准 ${GRAMS_PER_JIN} 克，秤上是多少就收多少。${state.blanchOn ? '过完称，碗下烫锅。' : ''}</p>
       <div class="stack" style="margin-top:10px">${orders.map(orderCard).join('')}</div>
       <button class="go" style="margin-top:14px" data-act="cook">下锅 · 开卖</button>
     </div>`;
@@ -962,12 +976,100 @@ function scaleSwitch() {
 }
 
 
+// ── 正文 3.11 烫煮（ui-spec UI-09）：§八 排期收口把这条划成「开关式实现（在建时默认关闭）」，开关 = state.blanchOn（初值取 CONFIG.blanch，与 laborOn / competitionOn 同构）。
+// 关着时 blanchBlock() 直接返回空串：不渲染一格、不起一个计时器、不掷一个随机，亲手单还是 M1 那一步。
+// 开着时每单两击（下碗 / 夹出）、熟度条自己匀速扫 BLANCH.sweepSec 秒——离正文 :210 的「每单操作 ≤20 秒」还有余量；
+// 操作量总账按正文 :356 走玩家计时数据（0×0 视口测不了人体时长），不自作削减。
+function blanchBlock(o) {
+  if (!state.blanchOn) return '';
+  const cust = o.customerId;
+  const v = blanchBy[cust];
+  const judged = judgeBlanch(v);
+  const zoneW = BLANCH.greenHigh - BLANCH.greenLow;
+  return `<div style="margin-top:10px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="muted">烫锅</span>
+      <span style="position:relative;flex:1;height:16px;border:2px solid var(--ink);background:var(--paper)">
+        <i style="position:absolute;top:0;bottom:0;left:${BLANCH.greenLow}%;width:${zoneW}%;background:var(--teal);opacity:.35"></i>
+        <i style="position:absolute;top:0;bottom:0;left:${BLANCH.center - BLANCH.centerBand}%;width:${BLANCH.centerBand * 2}%;background:var(--mustard);opacity:.55"></i>
+        <i id="bf-${cust}" style="position:absolute;top:0;bottom:0;left:0;width:${v ?? 0}%;background:var(--ink);opacity:.5"></i>
+      </span>
+      <span class="num" id="bw-${cust}" style="min-width:3.5em">${judged ? esc(judged.label) : ''}</span>
+    </div>
+    <div class="row" style="margin-top:6px">
+      <button id="bs-${cust}" data-act="bstart" data-cust="${cust}" ${v === undefined ? '' : 'disabled'}>下碗 · 熟度条自己扫</button>
+      <button id="bp-${cust}" data-act="bpull" data-cust="${cust}" disabled>夹出</button>
+    </div>
+    <p class="muted">绿区里夹出算这一单烫到了，正中间那一线记「最佳+」；早了是夹生，晚了是烫老。不动它就等于没烫，这一只碗只影响眼前这一单。</p>
+  </div>`;
+}
+
+function stopBlanch(cust) {
+  const run = blanchRun[cust];
+  if (run) cancelAnimationFrame(run.raf);
+  delete blanchRun[cust];
+}
+
+function stopAllBlanch() {
+  for (const cust of Object.keys(blanchRun)) stopBlanch(cust);
+}
+
+function startBlanch(cust) {
+  if (!state.blanchOn || blanchBy[cust] !== undefined || blanchRun[cust]) return;
+  const t0 = performance.now();
+  const step = () => {
+    const run = blanchRun[cust];
+    if (!run) return;
+    const v = blanchValueAt((performance.now() - t0) / 1000);
+    const fill = document.getElementById('bf-' + cust);
+    if (fill) fill.style.width = `${v}%`;
+    if (v >= 100) { delete blanchRun[cust]; return; }   // 扫满停在满格等玩家夹：夹出来就是烫老，不夹就是没烫
+    run.raf = requestAnimationFrame(step);
+  };
+  blanchRun[cust] = { t0, raf: requestAnimationFrame(step) };
+  const pull = document.getElementById('bp-' + cust);
+  if (pull) pull.disabled = false;                       // 碗没下锅，「夹出」在牌面上就是死的（引擎侧同样拦）
+  const start = document.getElementById('bs-' + cust);
+  if (start) start.disabled = true;                      // 一根条只许一次：要重来得先夹出来
+}
+
+function pullBlanch(cust) {
+  const run = blanchRun[cust];
+  if (blanchBy[cust] === undefined && !run) return;   // 碗没下过锅，夹不出东西
+  const v = run ? blanchValueAt((performance.now() - run.t0) / 1000) : blanchBy[cust];
+  stopBlanch(cust);
+  blanchBy[cust] = v;
+  saveFlow();
+  const judged = judgeBlanch(v);
+  const fill = document.getElementById('bf-' + cust);
+  if (fill) fill.style.width = `${v}%`;
+  const word = document.getElementById('bw-' + cust);
+  if (word && judged) {
+    word.textContent = judged.label;
+    if (judged.band === 'best') navigator.vibrate?.(10);   // 与足称同一记手感反馈，素材后补
+  }
+  for (const id of ['bs-', 'bp-']) {
+    const el = document.getElementById(id + cust);
+    if (el) el.disabled = true;
+  }
+}
+
+// 正文 5.4：常客只在亲手单出场，不设选项、不给奖励清单——所以台词是一行读的字，按钮一个都不给。
+// 进度取 RegularStory 的那一格（附录 F.5 :442 第 12 步 +1），今天上过几次单都是同一句：抽单在先、推进在打烊后。
+function regularChatter(o) {
+  const slot = REGULAR_SLOTS.indexOf(o.customerId);
+  const line = slot >= 0 ? regularLine(o.customerId, state.RegularStory[slot]) : null;
+  if (!line) return '';
+  return `<p class="muted" style="margin:6px 0 0">${esc(line)}</p>`;
+}
+
 function orderCard(o) {
   const g = gramsBy[o.customerId];
   const gave = o.lines.reduce((s, l) => s + Number(g[l.cat] || 0), 0);
   return `<div class="panel" style="box-shadow:3px 3px 0 var(--ink-2);background:var(--cream)">
     <div class="cust"><div class="ava ava-${o.customerId}" style="background-image:url(${AVA_SHEET})" role="img" aria-label="${esc(o.name)}"></div>
       <div><h3>${esc(o.name)}</h3><span class="muted">${esc(o.role)} · ${o.bowls} 碗</span></div></div>
+    ${regularChatter(o)}
     <div class="scale${gave > 0 && gave / o.lines.reduce((s, l) => s + l.grams, 0) >= 0.98 ? ' ok' : ''}" id="sc-${o.customerId}" style="margin:8px 0">
       <img src="./img/scale.webp" alt="电子秤" />
       <div class="readout num"><span id="rd-${o.customerId}">${gave}</span><span class="u">克</span>
@@ -984,6 +1086,7 @@ function orderCard(o) {
       <span class="num gave" id="lv-${o.customerId}-${l.cat}">你称 ${g[l.cat]} 克</span>
       <button class="pinch" id="pn-${o.customerId}-${l.cat}" data-pinch data-cust="${o.customerId}" data-cat="${l.cat}">捏出 −${stepFor(o.customerId, l.cat)} 克</button></div>
     <div class="muted kind-bad" id="flag-${o.customerId}-${l.cat}">${flagText(o.customerId, l, Number(g[l.cat] || 0))}</div>`).join('')}
+    ${blanchBlock(o)}
   </div>`;
 }
 

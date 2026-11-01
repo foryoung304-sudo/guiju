@@ -9,7 +9,7 @@ import { newGame, roundJin, loadGame, STORAGE_KEY } from './src/engine/state.js'
 import { effectivePrice, buildBasket, planPayment, recomputeStock, buyTool, sellBackTool, ownsTool } from './src/engine/market.js';
 import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, PACKING_SPILL, CONFIG, SAVE_VERSION,
   ADDITIVE, PREP_LEVELS, LABOR, TASTING, TOOLS, SCALE_DELTA_J_SHARE, SCALE_C_PER_JIN, SCALE_RISK_PER_JIN,
-  COMPETITION, INSPECTION, FACILITIES, ENDING } from './src/data/constants.js';
+  COMPETITION, INSPECTION, FACILITIES, ENDING, BLANCH } from './src/data/constants.js';
 import { SKU_BY_ID } from './src/data/skus.js';
 import { scenarioOf, WEATHER } from './src/data/scenario.js';
 import { evalCondition } from './src/engine/dsl.js';
@@ -20,6 +20,10 @@ import { additiveOf, additiveUnlocked, capacityJin, computeMBase, prepBudget, pr
 import { drawHandOrders, handOrderCount } from './src/engine/weigh.js';
 import { applyHidden, resolveChoice, weightOf, drawEvent, isActionAvailable, isActionAffordable } from './src/engine/events.js';
 import { inspectionScore, ticketlessCostCents, destroyTicketless, judgeBigInspection, judgeRoutineInspection } from './src/engine/inspection.js';
+import { blanchValueAt, judgeBlanch, signalTier } from './src/engine/blanch.js';
+import { REGULAR_LINES, regularLine, REGULAR_SLOTS } from './src/data/customers.js';
+import { buildComments } from './src/engine/comments.js';
+import { COMMENT_POOLS } from './src/data/comments.js';
 import { morningRivals, priceWarReprice, sharesAndS, tallySuppression, rivalPriceCoef, previewShare } from './src/engine/competition.js';
 import { applyShadow, computeQ } from './src/engine/shadow.js';
 import { makeRng } from './src/engine/rng.js';
@@ -1350,7 +1354,180 @@ for (const seed of [SEED, 7979, 36832]) {
   }
 }
 
-// ── 输出 ─────────────────────────────────────────────────────────
+// ── 13. M2 第六批：烫煮（开关式实现）+ 常客最低实现（正文 3.11 :210/:213、5.4 :326、附录 H.3 :676、§八 :362）──
+{
+  // 1) 五个手感参数逐字照正文 :213 / 附录 H.5 :615；开关按 §八「在建时默认关闭」
+  check('BLANCH 五数照录（全程 4.0 秒、绿区 55–78、中心 66.5 ±3），绿区上下沿折秒正好 2.2 与 3.12',
+    BLANCH.sweepSec === 4.0 && BLANCH.greenLow === 55 && BLANCH.greenHigh === 78
+    && BLANCH.center === 66.5 && BLANCH.centerBand === 3
+    && Math.abs(blanchValueAt(2.2) - BLANCH.greenLow) < 1e-9
+    && Math.abs(blanchValueAt(3.12) - BLANCH.greenHigh) < 1e-9,
+    `绿区 ${(BLANCH.greenLow / 100 * BLANCH.sweepSec).toFixed(2)}–${(BLANCH.greenHigh / 100 * BLANCH.sweepSec).toFixed(2)} 秒`);
+  const fresh = newGame(SEED);
+  check('§八 排期收口：烫煮「开关式实现（在建时默认关闭）」= CONFIG.blanch false，新档 blanchOn 照它起',
+    CONFIG.blanch === false && fresh.blanchOn === false && typeof fresh.blanchOn === 'boolean',
+    `CONFIG ${CONFIG.blanch}｜新档 ${fresh.blanchOn}`);
+
+  // 2) 熟度条读数：0→100 匀速，越界夹住（判定式不碰随机）
+  check('熟度读数匀速且钳制：0 秒 0、1 秒 25、4 秒满、超时仍 100、负秒回 0',
+    blanchValueAt(0) === 0 && blanchValueAt(1) === 25 && blanchValueAt(4) === 100
+    && blanchValueAt(9) === 100 && blanchValueAt(-1) === 0);
+
+  // 3) 四带判定：夹生 / 绿区 / 中心 ±3 最佳+ / 烫老，端点归属照「早于 55、晚于 78」
+  const bandOf = v => judgeBlanch(v)?.band;
+  check('四带端点：55 与 78 都算绿区（原文「早于 55 / 晚于 78」才判夹生与烫老），中心 63.5–69.5 记最佳+',
+    bandOf(54.99) === 'under' && bandOf(55) === 'green' && bandOf(63.4) === 'green'
+    && bandOf(63.5) === 'best' && bandOf(66.5) === 'best' && bandOf(69.5) === 'best'
+    && bandOf(69.51) === 'green' && bandOf(78) === 'green' && bandOf(78.01) === 'over',
+    `55→${bandOf(55)}、63.5→${bandOf(63.5)}、69.51→${bandOf(69.51)}、78.01→${bandOf(78.01)}`);
+  check('档位与文案照原文：夹生 / 最佳 / 最佳+ / 烫老；升一档记 +1、最佳+ 记 +2、夹生与烫老记 −1',
+    judgeBlanch(30).label === '夹生' && judgeBlanch(30).delta === -1
+    && judgeBlanch(60).label === '最佳' && judgeBlanch(60).delta === 1
+    && judgeBlanch(66.5).label === '最佳+' && judgeBlanch(66.5).delta === 2
+    && judgeBlanch(90).label === '烫老' && judgeBlanch(90).delta === -1);
+  check('碗没下锅 = 没这一下：读数为空判 null，信号一格都不挪（开关开着也不动）',
+    judgeBlanch(undefined) === null && judgeBlanch(null) === null);
+
+  // 4) 「档」的阶梯：全案只列过 <90% / 90–98% / ≥98% 三条判定带（正文 :211、附录 H.5 :649–651），上下都夹在这条阶梯两端
+  const tierNum = (base, v, on = true) => signalTier(base === 'short' ? { short: true } : base === 'full' ? { full: true } : {}, v, on);
+  const tierOf = (base, v, on = true) => ['short', 'normal', 'full'][tierNum(base, v, on)];
+  const LADDER = [
+    ['short', 66.5, 'full'], ['normal', 66.5, 'full'], ['full', 66.5, 'full'],
+    ['short', 60, 'normal'], ['normal', 60, 'full'], ['full', 60, 'full'],
+    ['normal', 30, 'short'], ['short', 30, 'short'], ['short', 60, 'normal'],
+    ['full', 90, 'normal'], ['normal', 90, 'short'], ['short', 90, 'short'],
+    ['short', undefined, 'short'], ['normal', undefined, 'normal'], ['full', undefined, 'full'],
+  ];
+  const ladderBad = LADDER.filter(([b, v, want]) => tierOf(b, v) !== want);
+  check('升/降档表 15 格逐格对：最佳+ 升两档（短斤直达足称）、绿区升一档、夹生与烫老降一档，上下都夹在三档阶梯内',
+    ladderBad.length === 0, ladderBad.map(([b, v, w]) => `${b}@${v}→${tierOf(b, v)}（应 ${w}）`).join('、') || '15/15');
+  check('开关关着时信号档逐字等于过称档（on=false 一支不读熟度，烫成 66.5 也不动）',
+    tierOf('short', 66.5, false) === 'short' && tierOf('normal', 30, false) === 'normal'
+    && tierOf('full', 90, false) === 'full');
+
+  // 5) 整日账面：开关开着只挪「该单信号」那一格，C/H/Risk/Q/流水/COGS 与关着时逐分一样
+  const RATIOS = [0.85, 1.0, 0.95];   // 短斤 / 足称 / 正常各一单（三档判定带都覆盖到）
+  const dayRun = (on, vals) => {
+    const s = newGame(SEED);
+    s.eventScope = 'm1';
+    const r = beginDay(s);
+    morningPreEvent(s, r);
+    submitBasket(s, [{ sku: 'MB1', qty: 4 }, { sku: 'VG1', qty: 6 }, { sku: 'NS1', qty: 4 }], r);
+    lockTradingDay(s, { priceTier: 'qinmin' });
+    morningEvent(s, r, () => null);
+    const orders = drawHandOrders(s, r);
+    s.blanchOn = on;
+    const blanchBy = !on || !vals ? null : Object.fromEntries(orders.map((o, i) => [o.customerId, vals[i % vals.length]]));
+    runDay(s, orders, o => Object.fromEntries(o.lines.map(l => [l.cat, Math.round(l.grams * RATIOS[orders.indexOf(o) % RATIOS.length])])), r, blanchBy);
+    return { s, orders };
+  };
+  const off = dayRun(false), offNoVal = dayRun(true), onMix = dayRun(true, [66.5, 30, 90]);
+  const acct = x => [x.s.C, x.s.H, x.s.Risk, x.s.Q, x.s.today.revenueCents, x.s.today.J, x.s.today.shortWeighCount, x.s.today.fullWeighCount].join('|');
+  check('开关开着且一份没夹：账面与过称计数与关着时逐字相同（没下手就不进这一层）',
+    acct(off) === acct(offNoVal) && offNoVal.s.today.signalShortCount === offNoVal.s.today.shortWeighCount
+    && offNoVal.s.today.signalFullCount === offNoVal.s.today.fullWeighCount
+    && Object.values(offNoVal.s.today.blanchCounts).every(v => v === 0),
+    `过称 ${offNoVal.s.today.shortWeighCount}/${offNoVal.s.today.fullWeighCount}｜信号 ${offNoVal.s.today.signalShortCount}/${offNoVal.s.today.signalFullCount}`);
+  check('开关开着且夹了：C/H/Risk/Q/流水/J 与关着时逐分相等（正文 :213「只作用单笔信号、不进 Q」，附录 :652 同口径）',
+    acct(off) === acct(onMix) && acct(offNoVal) === acct(onMix),
+    `关 ${acct(off)}｜开 ${acct(onMix)}`);
+  const VALS = [66.5, 30, 90];
+  check('夹生 / 烫老 / 最佳+ 三下各落一格：下手数与 blanchCounts 分带计数对上（3 单各夹一次）',
+    onMix.s.today.blanchCounts.best === 1 && onMix.s.today.blanchCounts.under === 1
+    && onMix.s.today.blanchCounts.over === 1 && onMix.s.today.blanchCounts.green === 0,
+    `最佳+ ${onMix.s.today.blanchCounts.best}｜绿区 ${onMix.s.today.blanchCounts.green}｜夹生 ${onMix.s.today.blanchCounts.under}｜烫老 ${onMix.s.today.blanchCounts.over}`);
+  const mixTier = i => signalTier(onMix.s.HandOrders[i], VALS[i % VALS.length], true);
+  check('信号档逐单对得上：三单的 (过称档, 熟度) 组合走同一张升降档表，计数不重不漏',
+    onMix.s.today.signalShortCount === onMix.s.HandOrders.filter((_, i) => mixTier(i) === 0).length
+    && onMix.s.today.signalFullCount === onMix.s.HandOrders.filter((_, i) => mixTier(i) === 2).length
+    && off.s.today.signalShortCount === off.s.today.shortWeighCount
+    && off.s.today.signalFullCount === off.s.today.fullWeighCount,
+    `开 ${onMix.s.today.signalShortCount}/${onMix.s.today.signalFullCount}｜关 ${off.s.today.signalShortCount}/${off.s.today.signalFullCount}`);
+
+  // 6) 第 12 步留言第③层读的是这一对：短斤烫回正常就不再必然出嘀咕，足称烫老也不再必然出夸
+  const regularOf = (short, full) => {
+    const s = newGame(SEED);
+    beginDay(s);
+    s.R = 0; s.Risk = 0; s.Q = 60; s.today.QZeroSales = true;   // 掐掉①②两层的越线通路，只看③落哪一支
+    s.today.shortWeighCount = short; s.today.fullWeighCount = full;
+    s.today.signalShortCount = short; s.today.signalFullCount = full;
+    return buildComments(s, makeRng(s)).filter(c => c.kind === 'regular').map(c => c.text);
+  };
+  check('③层：signalShort>0 出分量嘀咕、signalFull>0 出夸、两个都 0 且 R=0 时这一层整层空',
+    regularOf(1, 0).length === 1 && regularOf(0, 1).length === 1
+    && regularOf(1, 0)[0] === COMMENT_POOLS.portion[2] && regularOf(0, 1)[0] === COMMENT_POOLS.portion[1]
+    && regularOf(0, 0).length === 0,
+    `短 ${regularOf(1, 0)[0]}｜足 ${regularOf(0, 1)[0]}`);
+  {
+    const orders = [{ customerId: 'cX', name: '测试', bowls: 1, lines: [{ cat: 'MB', grams: 500 }] }];
+    const night = (on, value) => {
+      const s = newGame(SEED);
+      beginDay(s);
+      s.R = 0; s.Risk = 0; s.Q = 60; s.blanchOn = on;
+      const r = makeRng(s);
+      runDay(s, orders, () => ({ MB: 425 }), r, value === undefined ? null : { cX: value });   // 425/500 = 85% → 短斤
+      return { s, reg: buildComments(s, r).filter(c => c.kind === 'regular').map(c => c.text) };
+    };
+    const up = night(true, 66.5), down = night(false, undefined);
+    check('一单短斤烫到「最佳+」（升两档）→ 当晚出的是夸不是嘀咕；开关关着时同一单同一克数必出嘀咕',
+      up.s.today.shortWeighCount === 1 && up.s.today.signalShortCount === 0 && up.s.today.signalFullCount === 1
+      && up.reg[0] === COMMENT_POOLS.portion[1] && down.reg[0] === COMMENT_POOLS.portion[2]
+      && up.s.C === down.s.C && up.s.H === down.s.H && up.s.Risk === down.s.Risk,
+      `开 ${up.reg[0]}｜关 ${down.reg[0]}｜C/H/Risk ${up.s.C}/${up.s.H}/${up.s.Risk} 对 ${down.s.C}/${down.s.H}/${down.s.Risk}`);
+  }
+
+  // 7) 常客最低实现（§八「3 位有台词、无完整故事弧」+ 正文 5.4「不设选项、不给奖励清单」）
+  check('常客线四个槽固定给 c01–c04（附录 E.10 约束第 3 条），有台词的正好三位 = §八 的额度',
+    REGULAR_SLOTS.join(',') === 'c01,c02,c03,c04'
+    && REGULAR_SLOTS.filter(c => (REGULAR_LINES[c] || []).length > 0).length === 3,
+    `有台词 ${REGULAR_SLOTS.filter(c => (REGULAR_LINES[c] || []).length > 0).join('/')}｜句数 ${REGULAR_SLOTS.map(c => (REGULAR_LINES[c] || []).length).join('/')}`);
+  check('regularLine 随进度走、到顶停在最后一句（不回卷、不沉默），越界与负数都不崩',
+    regularLine('c01', 0) === REGULAR_LINES.c01[0] && regularLine('c01', 1) === REGULAR_LINES.c01[1]
+    && regularLine('c01', 99) === REGULAR_LINES.c01[REGULAR_LINES.c01.length - 1]
+    && regularLine('c01', -1) === REGULAR_LINES.c01[0] && regularLine('c04', 0) === null,
+    `第 0 句「${regularLine('c01', 0)}」`);
+  {
+    const s = newGame(SEED);
+    beginDay(s);
+    s.HandOrders = [{ customerId: 'c01' }, { customerId: 'c06' }, { customerId: 'c03' }];
+    const before = [...s.RegularStory];
+    nightClose(s, makeRng(s), null, null);
+    check('第 12 步推进：今天上过亲手单的常客线顾客那一格 +1，不占槽的剧情人物（c06 赵大妈）一格都不动',
+      s.RegularStory[0] === before[0] + 1 && s.RegularStory[2] === before[2] + 1
+      && s.RegularStory[1] === before[1] && s.RegularStory[3] === before[3],
+      `推进 ${s.RegularStory.join('/')}（原 ${before.join('/')}）`);
+    const none = newGame(SEED);
+    beginDay(none);
+    nightClose(none, makeRng(none), null, null);
+    check('没上过的常客不推进（RegularStory 不是「天数计数器」，附录 F.5 :442 写的是这来过几回）',
+      none.RegularStory.every(v => v === 0), none.RegularStory.join('/'));
+  }
+  check('台词只从 5.4 的四条生活线取材：不出现「要不要 / 便宜 / 省钱」式提问，不写年龄年级，不涉自伤表述（正文 §九 与附录 H.3 :676）',
+    Object.values(REGULAR_LINES).flat().every(l => !/要不要|便宜|省钱|打折|黑心|良?心/.test(l))
+    && Object.values(REGULAR_LINES).flat().every(l => !/[0-9一二三四五六七八九十]+\s*(年级|岁)/.test(l))
+    && Object.values(REGULAR_LINES).flat().every(l => !/死|自伤|割腕|活不下去/.test(l)),
+    `${Object.values(REGULAR_LINES).flat().length} 句逐句扫`);
+  check('存档迁移：老档缺 blanchOn / RegularStory / signal* 三样按「没烫过、没来过」补齐，不作废（裁定 9a959bd §一）',
+    (() => {
+      const store = new Map();
+      globalThis.localStorage = {
+        getItem: k => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => store.set(k, String(v)),
+        removeItem: k => store.delete(k),
+      };
+      const raw = JSON.parse(JSON.stringify(newGame(SEED)));
+      raw.saveVersion = 'v4.9.2-cal.1';
+      delete raw.blanchOn; delete raw.RegularStory;
+      delete raw.today.signalShortCount; delete raw.today.signalFullCount; delete raw.today.blanchCounts;
+      store.set(STORAGE_KEY, JSON.stringify(raw));
+      const back = loadGame();
+      delete globalThis.localStorage;
+      return back !== null && back.blanchOn === CONFIG.blanch && back.RegularStory.length === 4
+        && back.today.signalShortCount === (raw.today.shortWeighCount || 0)
+        && back.today.signalFullCount === (raw.today.fullWeighCount || 0)
+        && !!back.today.blanchCounts && Object.values(back.today.blanchCounts).every(v => v === 0);
+    })());
+}
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
 // 而开学周是"全线 ×1.1 + 品类系数偏肉（MB1.3/MT1.2）"；附录 D.5 的 2.5 元/碗 锚点按固定品类占比算，不含这两项。
 function bowlMarginYuan(tier, priceTierId, weatherId, semesterDay) {

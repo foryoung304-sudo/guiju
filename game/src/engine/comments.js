@@ -23,8 +23,9 @@ export function buildComments(state, rng) {
   else if (!t.QZeroSales && state.Q < 40) push('quality', pick(rng, COMMENT_POOLS.qualityBad));
 
   // ③ 熟客 / 常客互动 + 当日过称结果（分量嘀咕、足称夸奖都是这一层）
-  if (t.shortWeighCount > 0) push('regular', COMMENT_POOLS.portion[2]);
-  else if (t.fullWeighCount > 0) push('regular', COMMENT_POOLS.portion[1]);
+  // 读的是 signal* 这一对：烫煮开关关着时它们逐字等于 short/fullWeighCount，开着时才可能被烫煮挪档（正文 3.11）
+  if (t.signalShortCount > 0) push('regular', COMMENT_POOLS.portion[2]);
+  else if (t.signalFullCount > 0) push('regular', COMMENT_POOLS.portion[1]);
   else if (state.R > 0) push('regular', pick(rng, COMMENT_POOLS.regular));
 
   // ④ 普通经营反馈填满到 2–3 条
