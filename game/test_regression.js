@@ -8,7 +8,8 @@ import { bridgeCheck, settleDay, settleWriteoff, settleTasting } from './src/eng
 import { newGame, roundJin, loadGame, STORAGE_KEY } from './src/engine/state.js';
 import { effectivePrice, buildBasket, planPayment, recomputeStock, buyTool, sellBackTool, ownsTool } from './src/engine/market.js';
 import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, PACKING_SPILL, CONFIG, SAVE_VERSION,
-  ADDITIVE, PREP_LEVELS, LABOR, TASTING, TOOLS, SCALE_DELTA_J_SHARE, SCALE_C_PER_JIN, SCALE_RISK_PER_JIN } from './src/data/constants.js';
+  ADDITIVE, PREP_LEVELS, LABOR, TASTING, TOOLS, SCALE_DELTA_J_SHARE, SCALE_C_PER_JIN, SCALE_RISK_PER_JIN,
+  COMPETITION } from './src/data/constants.js';
 import { SKU_BY_ID } from './src/data/skus.js';
 import { scenarioOf, WEATHER } from './src/data/scenario.js';
 import { evalCondition } from './src/engine/dsl.js';
@@ -17,7 +18,8 @@ import { beginDay, morningPreEvent, submitBasket, previewBasket, commitPrep, loc
 import { additiveOf, additiveUnlocked, capacityJin, computeMBase, prepBudget, prepGridUsed, qTaste, washSkipped,
   xiaodouPresent, laborCapMul, laborCostCents, tastingConvert } from './src/engine/production.js';
 import { drawHandOrders, handOrderCount } from './src/engine/weigh.js';
-import { applyHidden } from './src/engine/events.js';
+import { applyHidden, resolveChoice, weightOf } from './src/engine/events.js';
+import { morningRivals, priceWarReprice, sharesAndS, tallySuppression, rivalPriceCoef, previewShare } from './src/engine/competition.js';
 import { applyShadow, computeQ } from './src/engine/shadow.js';
 import { makeRng } from './src/engine/rng.js';
 
@@ -34,9 +36,10 @@ function check(name, cond, detail) {
 const NEAR = (a, b, eps = 1) => Math.abs(a - b) <= eps;
 
 // ── 1. 三条极端玩法 ───────────────────────────────────────────────
-// M1 口径：正文 3.5:141 明写压力测试带跑在 M1 构建（无小豆人工），「人工与产能数值不参与本区间判定」。
-// M2 开人工线后本段一律传 labor:false 复现签发时的口径；M2 在场口径的另立区间店主还没给，只作证据不套带。
-const M1 = { labor: false };
+// M1 口径：正文 3.5:141 明写压力测试带跑在 M1 构建（无小豆人工、无竞争，S ≡ 1），「人工与产能数值不参与本区间判定」。
+// M2 开人工线 / 竞争层后本段一律传 labor:false + competition:false 复现签发时的口径；
+// M2 在场口径的另立区间店主还没给，只作证据不套带。
+const M1 = { labor: false, competition: false };
 const runs = {};
 for (const [key, strategy] of Object.entries(STRATEGIES)) runs[key] = simulate(SEED, 10, strategy, 'headless', M1);
 
@@ -251,10 +254,11 @@ for (const [key, run] of Object.entries(runs)) {
 // ── 7. M2 R5：短斤 Risk 时点（§〇.1 第 11 条签「豁免」，签复 b48ec8e）───────────
 // 正本 3.4：3 单/日全短斤 = +1.5 Risk/日 → 约 27 天到 Risk 40（例行检查入池）、约 47 天到 Risk 70（大检查硬触发）。
 // 短斤项进受保护池、Rep ≥60 的 −2/日 只吃其余来源；两件事各自守住：斜率不变 + 抵扣没坏。
+// M2 第四批接竞争层后本段再钉一条 competition:false：27/47 是「街上没有分流（S ≡ 1）」时签的锚点，与 labor 同一条理由。
 const SHORT_LINE = { tier: 1, price: 'standard', weigh: 0.85, yieldAll: true,
   buyFacilities: false, upgrade: false, buyout: false };
 for (const seed of [SEED, 7979, 36832]) {
-  const { log } = simulate(seed, 50, SHORT_LINE);
+  const { log } = simulate(seed, 50, SHORT_LINE, 'headless', { competition: false });
   const rep60 = log.findIndex(d => d.Rep >= 60);
   const slope = [...new Set(log
     .map((d, i) => (i > 1 && log[i - 1].Rep >= 60 ? +(d.Risk - log[i - 1].Risk).toFixed(2) : null))
@@ -619,7 +623,7 @@ for (const seed of [SEED, 7979, 36832]) {
     absent.XiaodouAbsentDays === 0 && xiaodouPresent(absent) === true, `递减后 ${absent.XiaodouAbsentDays} 日`);
 
   // 钱：工资既扣现金又进经营净额，逐日恒等式与桥都要平
-  const laborOn5 = simulate(SEED, 5, STRATEGIES.clean, 'headless', { labor: true });
+  const laborOn5 = simulate(SEED, 5, STRATEGIES.clean, 'headless', { labor: true, competition: false });
   const reps = laborOn5.state.DailyReports;
   const idOK = reps.every(r => r.grossCents - r.writeoffCents - r.fixedCents - r.laborCents
     + r.tastingNetCents === r.netOpsCents);
@@ -743,6 +747,294 @@ for (const seed of [SEED, 7979, 36832]) {
     `R ${R0} → ${sampled.s.R}（pending 已清）`);
   check('没开试吃时 pending 与份数都是 0（不给自己留一个隐形的 +1 R）',
     bare.s.TastingCount === 0 && bare.s.tasting_pending_R === 0);
+}
+
+// ── 11. M2 第四批：常驻竞争层（正文 3.13 / 3.14 第 7b / 附录 G.3、G.5、E.8、E.9）──────
+{
+  const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+  const war = EVENTS.find(e => e.id === 'evt_s_pricewar');
+  const ret = EVENTS.find(e => e.id === 'evt_s_return');
+
+  // 口径关：已签发的 M1 带（正文 3.5:141「无竞争（S ≡ 1）」）——整层不许碰账，也不许多抽一次随机
+  const off = simulate(SEED, 10, STRATEGIES.mid, 'headless', M1);
+  const rivalDraws = Object.keys(off.state.streamCounter).filter(k => k.startsWith('rival:') && k !== 'rival:0').length;
+  check('关竞争层 = M1 已签口径：S 恒 1、四摊份额与排队惯性停在 F.6 初值、王老板价签/P 一动不动',
+    off.log.every(d => d.S === 1 && d.share === null && d.rivalPrice === COMPETITION.rivalStartPrice
+      && d.rivalP === COMPETITION.rivalP && d.suppress === 0 && d.boost === 0)
+    && off.state.Share.every(x => x === COMPETITION.shareBase)
+    && off.state.QueueInertia.every(x => x === 1),
+    `十日 S ${[...new Set(off.log.map(d => d.S))].join('/')}，份额 ${off.state.Share.join('/')}`);
+  check('关竞争层不抽 rival 子流（同存档复现只依赖种子，不依赖"这层开没开过"）', rivalDraws === 0,
+    `rival 子流按日计数键 ${rivalDraws} 个（建档预置的 rival:0 不算抽取）`);
+  check('关竞争层时特殊池恒空：E.9 的入场式 RivalSuppressedDays 被第 11 步归零，价格战进不来',
+    off.log.every(d => !d.evening || !d.evening.startsWith('evt_s')),
+    `十日晚间事件 ${off.log.map(d => d.evening || '—').join('/')}`);
+
+  // 在场口径：竞争只改需求这一条腿，账目口径一律不动
+  const on = simulate(SEED, 10, STRATEGIES.mid, 'headless', { labor: false, competition: true });
+  const onBridge = bridgeCheck(on.state);
+  check('在场竞争层：十日现金桥与 NP 逐日对平（竞争不改账，只改需求）',
+    onBridge.ok && on.state.DailyReports.reduce((s, r) => s + r.netOpsCents + r.eventNetCents, 0) === on.state.NP,
+    `桥差 ${onBridge.diff / 100} 元，NP ${on.state.NP / 100} 元`);
+  check('在场：S 落在钳制带 [0.6, 1.4] 内、四摊份额每日和为 1（G.1 `:473` 只 clamp、总口径 `:6`「系数不取整」→ 原值直接验）',
+    on.log.every(d => d.S >= COMPETITION.sBand[0] && d.S <= COMPETITION.sBand[1] && d.share
+      && Math.abs(d.share.reduce((s, x) => s + x, 0) - 1) < 1e-9)
+    && on.log.some(d => d.S !== 1),
+    `十日 S ${on.log.map(d => d.S.toFixed(3)).join('/')}`);
+  check('在场：排队惯性按 F.6 式 = clamp(昨日份额 ÷ 0.25, 0.85, 1.15) 逐位成立',
+    on.state.Share.every((x, i) => on.state.QueueInertia[i] === clamp(x / COMPETITION.shareBase,
+      COMPETITION.inertiaBand[0], COMPETITION.inertiaBand[1])),
+    `份额 ${on.state.Share.map(x => x.toFixed(4)).join('/')} → 惯性 ${on.state.QueueInertia.map(x => x.toFixed(4)).join('/')}`);
+  check('在场十日同种子逐字复现（竞争层的随机全在命名子流里）',
+    JSON.stringify(simulate(SEED, 10, STRATEGIES.mid, 'headless', { labor: false, competition: true }).log)
+    === JSON.stringify(on.log));
+
+  // 附录 C 的份额两项（正文 :451 主式「今日预估份额 ÷ 昨日实际份额」、回退式「× 今日预估份额 ÷ 0.25」）：
+  // 样段里它们恒为 1 所以从没落过点，竞争层一开就不再是 1 —— 关掉整层时必须逐位回到 1，已签的 M1 带才不动
+  const offState = newGame(SEED);
+  offState.competitionOn = false;
+  beginDay(offState);
+  const estOff = previewBasket(offState, [], 'qinmin').forecast.estBowls;
+  const onState = newGame(SEED);
+  onState.competitionOn = true;
+  beginDay(onState);
+  // beginDay 那一次 rival 抽取是竞争层第 1 步自己的账，不能算在试算头上：只验「两次预览之后计数与状态一字未动」
+  const drawBefore = Object.entries(onState.streamCounter).filter(([k]) => k.startsWith('rival:')).map(([k, v]) => `${k}=${v}`).join(',');
+  const estOn = previewBasket(onState, [], 'qinmin').forecast.estBowls;
+  const ps = previewShare(onState, PRICE_TIERS.qinmin.perJin);
+  const drawAfter = Object.entries(onState.streamCounter).filter(([k]) => k.startsWith('rival:')).map(([k, v]) => `${k}=${v}`).join(',');
+  check('首日回退式的份额项：关层恒 ×1、开层按（预估份额 ÷ 基准 0.25）缩，且预估份额 < 基准 → 试算必然变小',
+    estOff > estOn && Math.abs(estOn - (estOff - Math.round(onState.R * 0.5)) * (ps / COMPETITION.shareBase)
+      - Math.round(onState.R * 0.5)) < 1e-12,
+    `回退式 ${estOff.toFixed(2)} 碗 → 在场 ${estOn.toFixed(2)} 碗（预估份额 ${ps.toFixed(4)} ÷ 0.25 = ${(ps / COMPETITION.shareBase).toFixed(4)}，熟客 R_v 不乘份额）`);
+  check('试算的预估份额不掷随机、不落账：两次预览之后 rival 子流计数与 Share／排队惯性一字未动',
+    drawBefore === drawAfter && onState.Share.every(x => x === COMPETITION.shareBase)
+    && onState.QueueInertia.every(x => x === 1),
+    `子流计数 ${drawBefore} → ${drawAfter}，份额 ${onState.Share.join('/')}，惯性 ${onState.QueueInertia.join('/')}`);
+  const samePrice = previewShare(onState, onState.PricePerJin);
+  const s7b = sharesAndS(onState);
+  check('预估份额与第 7b 步同一条吸引力式（同一价签算出来必须一模一样，全案不许出现两套 A_i）',
+    samePrice === s7b.share[0],
+    `试算侧 ${samePrice.toFixed(6)} ／ 第 7b 步 ${s7b.share[0].toFixed(6)}`);
+  const ratio = newGame(SEED);
+  ratio.competitionOn = true;
+  beginDay(ratio);
+  ratio.YesterdaySoldBowls = 40;
+  ratio.YesterdayScenario = ratio.today.scenario;   // 情境比取 1，只剩份额比在动
+  const estRatioBase = previewBasket(ratio, [], 'qinmin').forecast.estBowls;
+  ratio.Share = [0.5, 0.2, 0.2, 0.1];
+  const estRatioHalf = previewBasket(ratio, [], 'qinmin').forecast.estBowls;
+  check('比值式的份额项吃「÷ 昨日实际份额」：昨日份额从 0.25 抬到 0.5，试算按同比例腰斩（与今日预估无关）',
+    Math.abs(estRatioHalf - estRatioBase * (COMPETITION.shareBase / 0.5)) < 1e-12,
+    `${estRatioBase.toFixed(2)} 碗 → ${estRatioHalf.toFixed(2)} 碗`);
+  check('份额为 0 的存档不炸：正文写「昨日份额为 0 时改用回退式」，比值式的分母要有这道闸',
+    (() => { ratio.Share = [0, 1 / 3, 1 / 3, 1 / 3]; ratio.YesterdaySoldBowls = 40;
+      const f = previewBasket(ratio, [], 'qinmin').forecast;
+      return f.lowConfidence === true && Number.isFinite(f.estBowls); })(),
+    `回退式给 ${previewBasket(ratio, [], 'qinmin').forecast.estBowls.toFixed(2)} 碗并标低置信度`);
+  const onClean = simulate(SEED, 10, STRATEGIES.clean, 'headless', { labor: false, competition: true });
+  const offClean = simulate(SEED, 10, STRATEGIES.clean, 'headless', M1);
+  check('接线这两项要解决的问题：在场首日不再按「无竞争的需求」进货，第一天的报损与不在场逐分相等（差额登记在 delta §二十四.4）',
+    onClean.log[0].writeoff === offClean.log[0].writeoff && onClean.log[0].bought < offClean.log[0].bought,
+    `首日进货 ${offClean.log[0].bought.toFixed(1)} → ${onClean.log[0].bought.toFixed(1)} 元，报损 ${offClean.log[0].writeoff} ／ ${onClean.log[0].writeoff} 元`);
+
+  // G 式与钳制带（附录 G.3 :583 的算式，v4.9.2 R9 基准价 26.8）
+  check('G_i = clamp(26.8 ÷ 价, 0.70, 1.30)：基准价取 1.0，两家间接竞品双双撞到上限 1.30',
+    rivalPriceCoef(COMPETITION.priceBase) === 1.0
+    && rivalPriceCoef(18.8) === COMPETITION.gBand[1] && rivalPriceCoef(15.8) === COMPETITION.gBand[1]
+    && rivalPriceCoef(40) === COMPETITION.gBand[0],
+    `18.8 → ${rivalPriceCoef(18.8)}（原式 1.426）、15.8 → ${rivalPriceCoef(15.8)}（原式 1.696）、40 → ${rivalPriceCoef(40)}（原式 0.67）`);
+
+  const p = newGame(SEED);
+  p.competitionOn = true;
+  beginDay(p);
+  p.today.scenario = scenarioOf('sunny', 10);       // 只取天气，避开开学周的情境修正干扰分流算式
+  p.QueueInertia = [1, 1, 1, 1];
+  const sunny = sharesAndS(p);
+  check('晴天四摊吸引力：炸串 62.8 > 凉皮 46.8（P 42/36 拉开，正文 §〇.1 第 9 条）',
+    Math.abs(sunny.A[2] - 42 * 1.30 * 1.15) < 1e-9 && Math.abs(sunny.A[3] - 36 * 1.30) < 1e-9,
+    `A = ${sunny.A.map(x => x.toFixed(2)).join(' / ')}`);
+  p.today.scenario = scenarioOf('heat', 10);
+  p.QueueInertia = [1, 1, 1, 1];
+  const heat = sharesAndS(p);
+  check('高温天分流换手：凉皮 60.8 > 炸串 54.6（凉皮 ×1.3 / 炸串回到 1.0）',
+    Math.abs(heat.A[3] - 36 * 1.30 * 1.30) < 1e-9 && Math.abs(heat.A[2] - 42 * 1.30) < 1e-9,
+    `A = ${heat.A.map(x => x.toFixed(2)).join(' / ')}`);
+  const rain = scenarioOf('rain', 10);
+  p.today.scenario = rain;
+  p.QueueInertia = [1, 1, 1, 1];
+  check('雨天炸串分流 ×0.8（正文 3.13 四值表），凉皮不受天气影响仍 1.0',
+    rain.weather.id === 'rain' && Math.abs(sharesAndS(p).A[2] - 42 * 1.30 * 0.8) < 1e-9);
+
+  // 第 1 步：跟价式两分支 + 出事切换 + 每周加压
+  const f = newGame(SEED);
+  f.competitionOn = true;
+  f.Day = 5; f.PricePerJin = PRICE_TIERS.qinmin.perJin;
+  morningRivals(f, makeRng(f));
+  check('跟价式：你降到亲民 19.2 → 他 clamp(19.2×0.92, 19.2, 28.9) 落在下界 19.2（"三天内跟降"）',
+    f.RivalPrice === clamp(PRICE_TIERS.qinmin.perJin * COMPETITION.followCoef,
+      COMPETITION.followBand[0], COMPETITION.followBand[1]) && f.RivalPrice === COMPETITION.followBand[0],
+    `价签 ${COMPETITION.rivalStartPrice} → ${f.RivalPrice}`);
+  const before = f.RivalPrice;
+  f.Day += 1; f.PricePerJin = PRICE_TIERS.signature.perJin;
+  morningRivals(f, makeRng(f));
+  check('涨价他不跟：价签原样挂着（正文 3.13 两分支的第二支，"还是老价钱"）', f.RivalPrice === before,
+    `你挂 ${PRICE_TIERS.signature.perJin}，他仍 ${f.RivalPrice}`);
+
+  const g2 = newGame(SEED);
+  g2.competitionOn = true;
+  beginDay(g2);
+  g2.RivalP = COMPETITION.rivalPLow;
+  g2.rivalLowUntilDay = g2.Day + COMPETITION.rivalLowDays;
+  const pSeq = [];
+  for (let i = 0; i < 6; i++) { beginDay(g2); pSeq.push(g2.RivalP); }
+  check('出事当周 P=30、五天后回 55（正文 3.13；rival 子流每日 4% 抽中才进这段）',
+    pSeq.slice(0, COMPETITION.rivalLowDays).every(x => x === COMPETITION.rivalPLow)
+    && pSeq[COMPETITION.rivalLowDays] === COMPETITION.rivalP, `六日 P ${pSeq.join('/')}`);
+
+  const g3 = newGame(SEED);
+  g3.competitionOn = true;
+  const boostSeq = [];
+  for (const day of [99, 100, 103, 107]) {
+    g3.Day = day;
+    morningRivals(g3, makeRng(g3));
+    boostSeq.push(+g3.RivalAttrBoostWeeks.toFixed(6));
+  }
+  check('第 100 天起每周 ×1.03 加压防死局，中间那周不动（附录 F.6 RivalAttrBoostWeeks 行：Day>=100 的第 1 步）',
+    boostSeq[0] === 0 && boostSeq[1] === COMPETITION.boostWeekMul
+    && boostSeq[2] === COMPETITION.boostWeekMul
+    && g3.RivalAttrBoostWeeks === COMPETITION.boostWeekMul * COMPETITION.boostWeekMul,
+    `99/100/103/107 天加压 ${boostSeq.join(' → ')}`);
+  check('F.6 初值是 0，所以第一周必须落 1.03 而不是 0×1.03（照式子乘会永远乘不出加压）',
+    newGame(SEED).RivalAttrBoostWeeks === 0 && g3.RivalAttrBoostWeeks > 1);
+  const p100 = newGame(SEED);
+  p100.competitionOn = true;
+  p100.Day = 100;
+  morningRivals(p100, makeRng(p100));
+  p100.today.scenario = scenarioOf('sunny', 10);
+  p100.QueueInertia = [1, 1, 1, 1];
+  const boosted = sharesAndS(p100).A;
+  check('加压只抬王老板的吸引力，两家间接竞品照常数 P 不动（正文 §〇.1 第 9 条：它们不吃 RivalAttrBoostWeeks）',
+    p100.RivalAttrBoostWeeks === COMPETITION.boostWeekMul
+    && Math.abs(boosted[1] - 55 * rivalPriceCoef(p100.RivalPrice) * COMPETITION.boostWeekMul) < 1e-9
+    && Math.abs(boosted[2] - 42 * 1.30 * 1.15) < 1e-9 && Math.abs(boosted[3] - 36 * 1.30) < 1e-9,
+    `加压后 A = ${boosted.map(x => x.toFixed(2)).join(' / ')}`);
+
+  // 压制计数（第 11 步）与价格战三日倒计时
+  const s1 = newGame(SEED);
+  s1.competitionOn = true;
+  s1.Share = [0.31, 0.19, 0.30, 0.20];
+  tallySuppression(s1);
+  const s2 = newGame(SEED);
+  s2.competitionOn = true;
+  s2.RivalSuppressedDays = 4;
+  s2.Share = [0.29, 0.19, 0.30, 0.22];
+  tallySuppression(s2);
+  check('压制计数：你 ≥0.30 且他 ≤0.20 → +1，任一不满足即复位 0（附录 F.6 第 11 步行）',
+    s1.RivalSuppressedDays === 1 && s2.RivalSuppressedDays === 0,
+    `达标 ${s1.RivalSuppressedDays}／差一条 ${s2.RivalSuppressedDays}`);
+
+  const w = newGame(SEED);
+  w.competitionOn = true;
+  w.Rep = COMPETITION.warRepGate; w.RivalSuppressedDays = 5;
+  const okIn = evalCondition(war.condition, w);
+  w.RivalSuppressedDays = 4;
+  const noIn = evalCondition(war.condition, w);
+  w.RivalSuppressedDays = 5; w.Rep = COMPETITION.warRepGate - 1;
+  const noRep = evalCondition(war.condition, w);
+  check('价格战入池式照 E.9 原文：RivalSuppressedDays>=5 & Rep>=40，两条各差一点都不进',
+    okIn === true && noIn === false && noRep === false, `达标 ${okIn}／压制差一天 ${noIn}／口碑差一点 ${noRep}`);
+
+  const war2 = newGame(SEED);
+  war2.competitionOn = true;
+  beginDay(war2);
+  war2.Rep = 60; war2.RivalSuppressedDays = 6;
+  resolveChoice(war2, war, 'hold');
+  check('价格战结算：写 PricewarDays=3，同时把 evt_s_return 权重拉满 100（E.9 两行原文）',
+    war2.PricewarDays === 3 && war2.WeightShifts.evt_s_return?.weight === 100
+    && weightOf(war2, ret) === 100, `倒计时 ${war2.PricewarDays} 日，回流权重 ${weightOf(war2, ret)}`);
+  const warSeq = [];
+  for (let i = 0; i < 4; i++) {
+    beginDay(war2);
+    lockTradingDay(war2, { priceTier: 'standard' });
+    warSeq.push(`${war2.today.pricewarActive ? '打' : '停'}/${war2.PricewarDays}/${war2.RivalPrice.toFixed(3)}`);
+  }
+  const warPrice = +(PRICE_TIERS.standard.perJin * COMPETITION.warCoef).toFixed(3);
+  check('三日内他挂「你当日价 ×0.78」、第四日停（G.3 :577 的式子挂在定版之后，因为要用"当日价"）',
+    warSeq[0] === `打/2/${warPrice}` && warSeq[1] === `打/1/${warPrice}`
+    && warSeq[2] === `打/0/${warPrice}` && warSeq[3] === `停/0/${warPrice}`,
+    `四日「是否开打 / 剩余倒计时 / 他的价签」= ${warSeq.join(' → ')}`);
+  check('第三日末回流条件成立：PricewarDays 归零那一晚才抽得到（E.8 condition 第三项）',
+    war2.PricewarDays === 0 && evalCondition(ret.condition, war2) === true
+    && war2.EventHistory.includes('evt_s_pricewar'));
+
+  // 回流三档（正文 3.4 名场面表 / E.8）
+  const at = rep => {
+    const s = newGame(SEED);
+    s.competitionOn = true;
+    beginDay(s);
+    s.Rep = rep;
+    s.WeightShifts.evt_s_return = { weight: 100, expireDay: s.Day + 7 };   // 模拟价格战第三日末的拉满
+    const r = resolveChoice(s, ret, null);
+    return { s, branch: r.branch, action: r.action };
+  };
+  const full = at(50), weak = at(30), lost = at(29);
+  check('回流全档 Rep≥50：D0 ×1.20 持续 5 日、R +15、L +1、小刘发帖进 ① 类强制留言',
+    full.s.d0_buff_mult === 1.2 && full.s.d0_buff_days === 5 && full.s.R === 15 && full.s.L === 1
+    && full.s.today.forcedComments.length === 1, `R ${full.s.R}／L ${full.s.L}／留言 ${full.s.today.forcedComments[0]}`);
+  check('弱档 30≤Rep<50：×0.95 持续 3 日、R +3、L 不加（正文 3.4「L 不加」写在表里，不是漏配）',
+    weak.s.d0_buff_mult === 0.95 && weak.s.d0_buff_days === 3 && weak.s.R === 3 && weak.s.L === 0);
+  check('输档 Rep<30：熟客存量 R 一律不动，改为 ×0.85 持续 7 日 + R 增长冻结 7 日（正文 3.4 保底承诺优先）',
+    lost.s.R === 0 && lost.s.d0_buff_mult === 0.85 && lost.s.d0_buff_days === 7 && lost.s.R_frozen_days === 7,
+    `R ${lost.s.R}、冻结 ${lost.s.R_frozen_days} 日`);
+  check('三档都是"按 Rep 自动分版"：actions 为空、玩家不做选择也照样落账（resolveChoice 走 auto_branch）',
+    full.action === null && weak.action === null && lost.action === null
+    && full.branch.cond === 'Rep>=50' && weak.branch.cond === 'Rep>=30' && lost.branch.cond === 'true',
+    `Rep 50/30/29 命中档：${full.branch.cond} ／ ${weak.branch.cond} ／ ${lost.branch.cond}`);
+  check('触发后自身权重复位 0、冷却按「每次价格战重新武装一次」落 0 日（E.8 末两行）',
+    [full, weak, lost].every(x => x.s.WeightShifts.evt_s_return === undefined
+      && weightOf(x.s, ret) === 0 && x.s.Cooldowns.evt_s_return === x.s.Day));
+
+  // 冻结式的先判后减（附录 F.6 R_frozen_days 行：第 9 步递减）
+  const fr = newGame(SEED);
+  fr.R_frozen_days = 7;
+  fr.today.J = 10;
+  fr.today.consumed = [{ qty: 10, batch: { cat: 'MB', q: 95 } }];   // Q=95 ≥70，本该 +3
+  applyShadow(fr, { shortOrders: 0, spillBowls: 0 });
+  check('冻结期内第 9 步跳过 Q≥70 的 +3，且先判后减（当日仍算冻结日，7 日才吃满）',
+    fr.R === 0 && fr.R_frozen_days === 6, `R ${fr.R} 未涨，冻结余 ${fr.R_frozen_days} 日`);
+  const fr2 = newGame(SEED);
+  fr2.R_frozen_days = 1;
+  fr2.today.J = 10;
+  fr2.today.consumed = [{ qty: 10, batch: { cat: 'MB', q: 95 } }];
+  applyShadow(fr2, { shortOrders: 0, spillBowls: 0 });
+  const lastFrozenDay = fr2.R;
+  applyShadow(fr2, { shortOrders: 0, spillBowls: 0 });
+  check('冻结到期自动解除，不必任何事件再判一次：最后一天仍冻结，次日 +3 就回来',
+    lastFrozenDay === 0 && fr2.R_frozen_days === 0 && fr2.R === 3,
+    `冻结末日 R ${lastFrozenDay} → 次日 R ${fr2.R}（上限 ${Math.floor(fr2.BaseSales * 0.6)}）`);
+
+  // 强制留言排第一且不占概率类名额（正文 3.4 ①类优先级）
+  const cmt = simulate(SEED, 10, STRATEGIES.mid, 'headless', { labor: false, competition: true });
+  const forcedDay = cmt.log.find(d => d.evening === 'evt_s_return');
+  check('事件写的固定文案进的是 ① 类强制信号（正文 3.4 优先级第一档，不掷随机选材）',
+    forcedDay === undefined || forcedDay.comments.some(c => c.startsWith('forced:')),
+    forcedDay ? `${forcedDay.evening} 当日留言 ${forcedDay.comments.join(' ｜ ')}` : '本种子 10 日内未打到回流（条件链由上面的探针覆盖）');
+
+  // 价格战钳制带上界 28.9（勘误批 c：26.8 → 28.9）——本档价梯度不可达，只做钳制式探针
+  const wb = newGame(SEED);
+  wb.competitionOn = true;
+  wb.today.pricewarActive = true;
+  wb.PricePerJin = 40;
+  priceWarReprice(wb);
+  const wb2 = newGame(SEED);
+  wb2.competitionOn = true;
+  wb2.today.pricewarActive = true;
+  wb2.PricePerJin = 19.2;
+  priceWarReprice(wb2);
+  check('价格战式钳制带照已签勘误 c 落 [17.0, 28.9]：下界在亲民价 19.2×0.78=14.976 处真咬，上界只在合成价 40 处才够得着',
+    wb2.RivalPrice === COMPETITION.warBand[0] && wb.RivalPrice === COMPETITION.warBand[1],
+    `19.2 → ${wb2.RivalPrice}（钳下界）、40 → ${wb.RivalPrice}（钳上界；三档定价最高 32.2×0.78=25.116，够不到上界）`);
 }
 
 // ── 输出 ─────────────────────────────────────────────────────────

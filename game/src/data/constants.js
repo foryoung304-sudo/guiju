@@ -109,6 +109,29 @@ export const LABOR = {
 // 正文 3.6 注 / 附录 D.5：试吃份数 n ∈ 3–6（第 5 步定版、不掷随机）；一份 = 0.3 碗的料；1 元/份；转化 = floor(n ÷ 3)
 export const TASTING = { min: 3, max: 6, bowlSharePerPortion: 0.3, incomeCentsPerPortion: 100, convertPer: 3 };
 
+// ── 正文 3.13 常驻竞争 + 附录 G.3 / G.5 四摊常数（M2 第四批接线；全部照原文，未新增数值）──
+// G 基准价 26.8 = 标准价档（v4.9.2 R9 随价梯度上移）；跟价带 19.2 / 28.9；
+// 价格战带原写下界 15.8 → 17.0（R9 已签）、上界 26.8 → 28.9（勘误批 signoff-v492-audit-errata-20261031 c 项：与跟价带上界一致）
+export const COMPETITION = {
+  priceBase: 26.8, gBand: [0.70, 1.30],
+  shareBase: 0.25, sBand: [0.6, 1.4], inertiaBand: [0.85, 1.15],
+  rivalStartPrice: 22.8, rivalP: 55, rivalPLow: 30, rivalLowDays: 5, rivalMissPct: 0.04,
+  followCoef: 0.92, followBand: [19.2, 28.9],
+  warCoef: 0.78, warBand: [17.0, 28.9],
+  // 三日倒计时与「>=5 天 + Rep>=40」的门槛写在 `data/events.js` 的两行里（E.9 原文照录），
+  // 这里不再放一份——同一个已签数放两处就会各飘各的
+  // 第 100 天起单调加压防死局（正文 3.4 / §九 / 附录 F.6 `RivalAttrBoostWeeks`）：每周 ×1.03，只作用于王老板的吸引力
+  boostFromDay: 100, boostEveryDays: 7, boostWeekMul: 1.03,
+  // 5.3 价格战触发式的份额门槛（RivalSuppressedDays 的计数定义在正文 3.13，份额取第 7b 步实际值）
+  suppressSelfShare: 0.30, suppressRivalShare: 0.20, warRepGate: 40,
+};
+// 四摊同式（A_i = P_i × G_i × 排队惯性_i × 分流系数_i）：本摊与王老板分流系数恒 1.0
+// 两家间接竞品的 P 是常数、无生成规则、不吃加压（正文 §〇.1 第 9 条待签，默认按 42 / 36 执行）
+export const RIVAL_INDIRECT = [
+  { id: 'zhachuan', name: '炸串大姐', price: 18.8, p: 42, divert: { sunny: 1.15, cloudy: 1.15, rain: 0.8, heat: 1.0 } },
+  { id: 'liangpi', name: '凉皮叔', price: 15.8, p: 36, divert: { sunny: 1.0, cloudy: 1.0, rain: 1.0, heat: 1.3 } },
+];
+
 // 附录 J：结局判定用的量纲（ui-spec §一换算表：盘店价 60,000 / 金盆洗手 300,000 / 烧心 Wmax 210 斤）
 export const BUYOUT_PRICE_CENTS = 6000000;
 export const RETIRE_NP_CENTS = 30000000;
@@ -126,7 +149,8 @@ export const CONFIG = {
   handOrdersPerDay: 3,
   handOrdersTierFull: 3,
   handOrdersPerDayFull: 4,
-  competition: false,
+  // 正文 3.13 / 3.14 第 7b：M2 第四批接线。已签发的 M1 带（3.5:141「无竞争（S ≡ 1）」）由 harness 传 competition:false 复现
+  competition: true,
   // 正文 3.12 生产链前段：M2 接线（备菜工时与产能修正、调味台 M_base、添加剂三档、打包三档）
   prep: true,
   flavor: true,

@@ -12,6 +12,7 @@ import {
 import { additiveUnlocked, prepBudget, prepGridUsed, xiaodouPresent, laborCostCents, tastingConvert } from '../engine/production.js';
 import { effectivePrice, skuAvailable, creditAvailable, buyFacility, rampCoef, ownsTool, buyTool, sellBackTool } from '../engine/market.js';
 import { drawEvent, resolveChoice } from '../engine/events.js';
+import { competitionOn, streetBoard } from '../engine/competition.js';
 import { evalCondition } from '../engine/dsl.js';
 import { EVENTS } from '../data/events.js';
 import { drawHandOrders, GRAMS_PER_JIN } from '../engine/weigh.js';
@@ -610,6 +611,7 @@ const VIEWS = {
           <div><div class="muted">欠着</div><span class="num">${y(state.DebtSupplier)} / ${y(state.CreditCap)} 元</span></div>
         </div>
       </div>
+      ${streetPanel()}
       <div class="panel warn"><h3>柜里还剩</h3>
         <div class="row">${ALL_CATS.map(c => `<span class="muted">${CAT[c].name}<br><b class="num">${(c === 'SP' ? state.StockSoup : state.StockSolid[c]).toFixed(2)}</b>${c === 'SP' ? ' 份' : ' 斤'}</span>`).join('')}</div>
         ${state.YesterdaySoldOut ? '<p class="negv">昨天卖断过货。</p>' : ''}</div>
@@ -979,6 +981,15 @@ function orderCard(o) {
       <button class="pinch" id="pn-${o.customerId}-${l.cat}" data-pinch data-cust="${o.customerId}" data-cat="${l.cat}">捏出 −${stepFor(o.customerId, l.cat)} 克</button></div>
     <div class="muted kind-bad" id="flag-${o.customerId}-${l.cat}">${flagText(o.customerId, l, Number(g[l.cat] || 0))}</div>`).join('')}
   </div>`;
+}
+
+function streetPanel() {
+  // 正文 3.13：每天清晨玩家能看见三家的价签与昨日排队长度；四摊的 P 属传闻层，不进面板（3.1 豁免条）
+  if (!competitionOn(state)) return '';
+  const rows = streetBoard(state).map(r =>
+    `<span class="muted">${esc(r.name)}<br><b class="num">${r.price.toFixed(1)}</b> 元/斤 · ${r.queue}</span>`).join('');
+  return `<div class="panel"><h3>街面价签</h3><div class="row">${rows}</div>
+    <p class="muted">价是人家自己挂出来的，排队是人自己站出来的。</p></div>`;
 }
 
 function eventOverlay() {

@@ -13,7 +13,9 @@ export function buildComments(state, rng) {
     out.push({ kind, text });
   };
 
-  // ① 强制信号：风险到阈值必须有传闻（正文 3.4 Risk ≥40 → 传闻类留言）
+  // ① 强制信号：事件写的固定文案先占位（附录 E.7/E.8/E.10「结算页留言位多一条（① 类强制信号）」，不掷随机）；
+  // 再是风险到阈值必须有传闻（正文 3.4 Risk ≥40 → 传闻类留言）
+  for (const text of t.forcedComments) push('forced', text);
   if (state.Risk >= 40) push('forced', pick(rng, COMMENT_POOLS.rumor));
 
   // ② 品质信号：只在 Q ≥80 / Q <40 越线时入池，且每次结算至多 1 条

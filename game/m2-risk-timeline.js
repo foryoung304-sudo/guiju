@@ -8,8 +8,9 @@ import { simulate as simRaw, REF_STRATEGIES } from './src/sim.js';
 import { applyShadow } from './src/engine/shadow.js';
 
 // M1 口径：本脚本对的是已签发的 Risk/卖断货天数锚（签复 b48ec8e §三、裁定 0137f58 ④），
-// 那些锚跑在 M1 构建（无小豆人工，正文 3.5:141）→ 关人工复现，M2 在场口径的时点另在文末单独报，不替换锚。
-const simulate = (seed, days, strat, closer, opts) => simRaw(seed, days, strat, closer, { labor: false, ...opts });
+// 那些锚跑在 M1 构建（无小豆人工、无竞争分流，正文 3.5:141）→ 两样一起关才复现得出来，
+// M2 在场口径的时点另在文末单独报，不替换锚。
+const simulate = (seed, days, strat, closer, opts) => simRaw(seed, days, strat, closer, { labor: false, competition: false, ...opts });
 
 const SEEDS = [7979, 36832, 20261031];
 const SHORT_LINE = { name: '短斤线 全正经 + 标准价 + 天天短斤', tier: 1, price: 'standard', weigh: 0.85,

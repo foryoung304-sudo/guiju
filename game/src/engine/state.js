@@ -1,4 +1,4 @@
-import { SAVE_VERSION, MIGRATABLE_SAVE_VERSIONS, SUBSTREAMS, TIERS_STALL, CONFIG, ALL_CATS, SOLID_CATS, PRICE_TIERS, START_CASH_CENTS, START_CREDIT_CAP_CENTS, TOOLS } from '../data/constants.js';
+import { SAVE_VERSION, MIGRATABLE_SAVE_VERSIONS, SUBSTREAMS, TIERS_STALL, CONFIG, ALL_CATS, SOLID_CATS, PRICE_TIERS, START_CASH_CENTS, START_CREDIT_CAP_CENTS, TOOLS, COMPETITION } from '../data/constants.js';
 import { buildWeatherCycle } from '../data/scenario.js';
 import { makeRng } from './rng.js';
 
@@ -41,7 +41,9 @@ export function newGame(seed) {
     d0_buff_mult: 1.0, d0_buff_days: 0, next_day_traffic_mult: 1.0, event_demand_mult: 1.0,
     event_reserve_bowls: 0, reg_reserved_bowls: 0, R_frozen_days: 0,
     RivalPrice: 22.8, RivalP: 55, RivalSuppressedDays: 0, Share: [0.25, 0.25, 0.25, 0.25], QueueInertia: [1, 1, 1, 1],
-    RivalAttrBoostWeeks: 0, HandOrders: [], RegularStory: [0, 0, 0, 0],
+    // rivalLowUntilDay：正文 3.13「出事当周 P 降到 30、五天后回 55」的到期日；附录 F.6 只列了 RivalP 的切换结果、没列这个计数器，已登记待并
+    RivalAttrBoostWeeks: 0, rivalLowUntilDay: 0, competitionOn: CONFIG.competition,
+    HandOrders: [], RegularStory: [0, 0, 0, 0],
     YesterdaySoldBowls: 0, YesterdaySoldJin: 0, YesterdayScenario: null, YesterdayRamp: 1.0, YesterdayF: 1.0,
     YesterdaySoldJinByCat: Object.fromEntries(SOLID_CATS.map(c => [c, 0])), YesterdaySoup: 0,
     YesterdaySoldOut: false, YesterdayD0: 0,
@@ -63,6 +65,8 @@ export function newGame(seed) {
 export function blankToday() {
   return {
     scenario: null,
+    // 竞争层当日三项：S（第 7b 步实际值，只进回放与后台）、四摊份额、价格战当日是否生效
+    S: 1, share: null, pricewarActive: false,
     priceMods: [],
     priceMultToday: {},
     purchases: [],
@@ -79,6 +83,8 @@ export function blankToday() {
     eventCashEvening: 0,
     eventAssetLoss: 0,
     comments: [],
+    // 附录 E.8/E.7/E.10 的「① 类强制留言」：事件写的固定文案，不掷随机、第 12 步排在概率类信号之前
+    forcedComments: [],
     shortWeighCount: 0,
     fullWeighCount: 0,
     portionGrudge: false,
@@ -124,6 +130,15 @@ export function loadGame() {
   if (typeof parsed.XiaodouAbsentDays !== 'number' || !Number.isFinite(parsed.XiaodouAbsentDays)) parsed.XiaodouAbsentDays = 0;
   if (typeof parsed.tasting_pending_R !== 'number' || !Number.isFinite(parsed.tasting_pending_R)) parsed.tasting_pending_R = 0;
   if (typeof parsed.laborOn !== 'boolean') parsed.laborOn = CONFIG.labor;
+  // M2 第四批（常驻竞争层）新带的字段：旧档按「这条街还没打过价」补初值，不动任何已签数值
+  if (typeof parsed.competitionOn !== 'boolean') parsed.competitionOn = CONFIG.competition;
+  if (typeof parsed.RivalPrice !== 'number') parsed.RivalPrice = COMPETITION.rivalStartPrice;
+  if (typeof parsed.RivalP !== 'number') parsed.RivalP = COMPETITION.rivalP;
+  for (const k of ['PricewarDays', 'RivalSuppressedDays', 'RivalAttrBoostWeeks', 'rivalLowUntilDay'])
+    if (typeof parsed[k] !== 'number' || !Number.isFinite(parsed[k])) parsed[k] = 0;
+  if (!Array.isArray(parsed.Share) || parsed.Share.length !== 4) parsed.Share = [0.25, 0.25, 0.25, 0.25];
+  if (!Array.isArray(parsed.QueueInertia) || parsed.QueueInertia.length !== 4) parsed.QueueInertia = [1, 1, 1, 1];
+  if (!Array.isArray(parsed.today?.forcedComments)) parsed.today = { ...(parsed.today || {}), forcedComments: [] };
   parsed.saveVersion = SAVE_VERSION;
   return parsed;
 }

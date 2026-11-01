@@ -16,6 +16,30 @@ function eligible(state, ev, timing) {
     && !inCooldown(state, ev);
 }
 
+// weight_shift（正文 5.3「事件结算后立即生效；持续到目标事件被触发为止，或满 7 天自动过期」）：
+// 同目标多份取最大值不叠加，故写入时比大小；读取时过期即当作不存在
+export function weightOf(state, ev) {
+  const shift = state.WeightShifts[ev.id];
+  if (shift && state.Day <= shift.expireDay) return shift.weight;
+  return ev.weight;
+}
+
+export function shiftWeight(state, target, weight, days = 7) {
+  const cur = state.WeightShifts[target];
+  if (cur && state.Day <= cur.expireDay) {
+    state.WeightShifts[target] = { weight: Math.max(cur.weight, weight), expireDay: Math.max(cur.expireDay, state.Day + days) };
+  } else {
+    state.WeightShifts[target] = { weight, expireDay: state.Day + days };
+  }
+}
+
+// 第 11 步清理：过期未用的 shift 一律删除（附录 F.6「7 天或目标触发过期」）
+export function expireShifts(state) {
+  for (const [id, s] of Object.entries(state.WeightShifts)) {
+    if (state.Day > s.expireDay) delete state.WeightShifts[id];
+  }
+}
+
 // must_fire（附录 A 第 14 字段 / E.3）：窗口内且本局尚未触发过，强制选中、跳过概率门与权重。
 // 时机不限：附录 A 的定义写在 Schema 里而不是某一步的伪码里，回签审复 §五 的「好事保底」用的就是第 10 步晚间事件
 function forcedEvent(state, timing) {
@@ -24,16 +48,28 @@ function forcedEvent(state, timing) {
     && state.Day >= ev.must_fire.from && state.Day <= ev.must_fire.to) || null;
 }
 
-// 正文 3.14 第 2 / 6 / 10 步：先过滤（条件 + 冷却）再过概率门，再按 weight 种子抽，至多 1 条
+// 正文 3.14 第 2 / 6 / 10 步：先过滤（条件 + 冷却）再过概率门，再按 weight 种子抽，至多 1 条。
+// 同日排序（正文 5.3 末「DSL 补全定义」）：特殊事件先于日常事件；硬触发不走概率门也不走权重。
+// 关掉竞争层时特殊池恒空 → 只走一次 daily 门与一次 pickWeighted，抽取次数与 M1 完全同轨（已签发带不许漂）。
 export function drawEvent(state, timing, rng) {
   const forced = forcedEvent(state, timing);
   if (forced) return forced;
-  const pool = EVENTS.filter(ev => eligible(state, ev, timing));
+  const stream = TIMING_STREAM[timing];
+  const ready = pool => EVENTS.filter(ev => ev.pool === pool && eligible(state, ev, timing));
+
+  const specials = ready('special');
+  const hard = specials.find(ev => ev.hard);
+  if (hard) return hard;
+  const soft = specials.filter(ev => !ev.hard && weightOf(state, ev) > 0);
+  if (soft.length && rng.chance(DRAW_GATE.special, stream)) {
+    const picked = rng.pickWeighted(soft.map(ev => ({ ev, w: weightOf(state, ev) })), x => x.w, stream);
+    if (picked) return picked.ev;
+  }
+
+  const pool = ready('daily');
   if (!pool.length) return null;
-  const gate = pool[0].pool === 'special' ? DRAW_GATE.special : DRAW_GATE.daily;
-  if (!rng.chance(gate, TIMING_STREAM[timing])) return null;
-  const shifted = pool.map(ev => ({ ev, w: state.WeightShifts[ev.id]?.weight ?? ev.weight }));
-  const picked = rng.pickWeighted(shifted, x => x.w, TIMING_STREAM[timing]);
+  if (!rng.chance(DRAW_GATE.daily, stream)) return null;
+  const picked = rng.pickWeighted(pool.map(ev => ({ ev, w: weightOf(state, ev) })), x => x.w, stream);
   return picked ? picked.ev : null;
 }
 
@@ -64,19 +100,31 @@ export function applyOps(state, ops, slot) {
       state.event_reserve_bowls = op.reserveBowls;
       state.pendingReserve = { bowls: op.reserveBowls };
     }
+    // E.9 价格战：写三日倒计时；改价式本身在竞争层按 PricewarDays 每日结算（附录 G.3）
+    if (op.pricewarDays !== undefined) state.PricewarDays = op.pricewarDays;
+    // E.8 回流 <30 档：熟客存量不扣（正文 3.4 保底承诺优先），改为冻结 7 日不增长
+    if (op.rFrozenDays !== undefined) state.R_frozen_days = op.rFrozenDays;
+    // E.7/E.8/E.10 的「结算页留言位多一条（① 类强制信号）」：固定文案，不走第 12 步的随机选材
+    if (op.forcedComment) state.today.forcedComments.push(op.forcedComment);
   }
 }
 
-// 第 10 步（或第 6 步）玩家选择落地：明账 + 暗线 + 历史 / 冷却
+// 第 10 步（或第 6 步）玩家选择落地：明账 + 暗线 + 历史 / 冷却 / weight_shift
 export function resolveChoice(state, ev, actionId) {
   const action = (ev.actions || []).find(a => a.id === actionId) || null;
   const slot = ev.timing === 'evening' ? 'eventCashEvening' : 'eventCashMorning';
-  applyOps(state, action ? action.open : ev.open, slot);
-  const hidden = (action?.hidden || ev.effect_hidden || []).filter(h => !h.when);
+  // 玩家不做选择的事件（E.8「按 Rep 自动分版」）走 auto_branch：条件式命中第一条即该档
+  const branch = !action && Array.isArray(ev.auto_branch) ? ev.auto_branch.find(b => evalCondition(b.cond, state)) || null : null;
+  const set = action || branch;
+  applyOps(state, set ? set.open : ev.open, slot);
+  const hidden = (set ? set.hidden : ev.effect_hidden || []).filter(h => !h.when);
   for (const h of hidden) applyHidden(state, h);
   state.EventHistory.push(ev.id);
+  delete state.WeightShifts[ev.id];                       // 5.3：shift 持续到目标事件被触发为止
   state.Cooldowns[ev.id] = state.Day + (action?.cooldown ?? ev.cooldown ?? ONCE);
-  return { event: ev, action };
+  const shift = action?.weightShift ?? ev.weightShift;
+  if (shift) shiftWeight(state, shift.target, shift.weight, shift.days ?? 7);
+  return { event: ev, action, branch };
 }
 
 export function applyHidden(state, h) {

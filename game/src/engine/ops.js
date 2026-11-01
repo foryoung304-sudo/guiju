@@ -2,6 +2,7 @@ import { CAT, SOLID_CATS, PACKING, PACKING_SPILL, SCALE_DELTA_J_SHARE } from '..
 import { toCents, roundJin } from './state.js';
 import { stockAvgCost, takeStock, rampCoef } from './market.js';
 import { capacityJin, tastingConvert } from './production.js';
+import { competitionOn, sharesAndS } from './competition.js';
 import { PRICE_TIERS } from '../data/constants.js';
 
 // 正文 3.5 定价档系数（招牌档受 Rep 与考试周修正）
@@ -30,8 +31,12 @@ export function runBusiness(state, handResults, rng) {
     if (state.d0_buff_days <= 0) { state.d0_buff_days = 0; state.d0_buff_mult = 1.0; }
   }
 
-  // 7b 样段期无同行分流
-  const S = 1;
+  // 7b 竞争系数 S（正文 3.14：四摊吸引力 A_i = P×G×排队惯性×分流，S = 本摊份额 ÷ 0.25 钳 [0.6,1.4]）
+  // 样段与已签发的 M1 带走 competitionOn=false 这条路：S ≡ 1、不抽 rival 子流、不写 Share/惯性
+  const comp = competitionOn(state) ? sharesAndS(state) : null;
+  const S = comp ? comp.S : 1;
+  t.S = S;
+  t.share = comp ? comp.share : null;
 
   // 7c 需求合成（碗）：熟客到访量 R_v 与昨日顺延的明日预订合并成当日熟客优先需求，
   // 合计不超过熟客存量 R（3.14 第 7g 步 / 附录 F.4 reg_reserved_bowls），防积压滚大

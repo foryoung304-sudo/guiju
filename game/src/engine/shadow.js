@@ -81,6 +81,8 @@ export function applyShadow(state, { shortOrders, spillBowls }) {
   if (Q >= 70 && state.R_frozen_days === 0) {
     state.R = Math.min(Math.floor(state.BaseSales * 0.6), state.R + 3);
   }
+  // 附录 F.6 `R_frozen_days` 行（回流 <30 档写 7、第 9 步递减）：先判后减，冻结才吃满 7 个营业日
+  if (state.R_frozen_days > 0) state.R_frozen_days -= 1;
 
   if (state.Risk >= 100) state.risk_100_pending = true;
   state.Wmax = Math.max(state.Wmax, roundJin(t.J));

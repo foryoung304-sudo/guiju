@@ -1,10 +1,11 @@
 import { SOLID_CATS, CAT, CONFIG, PACKING, PRICE_TIERS, PREP_STATIONS, TASTING, START_CASH_CENTS, WASH_SKIP_WRITEOFF_MUL,
-  SCALE_DELTA_J_SHARE } from '../data/constants.js';
+  SCALE_DELTA_J_SHARE, COMPETITION } from '../data/constants.js';
 import { SKU_BY_ID } from '../data/skus.js';
 import { toCents, roundJin, takeFromCostPool } from './state.js';
 import { recomputeStock, planPayment, takeStock } from './market.js';
 import { priceCoefFor } from './ops.js';
 import { additiveOf, capacityJin, laborCostCents, tastingConvert, washSkipped } from './production.js';
+import { competitionOn, previewShare } from './competition.js';
 
 const ALL_STOCK_CATS = SOLID_CATS.concat(['SP']);
 
@@ -147,23 +148,29 @@ export function bridgeCheck(state) {
 export function forecastBasket(state, basket, priceTierId, scenario) {
   const yBowls = state.YesterdaySoldBowls;
   const ySc = state.YesterdayScenario;
+  // 附录 C `:451` 的份额两项：主式吃（今日预估竞争份额 ÷ 昨日实际份额）、回退式吃（今日预估份额 ÷ 基准 0.25）。
+  // 样段期无竞争（正文 3.14 第 7b `:265`「样段期无竞争，S ≡ 1」）时它俩恒为 1，M1 因此没有落点；竞争层在场就必须回来。
+  // 关掉整层一律取 1（不是取算出的比值），已签发的 M1 带不引入浮点漂移。
+  const estShare = competitionOn(state) ? previewShare(state, PRICE_TIERS[priceTierId].perJin) : null;
   let estBowls;
   let lowConfidence = false;
-  if (yBowls > 0 && ySc) {
-    // 比值式：昨日售出 × 情境比 × 爬坡比 × 定价系数比 × F 比 × next_day_traffic_mult（份额比样段恒 1）
+  if (yBowls > 0 && ySc && state.Share[0] > 0) {
+    // 比值式：昨日售出 × 情境比 × 爬坡比 × 定价系数比 × F 比 × 份额比 × next_day_traffic_mult
     estBowls = yBowls * (scenario.trafficTotal / ySc.trafficTotal)
       * (rampNow(state) / state.YesterdayRamp)
       * (priceCoefFor(state, priceTierId, scenario) / state.PriceCoefYday)
       * (state.F / state.YesterdayF)
+      * (estShare === null ? 1 : estShare / state.Share[0])
       * state.next_day_traffic_mult;
   } else {
-    // 首日回退式：公开基础销量 × 爬坡 × 情境 × 定价系数 × F ×（口碑代理项）+ 可见熟客到访量 R_v
+    // 首日回退式：公开基础销量 × 爬坡 × 情境 × 定价系数 × F ×（口碑代理项）×（预估份额 ÷ 基准）+ 可见熟客到访量 R_v
     // 回签审复 §一.2（实测问题 #3）：口碑代理项由 P÷100 改为与 3.14 第 7 步同式的 0.75 + P×0.005。
     // 原式在 P=20 时给 0.2，低于第 7 步口碑项在任何一天可能的下界 0.75，首日试算因此把需求压到真实的 1/4；
     // 用 P（而不是暗口碑 Rep）保持"试算只用玩家看得见的代理"这条红线不变
     lowConfidence = true;
     estBowls = state.BaseSales * rampNow(state) * scenario.trafficTotal
       * priceCoefFor(state, priceTierId, scenario) * state.F * (0.75 + state.P * 0.005)
+      * (estShare === null ? 1 : estShare / COMPETITION.shareBase)
       + Math.round(state.R * 0.5);
   }
 

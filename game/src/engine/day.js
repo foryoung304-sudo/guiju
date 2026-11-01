@@ -5,11 +5,12 @@ import { buildBasket, commitPurchase, planPayment, ownsTool } from './market.js'
 import { forecastBasket, settleDay, bridgeCheck } from './ledger.js';
 import { runBusiness, priceCoefFor } from './ops.js';
 import { applyShadow } from './shadow.js';
-import { drawEvent, resolveChoice, resolvePendingReserve } from './events.js';
+import { drawEvent, resolveChoice, resolvePendingReserve, expireShifts } from './events.js';
 import { drawHandOrders, settleWeighing } from './weigh.js';
 import { buildComments } from './comments.js';
 import { scenarioOf, forecastLabel } from '../data/scenario.js';
 import { additiveUnlocked, computeMBase, prepBudget, prepFits, prepGridUsed } from './production.js';
+import { morningRivals, priceWarReprice, tallySuppression } from './competition.js';
 
 // 正文 3.14 第 1 步（晨间结转）+ 明日情境
 export function beginDay(state) {
@@ -20,7 +21,6 @@ export function beginDay(state) {
   }
   state.dayStarted = true;
   state.risk_100_pending = false;
-  if (state.R_frozen_days > 0) state.R_frozen_days -= 1;
   // 附录 E evt_s_poach「让他走 → 14 日后回来」/「小豆请假一天」：缺席按第 1 步递减，减到 0 即恢复在场
   if (state.XiaodouAbsentDays > 0) state.XiaodouAbsentDays -= 1;
   // 正文 3.6 注：试吃转化「每转化 1 人次日 R +1」——当日第 8 步记下，第二天第 1 步进存量
@@ -29,8 +29,10 @@ export function beginDay(state) {
     state.tasting_pending_R = 0;
   }
   state.PriceIndex = Math.round((state.PriceIndex * (state.Day >= 100 ? 1.003 : 1.0)) * 1000) / 1000;
-
   state.today = blankToday();
+  // 正文 3.14 第 1 步「公布明日预报及同行信息」+ 附录 G.3：王老板出事抽取、跟价式、价格战倒计时、第 100 天起的加压。
+  // 挂在 blankToday 之后：竞争层要往 today 写「今日是否开打」，写在结转之前会被当日空白覆盖掉
+  morningRivals(state, rng);
   state.today.scenario = scenarioOf(state.weatherCycle[state.Day - 1] || 'sunny', state.SemesterDay);
   state.today.priceMods = state.today.scenario.priceMods;
   state.Weather = state.today.scenario.weather.id;
@@ -113,6 +115,8 @@ export function lockTradingDay(state, opts = {}) {
   // ⑥ 显多秤：秤不在手上（未购 / 已在第 3 步卖回）时按卸下收
   const askedScale = opts.scaleShowOn === undefined ? state.ScaleShowOn : !!opts.scaleShowOn;
   state.ScaleShowOn = askedScale && ownsTool(state, 'JI_SCALE');
+  // 附录 G.3 的价格战式用「你当日价」，当日价到本步才存在，故改价挂在定版之后（第 1 步那次只递减倒计时）
+  priceWarReprice(state);
   state.today.locked = true;
   return { ok: true, M_base: state.M_base, tastingCount: state.TastingCount, scaleShowOn: state.ScaleShowOn };
 }
@@ -171,6 +175,10 @@ export function nightClose(state, rng, ev, actionId) {
   const eventNetCents = state.today.eventCashMorning + state.today.eventCashEvening;
   state.NP += state.today.netOpsCents + eventNetCents;
   state.today.eventNetCents = eventNetCents;
+  // 附录 F.6 `RivalSuppressedDays` 在第 11 步记（份额取第 7b 步存档值，正文 3.13）
+  tallySuppression(state);
+  // 正文 5.3 weight_shift 的「满 7 天自动过期」：过期未用的修正第 11 步清掉（目标当日已触发则在 resolveChoice 里就地清除）
+  expireShifts(state);
   state.BizDays = state.Day;
   state.NegativeCashStreak = state.Cash < 0 ? state.NegativeCashStreak + 1 : 0;
   const ending = checkEndings(state);

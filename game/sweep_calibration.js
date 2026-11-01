@@ -12,11 +12,11 @@
 import { simulate as simRaw, STRATEGIES, REF_STRATEGIES } from './src/sim.js';
 import { WEATHER } from './src/data/scenario.js';
 import { EVENTS } from './src/data/events.js';
-import { ENDING, RETIRE_NP_CENTS } from './src/data/constants.js';
+import { ENDING, RETIRE_NP_CENTS, COMPETITION } from './src/data/constants.js';
 
-// M1 口径（正文 3.5:141：压力测试带跑在 M1 构建，「人工与产能数值不参与本区间判定」）：
-// 本脚本凡是压到已签发带的线一律关人工，M2 在场口径的区间店主还没签 → 只在文末 H 段出证据，不在此套带。
-const simulate = (seed, days, strat, closer, opts) => simRaw(seed, days, strat, closer, { labor: false, ...opts });
+// M1 口径（正文 3.5:141：压力测试带跑在 M1 构建，「人工与产能数值不参与本区间判定」「无竞争（S ≡ 1）」）：
+// 本脚本凡是压到已签发带的线一律关人工、关竞争，M2 在场口径的区间店主还没签 → 只在文末 H 段出证据，不在此套带。
+const simulate = (seed, days, strat, closer, opts) => simRaw(seed, days, strat, closer, { labor: false, competition: false, ...opts });
 
 const BAND = [-450, 360];
 const SEEDS = [20261031, 7979, 12345, 4242, 90210];
@@ -366,6 +366,56 @@ function sweepH() {
   console.log('  ⚠️ 以上位移需要店主回签 M2 在场区间后才能进验收门；未签之前 A/D/G 段一律按 M1 口径跑。');
 }
 
+// ── I. M2 在场口径证据（常驻竞争层开，区间未签 → 只出数不判红绿）──
+// 竞争只改需求这一条腿（正文 3.13 红线），但改多大要先量：本段报「S 钳在哪一档、钳几天、位移多少、
+// 十日里特殊链走到哪一步」，不给任何带。第四批把 S 从恒 1 变成实算，是 M2 区间里第一个会影响全盘的量。
+// 配套的附录 C 份额两项（主式「÷ 昨日实际份额」、回退式「× 今日预估份额 ÷ 0.25」）同批落点：关掉整层时两项恒 ×1（A–G 逐字节一致即为证），
+// 所以下面的位移里不含"试算不认竞争 → 首日多买四成、报损 301.77 元"那一块假账。
+function sweepI() {
+  console.log(`\n${line(100)}\nI. M2 在场口径证据（常驻竞争层开，区间未签 → 只出数不判红绿）\n${line(100)}`);
+  for (const strat of Object.values(STRATEGIES)) {
+    const rows = SEEDS.map(s => {
+      const off = simulate(s, 10, strat);
+      const on = simulate(s, 10, strat, 'headless', { competition: true });
+      const sSeq = on.log.map(d => d.S);
+      const sorted = [...sSeq].sort((a, b) => a - b);
+      return {
+        d: cum(on.log, 10) - cum(off.log, 10),
+        floorDays: sSeq.filter(x => x === COMPETITION.sBand[0]).length,
+        head: sSeq[0], tail: sSeq[sSeq.length - 1], mid: sorted[5],
+        chain: on.state.EventHistory.filter(id => id.startsWith('evt_s')).join('→') || '特殊链未启动',
+        bowls: on.log.reduce((a, x) => a + x.bowls, 0) - off.log.reduce((a, x) => a + x.bowls, 0),
+      };
+    });
+    const dec = deciles(rows.map(r => r.d));
+    const mid = rows[rows.map(r => r.d).indexOf(dec.p50)] || rows[0];
+    console.log(`  ${strat.name}｜10 日累计位移（竞争在场 − 不在场）：`
+      + `${rows.map(r => f2(r.d)).join(' / ')}　元｜最小 ${f2(dec.min)} 中位 ${f2(dec.p50)} 最大 ${f2(dec.max)}`);
+    console.log(`     S 轨迹（中位那条种子）：首日 ${mid.head.toFixed(3)} → 中位 ${mid.mid.toFixed(3)} → 末日 ${mid.tail.toFixed(3)}，`
+      + `其中 ${mid.floorDays}/10 天钳在下界 ${COMPETITION.sBand[0]}；同期出餐差 ${mid.bowls} 碗`);
+    console.log(`     特殊链：${rows.map(r => r.chain).join('　')}`);
+  }
+  // 本摊 P 是 3.13 的滞后式（开局 20、每日 0.7/0.3 收敛到口碑目标），竞品 P 是常数 55 / 42 / 36 →
+  // S 什么时候爬出下界，取决于 P 爬多快；这条 30 日探针量的就是那一个数，顺带看在场口径会不会把线直接压死。
+  console.log(`  30 日探针（全正经线 × 五种子，看 S 何时离开下界、在场口径能不能活到 30 天）：`);
+  for (const s of SEEDS) {
+    const off30 = simulate(s, 30, STRATEGIES.clean, 'headless');
+    const on = simulate(s, 30, STRATEGIES.clean, 'headless', { competition: true });
+    const esc = on.log.findIndex(d => d.S > COMPETITION.sBand[0] + 1e-9);
+    // 30 日跑不满的存档（破产/收尾提前落地）没有 log[29]，探针退到实际最后一天
+    const at = esc < 0 ? on.log[on.log.length - 1] : on.log[esc];
+    const minCash = Math.min(...on.log.map(d => d.cash));
+    const maxWoff = d => Math.max(...d.log.map(x => x.writeoff));
+    console.log(`     seed ${s}：${esc < 0 ? `${on.log.length} 日内未离开下界` : `第 ${esc + 1} 日离开下界`}，`
+      + `当日 S ${at.S.toFixed(3)}、份额 ${at.share.map(x => x.toFixed(3)).join('/')}、本摊 P ${at.P}、Rep ${at.Rep}`
+      + `｜存续 ${on.log.length} 日（不在场 ${off30.log.length}）、最低现金 ${f2(minCash)} 元、结局 ${END_NAME[on.state.EndingId] || '—'}`
+      + `｜单日最大报损 ${f2(maxWoff(on))} 元（不在场 ${f2(maxWoff(off30))}）`);
+  }
+  console.log(`  ⚠️ 回报项（R8 断货日锚）：附录 C:451 的「max（当日试算, 昨日 D0）」按正文吃的是 3.14 第 7a 步的竞争前 D0，`
+    + `样段 S ≡ 1 时两者同值、无从分辨；在场口径下这个锚比可达需求高一个 1/S（S 钳 0.6 时高 67%），上表"单日最大报损"就是它的代价。未裁之前按正文照旧实现。`);
+  console.log('  ⚠️ 竞争在场口径要店主另立区间才进验收门；本段只说明「S ≡ 1 → S 实算」这一步的盘面代价有多大。');
+}
+
 console.log(`M1 定稿 §七.2 回签证据表｜验收带 ${BAND} 元｜种子 ${SEEDS.join('/')}`);
 sweepA();
 sweepB();
@@ -375,3 +425,4 @@ sweepE();
 sweepF();
 sweepG();
 sweepH();
+sweepI();

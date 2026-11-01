@@ -144,6 +144,9 @@ export function simulate(seed, days, strategy, closer = 'headless', opts = {}) {
   // 人工线口径开关：正文 3.5:141 的压力测试带跑在 M1 构建（无小豆人工），「人工与产能数值不参与本区间判定」，
   // M2 重跑要另立区间（店主尚未签发）→ 凡是对已签发带的断言一律传 labor:false 复现 M1 口径。
   if (opts.labor !== undefined) state.laborOn = !!opts.labor;
+  // 竞争层口径开关：同一条理由（3.5:141 的 M1 构建「无竞争（S ≡ 1）」）——已签发带一律传 competition:false，
+  // M2 在场带店主还没签，只在 sweep 证据段出数。关掉时整层不抽 `rival` 子流，随机流与 M1 完全同轨。
+  if (opts.competition !== undefined) state.competitionOn = !!opts.competition;
   // 试吃 / 显多秤探针（回归 §10 用）：直接给到"已置办"的前置，只验开与关的账面差别，不模拟攒钱买的过程
   if (opts.tasting) { state.Facilities.push('fac_taste'); state.TastingCount = opts.tasting; }
   if (opts.scale) { state.Tools.push('JI_SCALE'); state.ScaleShowOn = true; }
@@ -185,6 +188,10 @@ export function simulate(seed, days, strategy, closer = 'headless', opts = {}) {
       bowls: Math.round(state.today.bowls), J: state.today.J, Q: state.today.Q,
       M_base: +state.M_base.toFixed(3),
       cap: state.today.capJin ?? null, deferred: state.today.deferredBowls || 0, regLost: state.today.regLost || 0,
+      // 3.13 第四批：竞争系数 S、四摊份额、王老板价签与 P、压制计数（关掉竞争层时恒 S=1 / 份额 0.25）
+      // 本摊 P 一起落表：S 什么时候离开下界，取决于 3.13 滞后式的 P 爬多快，探针要能在 log 上直接读它
+      S: state.today.S, share: state.today.share, rivalPrice: state.RivalPrice, rivalP: state.RivalP, P: state.P,
+      suppress: state.RivalSuppressedDays, boost: state.RivalAttrBoostWeeks,
       revenue: state.today.revenueCents / 100, cogs: state.today.cogsCents / 100,
       gross: state.today.grossCents / 100, writeoff: state.today.writeoffCents / 100,
       netOps: state.today.netOpsCents / 100, eventNet: state.today.eventNetCents / 100,
