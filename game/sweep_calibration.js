@@ -12,7 +12,8 @@
 import { simulate as simRaw, STRATEGIES, REF_STRATEGIES } from './src/sim.js';
 import { WEATHER } from './src/data/scenario.js';
 import { EVENTS } from './src/data/events.js';
-import { ENDING, RETIRE_NP_CENTS, COMPETITION } from './src/data/constants.js';
+import { ENDING, RETIRE_NP_CENTS, COMPETITION, BUYOUT_PRICE_CENTS, HEARTBURN_WMAX_JIN,
+  QUIT_VARIANT_NP_CENTS, QUIT_VARIANT_REP } from './src/data/constants.js';
 
 // M1 口径（正文 3.5:141：压力测试带跑在 M1 构建，「人工与产能数值不参与本区间判定」「无竞争（S ≡ 1）」；
 // §八 M1 行把「特殊事件、完整事件池」整体划给 M2）：
@@ -479,6 +480,54 @@ function sweepJ() {
     + '　要看事件层本身值多少钱，得把两条线的随机流对齐了再比（另事）。');
 }
 
+// ── K. M2 在场口径的六结局可达性（第七批：判定归属写死 + 摊位升级段进界面之后，重问一遍「玩家摸得到几条」）──
+// C 段跑在 M1 口径，把 #3/#5 全标 ⊘：设施只解锁 3 件 → L 到不了 4；好事池只 1 条 → C 到不了 5。
+// 本段把三层开关（人工/竞争/完整事件池）全开、跑同六条线，只看结局落地与 G.4 四道门的达标情况。
+// 区间店主未签 → 只出数不判红绿；且这仍是无头线口径，界面那三个主动入口的时序（判在付钱之前）另由回归 §14 钉。
+function sweepK() {
+  console.log(`\n${line(100)}\nK. M2 在场口径的六结局可达性（人工 + 竞争 + 完整事件池全开，区间未签 → 只出数不判红绿）\n${line(100)}`);
+  const M2 = { labor: true, competition: true, eventScope: 'full' };
+  const invest = { buyFacilities: true, upgrade: true, buyout: true };
+  const six = [
+    ...Object.values(REF_STRATEGIES),
+    ...Object.values(STRATEGIES).map(s => ({ ...s, ...invest })),
+  ];
+  const landed = {};
+  // 门槛逐栏照附录 G.4 原式列出来（含判空即过的差项），不在此段替引擎判 —— 判定归属由回归 §14 钉
+  const gate = (label, items) => {
+    const bad = items.filter(it => !it[1]);
+    return `${label}${bad.length ? `✗（差 ${bad.map(it => `${it[0]}=${it[2]}`).join('、')}）` : '✓'}`;
+  };
+  const tag = r => { const l = r.log.at(-1); return l.ending ? `#${l.ending}` : '未触发'; };
+  console.log(`  附录 G.4 四道门：#3 现金≥60,000 & Rep≥75 & H≤10 & L≥4｜#4 H≥18 & Wmax≥210 斤｜#5 C≥5 & NP≥300,000 元｜#6 变体 NP≥90,000 元 & Rep≥60`);
+  console.log(`  每行左 = C 段同口径的 M1 结果（人工/竞争/事件池全关），右 = 本段的 M2 在场结果；门后的数是 M2 那一次的末态。`);
+  console.log(`  四道门只列未达标那一栏的读数（括号里没提的栏目 = 该栏已达标），判空即过要差在哪一眼就能读。\n`);
+  for (const strat of six) {
+    const opts = { buy: 'appc', additive: strat.key === 'ref3' ? 'more' : 'none' };
+    console.log(`  ${strat.name.padEnd(26, '　')}｜120 日内：`);
+    for (const seed of SEEDS.slice(0, 3)) {
+      const m1 = simulate(seed, 120, strat, 'headless', opts);
+      const m2 = simulate(seed, 120, strat, 'headless', { ...M2, ...opts });
+      const st = m2.state, last = m2.log.at(-1);
+      if (last.ending) landed[last.ending] = (landed[last.ending] || 0) + 1;
+      const gates = [
+        gate('#3', [['L≥4', st.L >= 4, st.L], ['现金≥60,000', st.Cash >= BUYOUT_PRICE_CENTS, +(st.Cash / 100).toFixed(0)],
+          ['Rep≥75', last.Rep >= 75, last.Rep], ['H≤10', last.H <= 10, last.H]]),
+        gate('#4', [['H≥18', last.H >= 18, last.H], ['Wmax≥210', st.Wmax >= HEARTBURN_WMAX_JIN, +st.Wmax.toFixed(1)]]),
+        gate('#5', [['C≥5', last.C >= 5, last.C], ['NP≥300,000', last.NP >= RETIRE_NP_CENTS / 100, +last.NP.toFixed(0)]]),
+        gate('#6变体', [['NP≥90,000', last.NP >= QUIT_VARIANT_NP_CENTS / 100, +last.NP.toFixed(0)],
+          ['Rep≥60', last.Rep >= QUIT_VARIANT_REP, last.Rep]]),
+      ].join(' ');
+      console.log(`      ${seed}：M1 ${tag(m1)}@${m1.log.at(-1).day} → M2 ${tag(m2)}@${last.day}｜${gates}`);
+    }
+  }
+  const order = [ENDING.CRASH, ENDING.BANKRUPT, ENDING.RULES, ENDING.HEARTBURN, ENDING.RETIRE, ENDING.MEDIOCRE];
+  console.log(`\n  本段落地的结局：${order.filter(id => landed[id]).map(id => `#${id} ${END_NAME[id]} ×${landed[id]}`).join('　') || '无'}`);
+  console.log(`  未落地：${order.filter(id => !landed[id]).map(id => `#${id} ${END_NAME[id]}`).join('　') || '无'}`
+    + `｜无头线按「判空即过、只升档」永不选 #6（玩家不会为拿平庸收摊提前离场），故 #6 只可能从界面「不干了」进来。`);
+  console.log('  ⚠️ 本段不进验收门：M2 在场区间未签发；且这里判的是无头线的合成式 closeShop，界面那三个入口各自只判自己那道门（正文 §六 判定归属写死），两者不同轨。');
+}
+
 console.log(`M1 定稿 §七.2 回签证据表｜验收带 ${BAND} 元｜种子 ${SEEDS.join('/')}`);
 sweepA();
 sweepB();
@@ -490,3 +539,4 @@ sweepG();
 sweepH();
 sweepI();
 sweepJ();
+sweepK();

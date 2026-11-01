@@ -135,6 +135,11 @@ export function takeStock(state, cat, amount, taken = []) {
   return roundJin(amount - need);
 }
 
+// 界面只读这一条：D.3 的「解锁条件」列原样交给 DSL，界面不许自己判 Tier / EVT / BizDays
+export function isFacilityUnlocked(state, id) {
+  return evalCondition(FACILITIES[id].unlock, state);
+}
+
 export function buyFacility(state, facId) {
   const fac = FACILITIES[facId];
   // 解锁条件在引擎这一侧也过一次门：正文 3.6「证件墙干净线买不到」是有意的，只把检查放在界面上等于没放

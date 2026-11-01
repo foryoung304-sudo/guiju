@@ -6,15 +6,17 @@ import { fileURLToPath } from 'node:url';
 import { simulate, STRATEGIES } from './src/sim.js';
 import { bridgeCheck, settleDay, settleWriteoff, settleTasting } from './src/engine/ledger.js';
 import { newGame, roundJin, loadGame, STORAGE_KEY } from './src/engine/state.js';
-import { effectivePrice, buildBasket, planPayment, recomputeStock, buyTool, sellBackTool, ownsTool } from './src/engine/market.js';
+import { effectivePrice, buildBasket, planPayment, recomputeStock, buyTool, sellBackTool, ownsTool, upgradeStall, isFacilityUnlocked } from './src/engine/market.js';
 import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, PACKING_SPILL, CONFIG, SAVE_VERSION,
   ADDITIVE, PREP_LEVELS, LABOR, TASTING, TOOLS, SCALE_DELTA_J_SHARE, SCALE_C_PER_JIN, SCALE_RISK_PER_JIN,
-  COMPETITION, INSPECTION, FACILITIES, ENDING, BLANCH } from './src/data/constants.js';
+  COMPETITION, INSPECTION, FACILITIES, ENDING, BLANCH, TIERS_STALL,
+  BUYOUT_PRICE_CENTS, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN, QUIT_VARIANT_NP_CENTS, QUIT_VARIANT_REP } from './src/data/constants.js';
 import { SKU_BY_ID } from './src/data/skus.js';
 import { scenarioOf, WEATHER } from './src/data/scenario.js';
 import { evalCondition } from './src/engine/dsl.js';
 import { EVENTS } from './src/data/events.js';
-import { beginDay, morningPreEvent, submitBasket, previewBasket, commitPrep, lockTradingDay, morningEvent, runDay, nightSettle, eveningDraw, nightClose, checkEndings } from './src/engine/day.js';
+import { beginDay, morningPreEvent, submitBasket, previewBasket, commitPrep, lockTradingDay, morningEvent, runDay, nightSettle, eveningDraw, nightClose, checkEndings,
+  judgeBuyout, judgeRetire, quitVariant, quitBlurb, closeShop } from './src/engine/day.js';
 import { additiveOf, additiveUnlocked, capacityJin, computeMBase, prepBudget, prepGridUsed, qTaste, washSkipped,
   xiaodouPresent, laborCapMul, laborCostCents, tastingConvert } from './src/engine/production.js';
 import { drawHandOrders, handOrderCount } from './src/engine/weigh.js';
@@ -1527,6 +1529,238 @@ for (const seed of [SEED, 7979, 36832]) {
         && back.today.signalFullCount === (raw.today.fullWeighCount || 0)
         && !!back.today.blanchCounts && Object.values(back.today.blanchCounts).every(v => v === 0);
     })());
+}
+
+// ── 14. M2 第七批：结局判定归属（附录 G.4 四个动作）+ 摊位六档升级段（UI-05 上段，此前只有无头线能走）──
+{
+  const mk = o => Object.assign(newGame(SEED), o);
+
+  // 1) #3「规矩立住」四项门槛逐项（现金 60,000 / Rep 75 / H ≤10 / L ≥4，附录 G.4:590 与 ui-spec 换算表第 16 行）
+  check('G.4 #3 四项同时达标（全取下界）判给「规矩立住」',
+    judgeBuyout(mk({ Cash: BUYOUT_PRICE_CENTS, Rep: 75, H: 10, L: 4 })) === ENDING.RULES);
+  check('#3 四项差一口气就判空（现金少一分 / Rep 差 0.01 / H 到 10.01 / L 只有 3）——判空即过，只升档',
+    [
+      judgeBuyout(mk({ Cash: BUYOUT_PRICE_CENTS - 1, Rep: 75, H: 10, L: 4 })),
+      judgeBuyout(mk({ Cash: BUYOUT_PRICE_CENTS, Rep: 74.99, H: 10, L: 4 })),
+      judgeBuyout(mk({ Cash: BUYOUT_PRICE_CENTS, Rep: 75, H: 10.01, L: 4 })),
+      judgeBuyout(mk({ Cash: BUYOUT_PRICE_CENTS, Rep: 75, H: 10, L: 3 })),
+    ].every(e => e === 0));
+  check('G.4 #4 烧心大王：H≥18 且 Wmax≥210 斤（v4.9.2 由 70 斤随量纲重锚上调）判给 #4',
+    judgeBuyout(mk({ Cash: BUYOUT_PRICE_CENTS, Rep: 75, H: 18, Wmax: 210, L: 4 })) === ENDING.HEARTBURN
+    && judgeBuyout(mk({ Cash: 0, Rep: 0, H: 18, Wmax: 209.99 })) === 0);
+  check('#3 排在 #4 前面且两者按构造互斥（H≤10 与 H≥18 不可能同时成立）→ 同日多条取序号最小这条不会被触发',
+    judgeBuyout(mk({ Cash: BUYOUT_PRICE_CENTS, Rep: 75, H: 9, Wmax: 900, L: 4 })) === ENDING.RULES);
+
+  // 2) #5 金盆洗手：NP≥300,000 元 且 C≥5；C<5 时目标墙那个入口根本不出现
+  check('G.4 #5 门槛 NP≥300,000 元 且 C≥5（两个下界同取给 #5，任一项不足判空）',
+    judgeRetire(mk({ NP: RETIRE_NP_CENTS, C: 5 })) === ENDING.RETIRE
+    && judgeRetire(mk({ NP: RETIRE_NP_CENTS - 1, C: 5 })) === 0
+    && judgeRetire(mk({ NP: RETIRE_NP_CENTS, C: 4 })) === 0);
+
+  // 3) #6 变体门槛（附录 G.4 第 6 行 / ui-spec 换算表：NP≥90,000 元 且 Rep≥60）
+  check('#6 变体「街坊会想你的摊」= NP≥90,000 元 且 Rep≥60；id 仍是 6，不是第七个结局',
+    quitVariant(mk({ NP: QUIT_VARIANT_NP_CENTS, Rep: 60 })) && !quitVariant(mk({ NP: QUIT_VARIANT_NP_CENTS - 1, Rep: 60 }))
+    && !quitVariant(mk({ NP: QUIT_VARIANT_NP_CENTS, Rep: 59.99 }))
+    && ENDING.MEDIOCRE === 6 && Object.keys(ENDING).length === 6);
+
+  // 4) 拆分不许改结果：无头线的 closeShop 与拆前三条内联式子逐状态同值（sweep C 段靠它，动一下就漂已签带）
+  {
+    const legacy = s => {
+      if (s.Cash >= BUYOUT_PRICE_CENTS && s.Rep >= 75 && s.H <= 10 && s.L >= 4) return ENDING.RULES;
+      if (s.H >= 18 && s.Wmax >= HEARTBURN_WMAX_JIN) return ENDING.HEARTBURN;
+      if (s.C >= 5 && s.NP >= RETIRE_NP_CENTS) return ENDING.RETIRE;
+      return ENDING.MEDIOCRE;
+    };
+    const probes = [
+      mk({ Cash: 7000000, Rep: 80, H: 5, L: 5, C: 6, NP: 40000000 }),
+      mk({ Cash: 7000000, Rep: 80, H: 20, Wmax: 300, L: 5 }),
+      mk({ Cash: 100, Rep: 10, H: 20, Wmax: 300, C: 6, NP: 40000000 }),
+      mk({ Cash: 100, Rep: 10, C: 4, NP: 40000000 }),
+      mk({}), newGame(SEED),
+    ];
+    check('closeShop（无头线沿用）与拆前的合成式子在 6 个代表状态上逐字同结果',
+      probes.every(s => closeShop(s) === legacy(s)),
+      probes.map(s => `${closeShop(s)}`).join('/'));
+  }
+
+  // 5) 为什么 #3 必须判在钱出去之前（本批最实质的一条口径证据）
+  {
+    const s = mk({ Cash: BUYOUT_PRICE_CENTS + 10000, Rep: 80, H: 5, L: 4, Tier: 5 });
+    const before = judgeBuyout(s);
+    upgradeStall(s);
+    check('盘店那笔 60,000 付出去之后现金必然跌破 60,000 ⇒ 判在付钱之后 = 「规矩立住」要手里攥着两份盘店钱；本批按 G.4 判在动作当刻（付钱前）',
+      before === ENDING.RULES && judgeBuyout(s) === 0 && s.Tier === 6,
+      `付钱前 ${before}｜付钱后现金 ${(s.Cash / 100).toFixed(2)} 元 → ${judgeBuyout(s)}｜档 ${s.Tier}`);
+  }
+
+  // 6) 摊位六档（附录 G.5:609 那行四列 + D.1:52 的赊购额阶梯，全部照表钉；这一整条此前只有无头线走得到，界面没有入口）
+  {
+    const s = newGame(SEED);
+    let ok = true; const detail = [];
+    let cash = 0;
+    const want = {
+      baseSales: [90, 180, 320, 550, 900, 1500],
+      fixedCost: [75, 135, 240, 420, 780, 1440],
+      creditCap: [600, 1500, 2500, 4000, 6500, 10000],
+      capacity: [130, 260, 460, 790, 1300, 2160],
+      upgradePrice: [1050, 4500, 13500, 27000, 60000],
+    };
+    for (let i = 0; i < 6; i++) {
+      const t = TIERS_STALL[i];
+      cash += (want.upgradePrice[i] || 0);
+      ok = ok && t.baseSales === want.baseSales[i] && t.fixedCost === want.fixedCost[i] * 100
+        && t.creditCap === want.creditCap[i] * 100 && t.capacity === want.capacity[i]
+        && (i === 5 ? t.upgradePrice === null : t.upgradePrice === want.upgradePrice[i] * 100);
+      detail.push(`${t.name} ${t.baseSales}/${t.fixedCost / 100}/${t.creditCap / 100}/${t.capacity}`);
+    }
+    check('六档四列照附录 G.5:609 逐档钉（基础销量 / 固定支出 / 赊购额〔D.1:52〕/ 出餐产能斤数），末档 upgradePrice = null',
+      ok && TIERS_STALL.length === 6, detail.join('　'));
+    check('upgradeStall 五档一路买上去：逐档扣价、七个字段同起同落、换档当刻爬坡重新置 3（附录 G.5）',
+      (() => {
+        const u = newGame(SEED);
+        let acc = 0, steps = 0;
+        for (let i = 0; i < 5; i++) {
+          const price = TIERS_STALL[u.Tier - 1].upgradePrice;
+          u.Cash = price;                       // 取下界：正好够付
+          const c0 = u.Cash, t0 = u.Tier;
+          if (!upgradeStall(u)) return false;
+          acc += c0 - u.Cash;
+          if (u.Tier !== t0 + 1 || u.RampDays !== 3 || u.NetInvestSpent !== acc) return false;
+          steps += 1;
+        }
+        return steps === 5 && u.Tier === 6 && u.BaseSales === 1500 && u.FixedCost === 144000
+          && u.CreditCap === 1000000 && u.CapacityBase === 2160 && u.tierName === '整街双店'
+          && acc === (1050 + 4500 + 13500 + 27000 + 60000) * 100;
+      })());
+    const broke = newGame(SEED);
+    const cashBefore = broke.Cash;
+    check('现金不够付下一档 → upgradeStall 返回 false 且一分不扣（正文 3.5:136「额度耗尽只会让篮子提交不了」的同族边界）',
+      upgradeStall(broke) === false && broke.Cash === cashBefore && broke.Tier === 1);
+    const top = mk({ Tier: 6 });
+    check('末档没有 upgradePrice → 买不动、不给结局（双店是终点档，§三 档位表）',
+      upgradeStall(top) === false && top.Tier === 6 && top.EndingId === 0);
+  }
+
+  // 7) 档位一解锁，三条随档的线立刻跟着动（附录 H:621 亲手单 3→4、附录 G.5:610 工时 4·4·5·5·6·6、D.3 设施解锁）
+  {
+    const handAt = t => handOrderCount(mk({ Tier: t }));
+    check('亲手单数随档位（正文 §八 M2 行「恢复 3 单/天、固定摊位档起 4 单/天」）：档 1–2 = 3 单，档 3 起 = 4 单',
+      [1, 2].every(t => handAt(t) === CONFIG.handOrdersPerDay)
+      && [3, 4, 5, 6].every(t => handAt(t) === CONFIG.handOrdersPerDayFull)
+      && CONFIG.handOrdersTierFull === 3,
+      `档 1–6 = ${[1, 2, 3, 4, 5, 6].map(handAt).join('/')}`);
+    const gridAt = t => prepBudget(mk({ Tier: t, laborOn: false }));   // CONFIG.labor 是 true，先关掉人工再看档位那一格
+    check('工时预算按档位 4·4·5·5·6·6（附录 G.5:610 工时行），小豆在场再多 1 格',
+      [1, 2, 3, 4, 5, 6].map(gridAt).join('/') === '4/4/5/5/6/6'
+      && (() => { const s = mk({ Tier: 3 }); s.laborOn = true; return prepBudget(s) === gridAt(3) + LABOR.gridBonus; })(),
+      `档 1–6 = ${[1, 2, 3, 4, 5, 6].map(gridAt).join('/')}`);
+    check('设施解锁条件走 DSL 原文且随档位放行：试吃角要二手餐车（档 2）、显多秤要固定摊位（档 3）',
+      !isFacilityUnlocked(mk({ Tier: 1 }), 'fac_taste') && isFacilityUnlocked(mk({ Tier: 2 }), 'fac_taste')
+      && Object.values(TOOLS).every(t => (t.id !== 'JI_SCALE') || (!evalCondition(t.unlock, mk({ Tier: 2 })) && evalCondition(t.unlock, mk({ Tier: 3 })))));
+    check('界面置灰之外引擎侧也拦得住（buyTool 里那道 unlock 门）：档 1 买显多秤返回 false、不扣现金',
+      (() => { const s = mk({ Cash: 10000000 }); const c0 = s.Cash;
+        return buyTool(s, 'JI_SCALE') === false && s.Cash === c0 && !ownsTool(s, 'JI_SCALE'); })());
+  }
+
+  // 8) 为什么 #3 在 M1 口径下是 ⊘ 而不是 ✗：M1 内容能给的 L 到不了 4
+  //    L 的来源正文写死两处（3.4:113）：店规设施每件 +1（共 6）＋良心版名场面每条 +1（共 4：回流全档 / 宣传队 / 锦旗 / 美食节获奖）→ 0–10。
+  //    本实现只落了前三条（美食节评选按 §八 排期收口归"首更补齐"，未在建内），所以全池实际是 9 而不是 10。
+  {
+    const L_SCENES = ['evt_s_return', 'evt_s_promo', 'evt_s_flag'];
+    // seen_routine_inspection 只有 M2 的例行检查能点亮，M1 口径下不许替它作弊（不然 fac_cert 被错算进 M1 池）
+    const lUnder = scope => {
+      const s = mk({ Tier: 6, BizDays: 200 });
+      if (scope !== 'm1') s.seen_routine_inspection = true;
+      s.EventHistory = EVENTS.filter(e => scope === 'm1' ? e.ship === 'M1' : true).map(e => e.id);
+      const facs = Object.values(FACILITIES).filter(f => isFacilityUnlocked(s, f.id)).length;
+      return { facs, scenes: L_SCENES.filter(id => s.EventHistory.includes(id)).length };
+    };
+    const m1 = lUnder('m1'), full = lUnder('full');
+    check('L 上限 = 可解锁设施件数 + 可触发的良心名场面（正文 3.4:113 两处来源，只数设施是漏的）：M1 池 3＋0 < 4 ⇒ #3 在已签发带上 ⊘ scope-blocked，不记红',
+      m1.facs + m1.scenes === 3 && m1.scenes === 0, `M1 设施 ${m1.facs}＋名场面 ${m1.scenes}＝L 上限 3`);
+    check('M2 接上完整事件池：设施六件全解锁 + 三条名场面都在池 → L 上限 9 ≥ 4，「规矩立住」那一栏在 M2 可达（正文 3.4:113 干净线核对：设施 5 件本身就给到 L=5）',
+      full.facs === 6 && full.scenes === 3, `全池 设施 ${full.facs}＋名场面 ${full.scenes}＝L 上限 ${full.facs + full.scenes}`);
+    check('三条名场面在数据里各写死 L+1（回流全档挂在 Rep≥50 那一档的分支效果里；器具显多秤不计 L，附录 E 实现约束第 2 条）',
+      L_SCENES.every(id => JSON.stringify(EVENTS.find(e => e.id === id)).includes('"L":1')), L_SCENES.join(' / '));
+  }
+
+  // 9) 两条被动结局（#1/#2）——每晚第 11 步判，与主动型不同轨
+  check('#1 翻车三条入口都在（Risk=100、risk_100_pending、大检查 Score<35 由 §12 钉）',
+    checkEndings(mk({ Risk: 100 })) === ENDING.CRASH && checkEndings(mk({ Risk: 0, risk_100_pending: true })) === ENDING.CRASH
+    && checkEndings(mk({ Risk: 99.9 })) === 0);
+  check('#2 破产 = 现金连负 3 天（第 2 天不判，第 3 天判）',
+    checkEndings(mk({ NegativeCashStreak: 3 })) === ENDING.BANKRUPT && checkEndings(mk({ NegativeCashStreak: 2 })) === 0);
+
+  // 10) #6 的合成评语两支：变体名正本 §六 给死，另一支是 agent 自撰；红线扫一遍
+  {
+    const hi = quitBlurb(mk({ NP: QUIT_VARIANT_NP_CENTS, Rep: 60, Day: 40 }));
+    const lo = quitBlurb(mk({ NP: 0, Rep: 10, Day: 3 }));
+    check('#6 评语两支都在（变体那句照 §六 原文「街坊会想你的摊」），且不碰暗线数字、不写道德判词',
+      hi === '街坊会想你的摊。' && lo.includes('3') && !/Rep|Risk|口碑|良心|黑心|坚守|降级/.test(hi + lo),
+      `「${hi}」/「${lo}」`);
+  }
+
+  // 11) 任意采购序列不死档（§八 M2 验收栏第一条）：五种买法各跑满 12 天，一天不许卡、账一天不许不平
+  {
+    const byTier = (t, jin, sp) => () => SOLID_CATS.map(c => ({ sku: SKU_BY_ID[c + t], qty: jin }))
+      .concat([{ sku: SKU_BY_ID['SP' + t], qty: sp }]);
+    const SEQ = {
+      '空篮': () => [],
+      '顶档正经料': byTier('1', 6, 24),
+      '清仓特价（无票）': byTier('3', 6, 24),
+      '强哥无标': byTier('6', 6, 24),
+      '巨量（远超现金 + 赊购额）': byTier('2', 400, 400),
+    };
+    const drive = picks => {
+      const s = newGame(SEED);
+      let days = 0, bridge = 0, committed = 0, refused = 0, leak = 0, nan = 0, threw = null, firstBasket = 0;
+      for (let i = 0; i < 12 && !s.EndingId; i++) {
+        try {
+          const r = beginDay(s);
+          morningPreEvent(s, r);
+          const cashBefore = s.Cash;
+          const sub = submitBasket(s, picks(), r);
+          if (i === 0) firstBasket = (sub.plan ? sub.plan.total / 100 : 0);
+          if (sub.ok) committed += 1;
+          // 篮子被拒付必须一分不扣（正文 3.5:136「额度耗尽只会让篮子提交不了」）——扣了就是账漏
+          else { refused += 1; if (s.Cash !== cashBefore) leak += 1; }
+          lockTradingDay(s, { priceTier: 'standard' });
+          morningEvent(s, r, () => null);
+          runDay(s, drawHandOrders(s, r), o => Object.fromEntries(o.lines.map(l => [l.cat, l.grams])), r);
+          nightSettle(s, r);
+          const ev = eveningDraw(s, r);
+          nightClose(s, r, ev, ev ? (ev.actions?.[0]?.id ?? null) : null);
+          days += 1;
+          if (bridgeCheck(s).ok) bridge += 1;
+          for (const v of [s.Cash, s.NP, s.today.revenueCents, s.today.netOpsCents, s.today.J])
+            if (!Number.isFinite(v)) nan += 1;
+        } catch (e) { threw = e.message; break; }
+      }
+      return { s, days, bridge, committed, refused, leak, nan, threw, firstBasket, ending: s.EndingId || 0 };
+    };
+    const runs = Object.fromEntries(Object.entries(SEQ).map(([k, v]) => [k, drive(v)]));
+    const row = k => {
+      const r = runs[k];
+      return `${k}：篮 ${r.firstBasket} 元、${r.days} 天（买成 ${r.committed}／拒付 ${r.refused}）`
+        + (r.ending ? `／第 ${r.s.Day} 天撞结局 #${r.ending}` : '')
+        + `、桥 ${r.bridge}/${r.days}${r.threw ? `／抛异常 ${r.threw}` : ''}`;
+    };
+    const clean = r => !r.threw && r.nan === 0 && r.leak === 0 && r.bridge === r.days && (r.days === 12 || r.ending > 0);
+    check('五种买法各 12 天：不抛异常、不出现 NaN、拒付不扣现金、现金桥天天平；结局提前落地算通过（触发制落地，不是死档）',
+      Object.values(runs).every(clean), Object.keys(SEQ).map(row).join('　'));
+    // 上一版这五条全在第 8 天并列撞 #2 —— 那是 600 元起步现金下四只篮子全被拒付、探针其实只在跑「什么都不买」。
+    // 所以这一条把「篮子确实提交得了」钉住，病态买法才有病态的样子。
+    check('买法真的买成了：三只买得起的篮子每天提交成功；巨量天天被拒付且一分不扣（提交不了 ≠ 死档）',
+      ['顶档正经料', '清仓特价（无票）', '强哥无标'].every(k => runs[k].committed === runs[k].days && runs[k].committed > 0)
+      && runs['巨量（远超现金 + 赊购额）'].committed === 0
+      && runs['巨量（远超现金 + 赊购额）'].refused === runs['巨量（远超现金 + 赊购额）'].days,
+      Object.keys(SEQ).map(k => `${k} 买成 ${runs[k].committed}/${runs[k].days}`).join('　'));
+    check('结局分流只由 G.4 的两条判据走：无票货堆 Risk → #1，不买货烧固定支出 → #2，正经料跑到第 12 天没有结局',
+      runs['顶档正经料'].ending === 0 && runs['顶档正经料'].days === 12
+      && runs['清仓特价（无票）'].ending === ENDING.CRASH && runs['强哥无标'].ending === ENDING.CRASH
+      && runs['空篮'].ending === ENDING.BANKRUPT && runs['巨量（远超现金 + 赊购额）'].ending === ENDING.BANKRUPT,
+      Object.keys(SEQ).map(k => `${k} → #${runs[k].ending || '无'}`).join('　'));
+  }
 }
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
 // 而开学周是"全线 ×1.1 + 品类系数偏肉（MB1.3/MT1.2）"；附录 D.5 的 2.5 元/碗 锚点按固定品类占比算，不含这两项。

@@ -168,10 +168,13 @@ export const BLANCH = {
   center: 66.5, centerBand: 3,
 };
 
-// 附录 J：结局判定用的量纲（ui-spec §一换算表：盘店价 60,000 / 金盆洗手 300,000 / 烧心 Wmax 210 斤）
+// 附录 G.4（:590–592 是分/斤原式）+ ui-spec §一换算表：盘店价 60,000 / 金盆洗手 300,000 / 烧心 Wmax 210 斤
 export const BUYOUT_PRICE_CENTS = 6000000;
 export const RETIRE_NP_CENTS = 30000000;
 export const HEARTBURN_WMAX_JIN = 210;
+// 附录 G.4 第 6 行的变体门槛：「街坊会想你的摊」要 NP ≥ 9,000,000 分（90,000 元，v4.9.2 随量纲重锚由 30,000 上调）且 Rep ≥ 60
+export const QUIT_VARIANT_NP_CENTS = 9000000;
+export const QUIT_VARIANT_REP = 60;
 
 export const SUBSTREAMS = ['weather', 'supply', 'price', 'rival', 'event_morning_pre', 'event_morning',
   'event_evening', 'comment', 'regular', 'receipt', 'packing'];

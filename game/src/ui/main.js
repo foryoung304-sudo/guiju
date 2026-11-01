@@ -2,15 +2,15 @@
 // 红线照正本 3.1 / 3.4 / 九：不许出现品质数字、不许出现道德标签、不许有一句劝善或劝坏的话。
 import { CAT, SOLID_CATS, ALL_CATS, PRICE_TIERS, FACILITIES, ENDING, CONFIG, TIERS_STALL, START_CASH_CENTS, START_CREDIT_CAP_CENTS,
   PACKING, PACKING_NAMES, PREP_STATIONS, PREP_LEVELS, ADDITIVE, FLAVOR_DIMS, FLAVOR_DIM_NAMES, CLIENT_MIX,
-  TASTING, TOOLS, SCALE_AUTO_MUL, BLANCH } from '../data/constants.js';
+  TASTING, TOOLS, SCALE_AUTO_MUL, BLANCH, RETIRE_NP_CENTS } from '../data/constants.js';
 import { SKUS_BY_CAT, SKU_BY_ID } from '../data/skus.js';
 import { newGame, loadGame, saveGame, clearSave, makeRng, roundJin, centsToYuan } from '../index.js';
 import {
   beginDay, morningPreEvent, previewBasket, submitBasket, commitPrep, lockTradingDay, runDay,
-  nightSettle, eveningDraw, nightClose, dailyReport, replayPage, closeShop,
+  nightSettle, eveningDraw, nightClose, dailyReport, replayPage, judgeBuyout, judgeRetire, quitBlurb,
 } from '../engine/day.js';
 import { additiveUnlocked, prepBudget, prepGridUsed, xiaodouPresent, laborCostCents, tastingConvert } from '../engine/production.js';
-import { effectivePrice, skuAvailable, creditAvailable, buyFacility, rampCoef, ownsTool, buyTool, sellBackTool } from '../engine/market.js';
+import { effectivePrice, skuAvailable, creditAvailable, buyFacility, isFacilityUnlocked, rampCoef, ownsTool, buyTool, sellBackTool, upgradeStall } from '../engine/market.js';
 import { drawEvent, resolveChoice, isActionAvailable, isActionAffordable } from '../engine/events.js';
 import { ticketlessCostCents } from '../engine/inspection.js';
 import { competitionOn, streetBoard } from '../engine/competition.js';
@@ -224,7 +224,9 @@ function act(host) {
     case 'evening': return afterEvening();
     case 'choose': return resolvePending(d.choice);
     case 'next': return newDay();
-    case 'sellout': return sellOutShop();
+    case 'sellout': return retireShop();
+    case 'quit': return quitShop();
+    case 'upgrade': return buyNextTier();
     case 'restart': clearSave(); return startNew((Date.now() % 100000) + 1);
     default: return undefined;
   }
@@ -591,10 +593,37 @@ function finishNight(choice, ev = pendingEvent) {
   return go('night');
 }
 
-function sellOutShop() {
-  state.EndingId = closeShop(state);       // 主动盘店：判定只在当刻走一次
+// 附录 G.4 把三个主动结局挂在三个不同动作上，界面照它分三个入口：
+// 「盘下对面铺子」= 置办面板里 门面→双店 那一笔（#3/#4 判在钱出去之前）、「把摊子盘出去」= #5、「不干了」= #6
+function retireShop() {
+  const e = judgeRetire(state);            // 判空即过：入口本只在 NP/达标时出现，真不达标就什么也不发生
+  if (!e) return go('night');
+  state.EndingId = e;
   saveGame(state);
   return go('end');
+}
+
+function quitShop() {
+  state.EndingId = ENDING.MEDIOCRE;        // #6 是随时出口，不设门槛（§六「玩家随时可点不干了」）
+  saveGame(state);
+  return go('end');
+}
+
+function buyNextTier() {
+  const price = TIERS_STALL[state.Tier - 1].upgradePrice;
+  if (!price || state.Cash < price) return go('market');
+  // 门面 → 整街双店这一笔就是正文 §六 说的"盘下对面铺子"：#3/#4 判在付钱当刻，判空即过、只升档
+  if (state.Tier === 5) {
+    const e = judgeBuyout(state);
+    if (e) {
+      state.EndingId = e;
+      saveGame(state);
+      return go('end');
+    }
+  }
+  upgradeStall(state);
+  saveGame(state);
+  return go('market');
 }
 
 // ── 画面 ─────────────────────────────────────────────────
@@ -779,8 +808,10 @@ const VIEWS = {
     ${state.EndingId ? `<div class="panel accent"><h2 class="kind-bad">${ENDING_NAMES[state.EndingId]}</h2>
       <p>这一局到这儿。剩下的就是你那张进货单。</p>
       <button class="go" style="margin-top:10px" data-nav="ledger">看进货单</button></div>`
-      : `<div class="row"><button class="ghost" data-act="next">开第 ${state.Day + 1} 天</button>
-        <button class="ghost" data-act="sellout">把摊子盘出去</button></div>`}`;
+      // #6「不干了」是随时出口、不设门槛；#5「把摊子盘出去」按 §六 只在 净赚 ≥300,000 且 C ≥5 时才出现（G.4 补一句"C<5 时入口不出现"）
+    : `<div class="row"><button class="ghost" data-act="next">开第 ${state.Day + 1} 天</button>
+        <button class="ghost" data-act="quit">不干了</button>
+        ${state.C >= 5 && state.NP >= RETIRE_NP_CENTS ? '<button class="ghost" data-act="sellout">把摊子盘出去</button>' : ''}</div>`}`;
   },
 
   ledger() {
@@ -929,26 +960,55 @@ const FACILITY_BLURB = {
   fac_sign: '招牌上刻一条你自己定的规矩：不做数字，只在终局演出里出现。',
 };
 
-// 正文 3.6 / 附录 D.3：六件设施 + 杂货摊器具一件。没解锁的不列（玩家看不见自己还没够到的东西），
-// 解锁了的原地挂着，买过的标"已置办"。显多秤是器具：不进 Facilities、不计 L（附录 E 实现约束第 2 条）。
+// UI-05 说的「未解锁显示解锁条件文案」：条件式来自附录 D.3 的「解锁条件」列，这里只把它翻成玩家读得懂的一句中性话，
+// 不预告事件内容、不写后果数值（红线：不许出现道德评语、不许把暗线摆到面板上）
+const UNLOCK_HINT = {
+  fac_prepay: '要先遇上一笔当面赊账的事。',
+  fac_taste: '二手餐车摆起来以后才有这一角。',
+  fac_display: '要先有一本立得住的账。',
+  fac_cert: '要先让检查的人上门看过一回。',
+  fac_contract: '要先有人来挖小豆。',
+  fac_sign: '满 45 个营业日才刻得动。',
+  JI_SCALE: '固定摊位摆起来以后杂货摊才上这一杆秤。',
+};
+
+// UI-05 上段：六档、当前高亮、下一档价与升级按钮。档名与价在附录 G.5:609（赊购额另见 D.1:52）与 ui-spec 换算表里，
+// 基础销量那一列属 3.1 可见清单之外（它只在留言与情境里以体感出现），所以这一段不印数字，只印档名与价。
+function tierBlock() {
+  const nextPrice = TIERS_STALL[state.Tier - 1].upgradePrice;
+  const next = state.Tier < 6 ? TIERS_STALL[state.Tier] : null;
+  // 第五档往第六档那一笔就是正文 §六 说的"盘下对面铺子"（60,000 与升双店价同值同原则，见换算表第 16 行）
+  const label = state.Tier === 5 ? '盘下对面铺子' : '升级';
+  return `<h3 style="margin-top:0">摊位</h3>
+    <div class="row tight">${TIERS_STALL.map(t => `<span class="muted" style="${t.level === state.Tier ? 'color:var(--ink);font-weight:700' : ''}">${t.name}</span>`).join('')}</div>
+    ${next ? `<p class="muted">下一档 ${next.name}：${nextPrice / 100} 元，一次性。${state.Cash < nextPrice ? `（现金不够，还差 ${(nextPrice - state.Cash) / 100}）` : ''}</p>
+      <button data-act="upgrade" ${state.Cash < nextPrice ? 'disabled' : ''}>${label}</button>`
+      : '<p class="muted">这条街两个铺子都是你的了，往上没有档了。</p>'}`;
+}
+
+// 正文 3.6 / 附录 D.3：六件设施 + 杂货摊器具一件。UI-05 要"未解锁显示解锁条件文案"，所以七件全列、
+// 没解锁的那几件挂着档名与那句条件话、按钮置灰。显多秤是器具：不进 Facilities、不计 L（附录 E 实现约束第 2 条）。
 function facilityRow() {
-  const facs = Object.values(FACILITIES).filter(f => state.Facilities.includes(f.id) || evalCondition(f.unlock, state));
-  const tools = Object.values(TOOLS).filter(t => ownsTool(state, t.id) || evalCondition(t.unlock, state));
-  if (!facs.length && !tools.length) return '';
-  return `<div class="panel warn"><h3>小店置办</h3>
+  const facs = Object.values(FACILITIES);
+  const tools = Object.values(TOOLS);
+  return `<div class="panel warn"><h3>小店置办</h3>${tierBlock()}<hr />
     ${facs.map(f => {
     const owned = state.Facilities.includes(f.id);
+    const open = isFacilityUnlocked(state, f.id);
     return `<div class="row tight"><div><b>${f.name}</b>
-        <p class="muted">${FACILITY_BLURB[f.id] || ''} ${f.price / 100} 元，一次性。</p></div>
-      <button data-act="facility" data-fac="${f.id}" ${owned || state.Cash < f.price ? 'disabled' : ''}>${owned ? '已置办' : '买下'}</button></div>`;
+        <p class="muted">${open ? `${FACILITY_BLURB[f.id] || ''} ${f.price / 100} 元，一次性。` : UNLOCK_HINT[f.id] || ''}</p></div>
+      <button data-act="facility" data-fac="${f.id}" ${owned || !open || state.Cash < f.price ? 'disabled' : ''}>${owned ? '已置办' : '买下'}</button></div>`;
   }).join('')}
     ${tools.map(t => {
     const owned = ownsTool(state, t.id);
+    const open = evalCondition(t.unlock, state);
     return `<div class="row tight"><div><b>${t.name}</b>
-        <p class="muted">杂货摊有卖：${t.price / 100} 元买、${t.sellBack / 100} 元卖回（第 3 步按半价回收）。
-          装上后散客那一层的计费斤数按 ×${SCALE_AUTO_MUL} 记账，开关在开门前定版、当日锁定。</p></div>
+        <p class="muted">${open
+          ? `杂货摊有卖：${t.price / 100} 元买、${t.sellBack / 100} 元卖回（第 3 步按半价回收）。
+              装上后散客那一层的计费斤数按 ×${SCALE_AUTO_MUL} 记账，开关在开门前定版、当日锁定。`
+          : UNLOCK_HINT[t.id] || ''}</p></div>
       <span class="row tight">${owned ? `<button class="ghost" data-act="sellTool" data-tool="${t.id}">卖回</button>` : ''}
-        <button data-act="buyTool" data-tool="${t.id}" ${owned || state.Cash < t.price ? 'disabled' : ''}>${owned ? '已上秤' : '买下'}</button></span></div>`;
+        <button data-act="buyTool" data-tool="${t.id}" ${owned || !open || state.Cash < t.price ? 'disabled' : ''}>${owned ? '已上秤' : '买下'}</button></span></div>`;
   }).join('')}</div>`;
 }
 
@@ -1128,6 +1188,7 @@ function endPanel(p, standalone) {
   const r = p.reveal;
   return (standalone ? hud() : '') + `<div class="panel accent">
     <h2 class="kind-bad">结局：${ENDING_NAMES[p.endingId]}</h2>
+    ${p.endingId === ENDING.MEDIOCRE ? `<p class="text">${esc(quitBlurb(state))}</p>` : ''}
     <div class="grid2">
       <div><div class="muted">营业天数</div><div class="big num">${p.days}</div></div>
       <div><div class="muted">累计净赚</div><div class="big num ${r.NP < 0 ? 'negv' : 'pos'}">${y(r.NP)}</div></div>

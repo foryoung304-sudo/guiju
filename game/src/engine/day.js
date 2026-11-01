@@ -1,4 +1,4 @@
-import { CONFIG, PRICE_TIERS, ENDING, SOLID_CATS, PACKING, ADDITIVE, TASTING, BUYOUT_PRICE_CENTS, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN } from '../data/constants.js';
+import { CONFIG, PRICE_TIERS, ENDING, SOLID_CATS, PACKING, ADDITIVE, TASTING, BUYOUT_PRICE_CENTS, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN, QUIT_VARIANT_NP_CENTS, QUIT_VARIANT_REP } from '../data/constants.js';
 import { blankToday, roundJin } from './state.js';
 import { makeRng } from './rng.js';
 import { buildBasket, commitPurchase, planPayment, ownsTool } from './market.js';
@@ -244,7 +244,7 @@ export function closeDay(state, rng, chooseEvening) {
   return nightClose(state, rng, ev, actionId);
 }
 
-// 附录 G.4：结局判定只在第 11 步走一次；3/4/5 由玩家主动盘店当刻判（见 closeShop）
+// 附录 G.4：被动型结局（#1/#2）每晚第 11 步判一次；主动型（#3/#4/#5/#6）挂在各自的动作当刻，见下面三条
 export function checkEndings(state) {
   // §六 #1 的两条被动路径：Risk 到 100（含当日曾到）、卫生大检查 Score < 35（附录 E.6 当晚判，见 inspection.js）
   if (state.risk_100_pending || state.Risk >= 100 || state.today?.inspectionCrash) return ENDING.CRASH;
@@ -252,13 +252,41 @@ export function checkEndings(state) {
   return 0;
 }
 
-// 玩家主动「把摊子盘出去」：当日只判一次，序号取最小；判空即过（只升档，不给结局）
-export function closeShop(state) {
+// 附录 G.4 把四个"执行某动作"型结局各挂在一个动作上，判定只在当刻走一次；
+// #1/#2 是被动的，每晚第 11 步判（见 checkEndings）。三个动作型分开成三条式子，
+// 是因为正文 §六「判定归属写死」：没做那个动作，就不该拿到那个结局。
+// #3/#4 挂在"盘下对面铺子"（付 60,000 = 升"整街双店"那一档，ui-spec 换算表第 16 行写"同值同原则"）这一笔上，
+// 且必须在钱出去之前判：判在付钱之后，"现金 ≥ 60,000"就变成要手里同时攥着两份盘店钱，
+// 正文 3.5:141 的参考策略①「首个结局应为规矩立住」将不可达。判空即过 = 只升档不给结局（§六 盘店分支补洞）。
+export function judgeBuyout(state) {
   if (state.Cash >= BUYOUT_PRICE_CENTS && state.Rep >= 75 && state.H <= 10 && state.L >= 4) return ENDING.RULES;
   if (state.H >= 18 && state.Wmax >= HEARTBURN_WMAX_JIN) return ENDING.HEARTBURN;
+  return 0;
+}
+
+// #5 金盆洗手：G.4「NP>=30000000(分) & C>=5」，且 C<5 时目标墙上那个入口根本不出现
+export function judgeRetire(state) {
   // 正本 G.5 写 NP>=10000000(分)＝10 万元，先前实现少了一位数；定稿门槛 30 万元＝30000000 分
-  if (state.C >= 5 && state.NP >= RETIRE_NP_CENTS) return ENDING.RETIRE;
-  return ENDING.MEDIOCRE;
+  return (state.C >= 5 && state.NP >= RETIRE_NP_CENTS) ? ENDING.RETIRE : 0;
+}
+
+// 「街坊会想你的摊」是 #6 的变体而不是第七个结局（id 仍是 6），门槛 NP ≥ 90,000 元 且 Rep ≥ 60
+export function quitVariant(state) {
+  return state.NP >= QUIT_VARIANT_NP_CENTS && state.Rep >= QUIT_VARIANT_REP;
+}
+
+// §六 只给了这一处分档（变体 vs 普通），没给第二把门槛，所以合成评语只做两支——
+// "按当时 Rep/净赚/天数合成"里的天数当事实陈述用，不当阈值用；两句文案属 agent 自撰，待店主审。
+export function quitBlurb(state) {
+  return quitVariant(state)
+    ? '街坊会想你的摊。'
+    : `卖了 ${state.Day} 天，摊子收了。`;
+}
+
+// 无头跑表的"尝试盘店"沿用合成判定：按序号取小，判空给 #6（正文 §六「同日多条达成按序号取小」）。
+// 界面上不许再走这条——那等于没盘店也能凭点一下「把摊子盘出去」拿到结局 #3。
+export function closeShop(state) {
+  return judgeBuyout(state) || judgeRetire(state) || ENDING.MEDIOCRE;
 }
 
 export function dailyReport(state) {
