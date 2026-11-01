@@ -221,6 +221,8 @@ export function simulate(seed, days, strategy, closer = 'headless', opts = {}) {
       cash: state.Cash / 100, debt: state.DebtSupplier / 100, NP: state.NP / 100,
       Rep: +state.Rep.toFixed(2), Risk: +state.Risk.toFixed(2),
       C: +state.C.toFixed(2), H: +state.H.toFixed(2), R: state.R, L: state.L,
+      // 正文 :91 / 附录 D.1 的票据覆盖率：第 9 步已写 state.ReceiptRate（shadow.js:89），这里只把它抄进逐日表
+      receiptRate: state.ReceiptRate,
       tier: state.Tier, invest: state.NetInvestSpent / 100,
       target: Math.floor(target),
       // 卡点两档：short = 想按试算买但被迫减量；starved = 连一碗的篮都付不齐（汤底只收现金最容易撞）

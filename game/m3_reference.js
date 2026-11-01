@@ -4,7 +4,9 @@
 // 本脚本只测量、只回报，不改任何已签数值；烫煮线不在跑表里出段（sim.js 无熟度取值口径，第八批已登记）。
 import { simulate, STRATEGIES, REF_STRATEGIES } from './src/sim.js';
 import { evalCondition } from './src/engine/dsl.js';
-import { ENDING, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN, FACILITIES, BUYOUT_PRICE_CENTS } from './src/data/constants.js';
+import { quitVariant } from './src/engine/day.js';
+import { ENDING, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN, FACILITIES, BUYOUT_PRICE_CENTS,
+  TIERS_STALL, QUIT_VARIANT_NP_CENTS, QUIT_VARIANT_REP } from './src/data/constants.js';
 
 const SEEDS = [20261031, 7979, 12345, 4242, 90210];
 const FULL = { buy: 'appc', labor: true, competition: true, eventScope: 'full' };
@@ -40,6 +42,20 @@ function deathCause(r) {
   return '｜死因 未从末夜 state 读出（要查实现）';
 }
 
+// 裁定⑤（signoff-m3-gate-rulings-20261101 二⑤）：无头线跑满 120 天不给结局的，按界面轨 quitVariant 判 #6 记账。
+// 口径落点选在测量层，不改 src/sim.js:147 的「判空即过」——那颗 if 是 G.4 的无头合成式，改它会动 sweep-out-r11 的已签带读数。
+// 变体/普通分档走引擎自己的 day.js:284（末夜 state 真值）；逐 log 只用于「变体门槛首达日」，
+// 而 log 的 Rep 是 toFixed(2) 的舍入读数，边界 ±0.005 可能让首达日差一天，所以那格只当参考。
+function quitTrack(r) {
+  const last = r.log.at(-1);
+  if (last.ending) return '';                       // 有无头首结局的场不进这条口径
+  const variant = quitVariant(r.state);
+  const vDay = firstDay(r.log, d => d.NP >= QUIT_VARIANT_NP_CENTS / 100 && d.Rep >= QUIT_VARIANT_REP);
+  return `\n      裁定⑤ 界面轨记账：第 ${last.day} 天点「不干了」→ #6 ${variant ? '变体（街坊会想你的摊）' : '普通（卖了 N 天，摊子收了）'}` +
+    `｜末态 NP ${f2(last.NP)}（门槛 ${QUIT_VARIANT_NP_CENTS / 100}）· Rep ${last.Rep}（门槛 ${QUIT_VARIANT_REP}）` +
+    `｜变体门槛首达日 ${vDay ?? '120 天内没到过'}`;
+}
+
 function report(name, r, extra = '') {
   const log = r.log, last = log.at(-1);
   const crash = firstDay(log, d => d.Risk >= 100);
@@ -55,8 +71,8 @@ function report(name, r, extra = '') {
   const lDay = firstDay(log, d => d.L >= L_NEED);
   const facs = r.invests.filter(i => i.kind === 'facility');
   const stalls = r.invests.filter(i => i.kind === 'stall');
-  console.log(`  ${name.padEnd(30, '　')}｜首结局 ${END_NAME[last.ending] || '未触发'} @ 第 ${last.day} 天` +
-    `｜末态 ${why(log)}`);
+  console.log(`  ${name.padEnd(30, '　')}｜首结局 ${END_NAME[last.ending] || '无（120 天跑满）'} @ 第 ${last.day} 天` +
+    `｜末态 ${why(log)}${quitTrack(r)}`);
   console.log(`      达标日：L≥${L_NEED} ${lDay ?? '未达'}｜H≥${H_NEED} ${hDay ?? '未达'}｜单日 J≥${HEARTBURN_WMAX_JIN}斤 ${wDay ?? '未达'}（峰值 ${wmax(log).toFixed(3)}）` +
     `｜Risk≥100 ${crash ?? '未破'}（账面峰值 ${riskPeak}）｜检查翻车 ${inspCrash ?? '无'}｜现金连负 3 天 ${negRun ?? '无'}${deathCause(r)}`);
   console.log(`      设施腿：${facs.length ? facs.map(i => `${i.to}@第${i.day}天(${i.price / 100}元)`).join(' ') : '一件没买'}` +
@@ -127,17 +143,28 @@ for (const [k, strat] of Object.entries(REF_STRATEGIES)) {
 for (const p of hbProbes) for (const s of SEEDS) allLines.push([p.label, run(s, p.strat, p.opt)]);
 for (const p of lProbes) for (const s of SEEDS) allLines.push([p.label, run(s, p.strat, p.opt)]);
 for (const k of Object.keys(STRATEGIES)) for (const s of SEEDS) allLines.push([k, run(s, { ...STRATEGIES[k], buyFacilities: true, upgrade: true, buyout: true }, { additive: 'more' })]);
+const quit6 = [];
 for (const [name, r] of allLines) {
-  const e = r.log.at(-1).ending;
-  if (!e) continue;
-  (seen[e] ||= []).push(`${name}@第${r.log.at(-1).day}天`);
+  const last = r.log.at(-1);
+  if (!last.ending) {                                   // 裁定⑤：跑满 120 天无结局 ⇒ 界面轨那晚点「不干了」记 #6
+    quit6.push(`${name}@第${last.day}天 ${quitVariant(r.state) ? '变体' : '普通'}`);
+    continue;
+  }
+  (seen[last.ending] ||= []).push(`${name}@第${last.day}天`);
 }
 for (const id of [1, 2, 3, 4, 5, 6]) {
   const hits = seen[id] || [];
+  if (id === 6) {                                       // 无头那颗 ⊘ 是 sim.js:147 的判空即过，不是够不着；记账另走界面轨（裁定⑤）
+    console.log(`  ✓ #6 ${END_NAME[6].padEnd(6, '　')}无头合成式落地 ${hits.length} 次（sim.js:147 判空即过，本来就不吃 #6）` +
+      `｜裁定⑤ 界面轨记账 ${quit6.length} 场：跑满 120 天那一晚点「不干了」→ #6（变体 ${quit6.filter(x => x.includes('变体')).length}／普通 ${quit6.filter(x => x.includes('普通')).length}）`);
+    continue;
+  }
   console.log(`  ${hits.length ? '✓' : '⊘'} #${id} ${END_NAME[id].padEnd(6, '　')}落地 ${hits.length} 次` +
-    `${hits.length ? `｜最早 ${hits.slice(0, 3).join(' ')}` : '（本批探针线里一次都没出现）'}`);
+    `${hits.length ? `｜最早 ${hits.slice(0, 3).join(' ')}` : '（无头合成式里一次都没出现）'}`);
 }
+console.log(`  #6 界面轨记账逐场：${quit6.length ? quit6.join('　') : '无（本批探针线全都在 120 天内拿到无头首结局）'}`);
 console.log(`\n  探针线合计 ${allLines.length} 场（120 天上限）。⊘ 不记红：可能是范围缺口（内容没接）也可能是门槛真的够不着，读上面各段的达标日自己判。`);
+console.log(`  两轨之别再记一次：上面 #1–#5 的计数是无头合成式（closeShop 序号取小 + sim.js:147 判空即过），#6 那格按裁定⑤ 补的是界面轨记账，两种数不能混读。`);
 
 // ── 追加段：把上面 ⊘ 与早死两条问到底 ────────────────────────────
 console.log(`\n${line(100)}\n【A】参考① 五种子逐场（议题三：首结局是不是「规矩立住」）\n${line(100)}`);
@@ -327,7 +354,8 @@ for (const key of ['ref1', 'ref2', 'ref3']) {
     } else if (key === 'ref2') {
       const ref1Same = gate3.ref1.find(x => x[0] === s)[1].log.at(-1);
       verdict.push(`${!ref1Same.ending ? '⊘' : (last.day > ref1Same.day ? '·' : '✗')} 首结局晚于策略①（① ${ref1Same.ending ? `第${ref1Same.day}天` : '120 天无结局'}／② ${last.ending ? `第${last.day}天` : '120 天无结局'}）`);
-      verdict.push(`${last.ending ? '·' : '✗'} 120 天内触发结局（末态 NP ${f2(last.NP)}、L ${last.L}、Rep ${last.Rep}、C ${last.C}）`);
+      verdict.push(`${last.ending ? '·' : '⊘'} 120 天内触发结局（末态 NP ${f2(last.NP)}、L ${last.L}、Rep ${last.Rep}、C ${last.C}）` +
+        `${last.ending ? '' : '｜裁定⑤ 记账：这一场无头不给结局，落界面轨 #6 ' + (quitVariant(r.state) ? '变体' : '普通') + '，:143 的「死局」定性按此收口'}`);
     } else {
       const riskNote = risk70 ?? `跑到第 ${log.length} 天就收线（末态 Risk ${last.Risk}），40 天窗口没走完`;
       verdict.push(`${risk70 !== null && risk70 <= 40 ? '·' : '✗'} Risk 第 40 天内破 70（${riskNote}）`);
@@ -343,12 +371,16 @@ const sixLines = [
   ...Object.values(STRATEGIES).map(s => [`${s.name}（极端线 + 投资腿）`, { ...s, ...investLegs }, 'more']),
 ];
 for (const [name, strat, add] of sixLines) {
-  const ends = SEEDS.map(s => { const l = run(s, strat, { additive: add }).log.at(-1);
-    return { day: l.day, txt: `${s} ${END_NAME[l.ending] || '未触发'}@${l.day}`, hit: !!l.ending }; });
+  const ends = SEEDS.map(s => { const r = run(s, strat, { additive: add }); const l = r.log.at(-1);
+    return { day: l.day, txt: `${s} ${END_NAME[l.ending] || `界面轨#6${quitVariant(r.state) ? '变' : '普'}`}@${l.day}`, hit: !!l.ending }; });
   const n = ends.filter(e => !e.hit).length;
   console.log(`    · ${name.padEnd(24, '　')}｜${ends.map(e => e.txt).join('　')}` +
-    `　→ ${n ? `✗ ${n}/5 种子 120 天跑满不给结局（末态见上：L / C / NP 哪项没够）` : '· 5/5 触发'}`);
+    `　→ · 5/5 触发结局` +
+    `${n ? `（无头合成式 ${ends.length - n}/5 + 裁定⑤ 界面轨 #6 记账 ${n}/5）` : '（全部无头合成式内触发）'}`);
 }
+console.log(`  读法（裁定⑤ 落地后）：:358「六条线逐条在 120 天内触发至少一个结局」与 :143「不存在 120 天无结局的死局策略」两条同按此收口——`);
+console.log(`  跑满 120 天没拿到无头首结局的场，玩家在界面轨那一晚点「不干了」即拿 #6（退出按钮恒在，第七批真机 QA），所以「未选择结局」不是死局、不再记 ✗；`);
+console.log(`  无头那侧的读数一格没改（sim.js:147 的判空即过仍按 G.4），改的只是本脚本的记账列。`);
 console.log(`  读法：⊘ = scope-blocked（对照线本身没给结局，无法比先后），沿用 §十四 的口径，不记红。`);
 
 console.log(`\n【I】:142 的「③ Risk 40 天内破 70」为什么在完整版读不到：同一条 ③ 线，事件池两口径对照（人工/竞争照旧在场）`);
@@ -390,6 +422,77 @@ console.log(`  ${lCells.length} 场到过 L≥4：其中 ${lCells.length - flagD
 console.log(`  不换档那条线的设施上限实测（见议题二末三场）：档1 只有 fac_prepay（要 evt_d_001）与 fac_sign（BizDays>=45）两件会上架，`);
 console.log(`  fac_taste 要 Tier>=2、fac_display 要 evt_d_021（condition 'Day>=10 & Tier>=2'）、fac_cert 要 seen_routine_inspection（evt_s_insp2 的 condition 'Risk>=40'）、`);
 console.log(`  fac_contract 要 evt_s_poach（'Tier>=固定摊位 & EVT?evt_s_pricewar'）⇒ 档1 不换档时 L 的设施腿封顶 2 件，:363 那条走通不了。`);
+
+// 正文 :358 交付栏要的逐日表：三条参考策略各跑到首个结局或 120 天上限，每日八列（篮子、Q、Rep、C/H、Risk、现金、经营净额、票据覆盖率），
+// 须注明种子，并另换 2 个种子复核策略排序不翻转。票据覆盖率那一列走裁定⑥ 新补的 sim.js receiptRate 格（纯读数，引擎第 9 步早就写了 state.ReceiptRate）。
+console.log(`\n${line(100)}\n【K】正文 :358 逐日表按样交付（三条参考线 × 主种子 ${SEEDS[0]} 全表 + 另换 ${SEEDS[1]}／${SEEDS[2]} 两种子复核排序）\n${line(100)}`);
+const kRun = (key, seed) => run(seed, REF_STRATEGIES[key], { additive: key === 'ref3' ? 'more' : 'none' });
+function dayTable(key, seed) {
+  const r = kRun(key, seed), log = r.log, last = log.at(-1);
+  console.log(`  ${REF_STRATEGIES[key].name}｜种子 ${seed}｜` +
+    `${last.ending ? `首结局 ${END_NAME[last.ending]} @ 第 ${last.day} 天` : `跑满 ${last.day} 天无无头首结局 ⇒ 裁定⑤ 界面轨记 #6 ${quitVariant(r.state) ? '变体' : '普通'}`}｜共 ${log.length} 行`);
+  console.log(`    ${'天'.padStart(4)}   ${'篮子(斤)'.padStart(10)} ${'Q'.padStart(7)} ${'Rep'.padStart(8)} ${'C/H'.padStart(12)} ${'Risk'.padStart(8)}` +
+    ` ${'现金'.padStart(13)} ${'经营净额'.padStart(12)} ${'票据覆盖率'.padStart(12)}`);
+  for (const d of log) {
+    console.log(`  ${String(d.day).padStart(6)} ${d.bought.toFixed(3).padStart(11)} ${d.Q.toFixed(1).padStart(8)} ${d.Rep.toFixed(2).padStart(9)}` +
+      ` ${(d.C.toFixed(2) + '/' + d.H.toFixed(2)).padStart(13)} ${d.Risk.toFixed(2).padStart(8)}` +
+      ` ${f2(d.cash).padStart(14)} ${f2(d.netOps).padStart(13)} ${((d.receiptRate * 100).toFixed(1) + '%').padStart(13)}`);
+  }
+  return r;
+}
+const kOrders = [];
+for (const key of ['ref1', 'ref2', 'ref3']) dayTable(key, SEEDS[0]);
+console.log(`\n  排序复核（:358「另换 2 个种子复核策略排序不翻转」）——本脚本把「排序」按 :142 已有的两条次序项读：③ 首结局早于 ①、① 首结局早于 ②；`);
+console.log(`  ② 跑满 120 天不给结局的按「晚于一切」记（这是测量口径自定，不是正本给的判据）。`);
+for (const seed of [SEEDS[0], SEEDS[1], SEEDS[2]]) {
+  const cells = ['ref1', 'ref2', 'ref3'].map((key, i) => {
+    const l = kRun(key, seed).log.at(-1);
+    return { mark: '①②③'[i], day: l.ending ? l.day : 999, name: l.ending ? END_NAME[l.ending] : '无结局' };
+  });
+  const ok = cells[2].day < cells[0].day && cells[0].day < cells[1].day;
+  kOrders.push({ seed, ok });
+  console.log(`    种子 ${String(seed).padEnd(9)}：${cells.map(c => `${c.mark} ${c.name}@${c.day === 999 ? '跑满 120 天' : `第 ${c.day} 天`}`).join('　')}` +
+    `　→ 次序 ${ok ? '· 不翻转（③ 早于 ① 早于 ②）' : '✗ 翻转'}`);
+}
+console.log(`  复核结论：3 个种子里 ${kOrders.filter(o => o.ok).length} 个次序不翻转${kOrders.filter(o => !o.ok).length ? `，翻转的是 ${kOrders.filter(o => !o.ok).map(o => o.seed).join('／')}（逐场死因见【B】【H】）` : ''}。`);
+
+// 裁定③（signoff-m3-gate-rulings-20261101 二③）授权的测量轮：只测不改。
+// tier-2 升级价 = TIERS_STALL[0].upgradePrice（三轮车那一格 =「升到档 2」的价，已签 105,000 分 = 1,050 元，constants.js:33）。
+// 覆盖只发生在探针进程的内存里：constants.js 与 src/ 一个字节都没动，跑完立刻还原并自检。
+// 还原自检走指纹比对（log + invests 全量 JSON），比「看起来一样」硬。
+console.log(`\n${line(100)}\n【L】裁定③ 测量轮：档 2 升级价覆盖为 800 / 650 元两档，各跑参考① 五种子（只测不改）\n${line(100)}`);
+const T2 = 0, SIGNED_T2 = TIERS_STALL[T2].upgradePrice;
+const sigOf = r => JSON.stringify([r.log, r.invests]);
+console.log(`  已签值现读：TIERS_STALL[0].upgradePrice = ${SIGNED_T2} 分 = ${SIGNED_T2 / 100} 元（本脚本不改这个格子出厂的值）`);
+const baseline = SEEDS.map(s => sigOf(kRun('ref1', s)));
+console.log(`  预先写死的成功标准（裁定③ 原话）：a 首结局 #3 ≥4/5；b #3 落点不早于第 35 天；c ③÷① 已签带与 D.5 锚点不受扰（c 不在本脚本里测，另跑 sweep 逐字节比）`);
+for (const price of [80000, 65000]) {
+  TIERS_STALL[T2].upgradePrice = price;
+  console.log(`\n  ── 档 2 升级价覆盖为 ${price / 100} 元（已签 ${SIGNED_T2 / 100} 元之下的第${price === 80000 ? '一' : '二'}档；investPhase 的 ×1.3 门槛随之下移到 ≥${f2(price * 1.3 / 100)} 元）`);
+  let n3 = 0, earliest3 = null, broke = 0;
+  for (const s of SEEDS) {
+    const r = kRun('ref1', s), last = r.log.at(-1);
+    const inv = r.invests.filter(i => i.kind === 'stall');
+    if (last.ending === ENDING.RULES) { n3 += 1; earliest3 = earliest3 === null ? last.day : Math.min(earliest3, last.day); }
+    const bad = inv.filter(i => i.cashAt < i.price * 1.3).length;
+    broke += bad;
+    report(`① 档2价${price / 100} 种子 ${s}`, r,
+      `｜本档换档不变式：${bad ? `破 ${bad} 处` : '全守'}`);
+    console.log(`      换档账（价是本档探针价、非已签值）：${inv.length ? inv.map(i => `第 ${i.day} 天 ${i.to - 1}→${i.to} 档花 ${i.price / 100} 元；时点现金 ${f2(i.cashAt / 100)} → 剩 ${f2(i.cashAfter / 100)}（门槛 ≥${f2(i.price * 1.3 / 100)}）`).join('；') : '未换档'}` +
+      `｜升级后头三天净额 ${inv.length ? inv[0] && r.log.slice(inv[0].day, inv[0].day + 3).map(d => f2(d.netOps)).join(' ') : '—'}` +
+      `｜空篮天数 ${r.log.filter(d => d.starved).length}｜缩量天数 ${r.log.filter(d => d.shortBuy).length}`);
+  }
+  const a = n3 >= 4, b = earliest3 !== null && earliest3 >= 35;
+  console.log(`    成功标准逐条：a #3 ${n3}/5 → ${a ? '达标' : '不达标'}｜b #3 最早落点 ${earliest3 ?? '无'} 天 → ${b ? '达标' : '不达标'}` +
+    `｜c 见批末 sweep 比对｜换档不变式 ${broke ? `破 ${broke} 处` : '五场全守'}`);
+  console.log(`    → 本档综合判：${a && b ? '达标（按裁定③：达标再签新价——签不签归店主，本批只回报）' : '不达标（回裁定③ 再议；下一候选是档 2 固定支出台阶，裁定写明不许跳过价格先动它，本批没动）'}`);
+}
+TIERS_STALL[T2].upgradePrice = SIGNED_T2;
+const sameBack = SEEDS.map((s, i) => sigOf(kRun('ref1', s)) === baseline[i]);
+console.log(`\n  还原自检：现读 ${TIERS_STALL[T2].upgradePrice} 分（应等已签 ${SIGNED_T2} 分）→ ${TIERS_STALL[T2].upgradePrice === SIGNED_T2 ? '一致' : '不一致，这是事故'}` +
+  `｜还原后 ① 五种子与覆盖前的指纹逐场比对：${sameBack.map(x => x ? '·' : '✗').join(' ')}（${sameBack.filter(x => x).length}/5 相同）`);
+console.log(`  口径提醒：探针覆盖只活在本进程，sweep_calibration.js / test_regression.js 各起进程、读的是 constants.js 出厂值，所以已签带与 D.5 锚点按构造不受扰；`);
+console.log(`  本批仍按这条构造另跑一遍 sweep 与回归作实证（见 delta §三十一 第 4 小节），不靠「构造上应该」收工。`);
 
 
 
