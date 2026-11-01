@@ -83,7 +83,12 @@ export function applyHidden(state, h) {
   if (h.Rep) state.Rep = Math.max(0, Math.min(100, state.Rep + h.Rep));
   if (h.C) { state.C = Math.max(0, state.C + h.C); state.H += h.C; }
   if (h.H) state.H += h.H;
-  if (h.Risk) state.Risk = Math.max(0, Math.min(100, state.Risk + h.Risk));
+  if (h.Risk) {
+    state.Risk = Math.max(0, Math.min(100, state.Risk + h.Risk));
+    // 裁定 9a959bd §二：执法清算穿得过保护池（豁免只挡每日 −2），顺序 = 先扣可抵扣池、不足再扣保护池。
+    // 下面这一行即该顺序的等价闭式：可抵扣池够扣时 RiskShort 原样留着，不够时差额落到保护池上。
+    state.RiskShort = Math.min(state.RiskShort, state.Risk);
+  }
   if (h.R) state.R = Math.max(0, state.R + h.R);
   if (h.L) state.L = Math.min(10, state.L + h.L);
 }

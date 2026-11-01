@@ -5,15 +5,18 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { simulate, STRATEGIES } from './src/sim.js';
 import { bridgeCheck } from './src/engine/ledger.js';
-import { newGame, roundJin } from './src/engine/state.js';
+import { newGame, roundJin, loadGame, STORAGE_KEY } from './src/engine/state.js';
 import { effectivePrice, buildBasket, planPayment } from './src/engine/market.js';
-import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, CONFIG } from './src/data/constants.js';
+import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, CONFIG, SAVE_VERSION } from './src/data/constants.js';
 import { SKU_BY_ID } from './src/data/skus.js';
 import { scenarioOf, WEATHER } from './src/data/scenario.js';
 import { evalCondition } from './src/engine/dsl.js';
 import { EVENTS } from './src/data/events.js';
 import { beginDay, morningPreEvent, submitBasket, lockTradingDay, morningEvent, runDay, nightSettle, eveningDraw, nightClose } from './src/engine/day.js';
-import { drawHandOrders } from './src/engine/weigh.js';
+import { drawHandOrders, handOrderCount } from './src/engine/weigh.js';
+import { applyHidden } from './src/engine/events.js';
+import { applyShadow } from './src/engine/shadow.js';
+import { makeRng } from './src/engine/rng.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SEED = Number(process.argv[2] ?? 20261031);
@@ -237,6 +240,97 @@ for (const [key, run] of Object.entries(runs)) {
     }
   });
   check(`凭空流水 ${key}（售出斤数 ≤ 期初库存 + 本篮买入）`, ghost.length === 0, ghost.join(' / '));
+}
+
+// ── 7. M2 R5：短斤 Risk 时点（§〇.1 第 11 条签「豁免」，签复 b48ec8e）───────────
+// 正本 3.4：3 单/日全短斤 = +1.5 Risk/日 → 约 27 天到 Risk 40（例行检查入池）、约 47 天到 Risk 70（大检查硬触发）。
+// 短斤项进受保护池、Rep ≥60 的 −2/日 只吃其余来源；两件事各自守住：斜率不变 + 抵扣没坏。
+const SHORT_LINE = { tier: 1, price: 'standard', weigh: 0.85, yieldAll: true,
+  buyFacilities: false, upgrade: false, buyout: false };
+for (const seed of [SEED, 7979, 36832]) {
+  const { log } = simulate(seed, 50, SHORT_LINE);
+  const rep60 = log.findIndex(d => d.Rep >= 60);
+  const slope = [...new Set(log
+    .map((d, i) => (i > 1 && log[i - 1].Rep >= 60 ? +(d.Risk - log[i - 1].Risk).toFixed(2) : null))
+    .filter(v => v !== null))];
+  check(`R5 短斤线 Rep ≥60 之后斜率仍为 +1.5/日 seed ${seed}`,
+    slope.length === 1 && slope[0] === 1.5, `Rep 首破 60 = 第 ${rep60 + 1} 天，此后增量 = ${slope.join('/')}`);
+  const at40 = log.find(d => d.Risk >= 40)?.day;
+  const at70 = log.find(d => d.Risk >= 70)?.day;
+  check(`R5 短斤线 Risk 40 / 70 与正本 3.4 锚点一致 seed ${seed}`,
+    at40 === 27 && at70 === 47, `到 40 = 第 ${at40} 天（锚 27）、到 70 = 第 ${at70} 天（锚 47）`);
+  check(`R5 受保护池不超过 Risk 本体 seed ${seed}`,
+    log.every(d => d.Risk >= 0 && d.Risk <= 100));
+}
+// 亲手单档数（定稿 3.11：M2 起 3 单/日，固定摊位档起 4 单/日）——R5 锚点的前置
+{
+  const s1 = newGame(SEED);
+  const s3 = newGame(SEED); s3.Tier = 3;
+  check('R5 前置：亲手单 M2 起 3 单/日、固定摊位档起 4 单/日',
+    handOrderCount(s1) === 3 && handOrderCount(s3) === 4,
+    `三轮车 ${handOrderCount(s1)} 单 / 固定摊位 ${handOrderCount(s3)} 单`);
+  check('R5 前置：同日抽到的亲手单不重复', (() => {
+    const orders = drawHandOrders(s3, makeRng(s3));
+    return orders.length === 4 && new Set(orders.map(o => o.customerId)).size === 4;
+  })(), `抽到 ${drawHandOrders(s3, makeRng(s3)).length} 单`);
+}
+// 抵扣没坏：同一条线，非短斤来源照样被 −2/日 拉下来；短斤来源一动不动
+{
+  const probe = short => {
+    const s = newGame(SEED);
+    s.Rep = 70; s.RiskShort = short; s.Risk = 10;
+    s.today.J = 10; s.today.consumed = [{ qty: 10, batch: { cat: 'MB', q: 95 } }];   // Q=95 → 黑心 0
+    applyShadow(s, { shortOrders: 0, spillBowls: 0 });
+    return +s.Risk.toFixed(2);
+  };
+  check('R5 对照：非短斤来源照吃 Rep ≥60 的 −2/日', probe(0) === 8, `Risk 10（保护池 0）→ ${probe(0)}`);
+  check('R5 对照：短斤积累的部分不受抵扣（保护池原样留着）', probe(10) === 10, `Risk 10（全是保护池）→ ${probe(10)}`);
+}
+// 裁定 9a959bd §二：执法清算（大检查通过清至 30 / 整改清至 40）穿得过保护池，
+// 顺序 = 先扣可抵扣池、不足再扣保护池。检查类事件 M2 接线前先把这条顺序钉住。
+{
+  const clear = (short, total, to) => {
+    const s = newGame(SEED);
+    s.RiskShort = short; s.Risk = total;
+    applyHidden(s, { Risk: to - total });
+    return { risk: +s.Risk.toFixed(2), prot: +s.RiskShort.toFixed(2), deductible: +(s.Risk - s.RiskShort).toFixed(2) };
+  };
+  const enough = clear(10, 25, 15);   // 可抵扣池 15 吃 10 → 剩 5，保护池一动不动
+  check('R5 清算顺序：可抵扣池够扣时保护池原样留着',
+    enough.risk === 15 && enough.prot === 10 && enough.deductible === 5,
+    `25→${enough.risk}，保护池 ${enough.prot}，可抵扣 ${enough.deductible}`);
+  const through = clear(40, 45, 30);   // 可抵扣池 5 扣光，差额 10 穿到保护池 → 40−10 = 30
+  check('R5 清算顺序：可抵扣池不足时差额穿保护池（案底消得最慢）',
+    through.risk === 30 && through.prot === 30 && through.deductible === 0,
+    `45→${through.risk}，保护池 40→${through.prot}，可抵扣 5→${through.deductible}`);
+  const toZero = clear(20, 20, 0);     // 全保护池被清零也不许留负数/残值
+  check('R5 清算边界：保护池整池清零后两池都归零',
+    toZero.risk === 0 && toZero.prot === 0, `20→${toZero.risk}，保护池 ${toZero.prot}`);
+}
+
+// ── 8. 存档迁移（裁定 9a959bd §一：升版不作废旧档，RiskShort 补 0、其余字段照旧带入）──
+{
+  const store = new Map();
+  globalThis.localStorage = {
+    getItem: k => (store.has(k) ? store.get(k) : null),
+    setItem: (k, v) => store.set(k, String(v)),
+    removeItem: k => store.delete(k),
+  };
+  const old = newGame(SEED);
+  old.saveVersion = 'v4.9.2-cal.1';
+  delete old.RiskShort;
+  Object.assign(old, { Day: 6, Rep: 41.5, Cash: 12345, Risk: 22.5 });
+  store.set(STORAGE_KEY, JSON.stringify(old));
+  const m = loadGame();
+  check('迁移：cal.1 旧档不作废，RiskShort 按「不溯及既往」补 0',
+    !!m && m.RiskShort === 0, `载入 ${m ? '成功' : '失败'}，RiskShort = ${m?.RiskShort}`);
+  check('迁移：其余字段照旧带入（Day / Rep / Cash / Risk）',
+    !!m && m.Day === 6 && m.Rep === 41.5 && m.Cash === 12345 && m.Risk === 22.5,
+    m ? `Day ${m.Day} / Rep ${m.Rep} / Cash ${m.Cash} / Risk ${m.Risk}` : '档被拒');
+  check('迁移：载入后版本号升到当前 ' + SAVE_VERSION, m?.saveVersion === SAVE_VERSION, `实际 ${m?.saveVersion}`);
+  store.set(STORAGE_KEY, JSON.stringify({ ...old, saveVersion: 'v4.9.1-cal.3' }));
+  check('迁移：名单外的版本照旧拒绝读档（附录 F.1 原口径）', loadGame() === null);
+  delete globalThis.localStorage;
 }
 
 // ── 输出 ─────────────────────────────────────────────────────────

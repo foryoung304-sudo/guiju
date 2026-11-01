@@ -2,10 +2,15 @@ import { CUSTOMERS, handOrderWeight } from '../data/customers.js';
 import { SOLID_CATS, CONFIG } from '../data/constants.js';
 import { roundJin } from './state.js';
 
-// 附录 H.1：第 7e 步用 regular 子流抽 2 位（同日不重复），常客线 A–D 走基权 ×（1 + P÷200）
+// 附录 H.1：第 7e 步用 regular 子流抽 3 位（同日不重复；固定摊位档起 4 位），常客线 A–D 走基权 ×（1 + P÷200）
+export function handOrderCount(state) {
+  return state.Tier >= CONFIG.handOrdersTierFull ? CONFIG.handOrdersPerDayFull : CONFIG.handOrdersPerDay;
+}
+
 export function drawHandOrders(state, rng) {
   const picked = rng.pickWeightedWithoutRepeats(
-    CUSTOMERS, c => handOrderWeight(c, state.P), CONFIG.handOrdersPerDay, 'regular');
+    CUSTOMERS, c => handOrderWeight(c, state.P), handOrderCount(state), 'regular');
+
   return picked.map(c => ({
     customerId: c.id, name: c.name, role: c.role, bowls: c.bowls,
     lines: SOLID_CATS.filter(cat => c.order[cat]).map(cat => ({ cat, grams: c.order[cat] })),

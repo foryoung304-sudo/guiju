@@ -1,4 +1,6 @@
-export const SAVE_VERSION = 'v4.9.2-cal.1';
+export const SAVE_VERSION = 'v4.9.2-cal.2';
+// 裁定 9a959bd §一：M2 首个可玩构建升版，列在此的旧档不作废、按迁移规则带入（RiskShort 补 0，不溯及既往）
+export const MIGRATABLE_SAVE_VERSIONS = ['v4.9.2-cal.1'];
 // 附录 F.3 / G.5 的量纲按 final-calibration-20261031 第一节+第三节重锚：现金 600、供应商额度 600（三轮车期），一律以分存整数
 export const START_CASH_CENTS = 60000;
 export const START_CREDIT_CAP_CENTS = 60000;
@@ -59,7 +61,11 @@ export const ENDING = { CRASH: 1, BANKRUPT: 2, RULES: 3, HEARTBURN: 4, RETIRE: 5
 
 export const CONFIG = {
   sampleDays: 10,
-  handOrdersPerDay: 2,
+  // 定稿 3.11 / 签复 signoff-m1-accepted-20261031：M1 样段裁 2 单属范围限定，M2 起恢复 3 单/日，
+  // 固定摊位（level 3）档起 4 单/日
+  handOrdersPerDay: 3,
+  handOrdersTierFull: 3,
+  handOrdersPerDayFull: 4,
   competition: false,
   prep: false,
   flavor: false,

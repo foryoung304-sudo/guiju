@@ -1,4 +1,4 @@
-import { SAVE_VERSION, SUBSTREAMS, TIERS_STALL, CONFIG, ALL_CATS, SOLID_CATS, PRICE_TIERS, START_CASH_CENTS, START_CREDIT_CAP_CENTS } from '../data/constants.js';
+import { SAVE_VERSION, MIGRATABLE_SAVE_VERSIONS, SUBSTREAMS, TIERS_STALL, CONFIG, ALL_CATS, SOLID_CATS, PRICE_TIERS, START_CASH_CENTS, START_CREDIT_CAP_CENTS } from '../data/constants.js';
 import { buildWeatherCycle } from '../data/scenario.js';
 import { makeRng } from './rng.js';
 
@@ -25,7 +25,7 @@ export function newGame(seed) {
     CostPool: Object.fromEntries(ALL_CATS.map(c => [c, 0])),
     NegativeCashStreak: 0,
 
-    Rep: 20, Q: 50, R: 0, R_v: 0, C: 0, H: 0, Risk: 0, risk_100_pending: false,
+    Rep: 20, Q: 50, R: 0, R_v: 0, C: 0, H: 0, Risk: 0, RiskShort: 0, risk_100_pending: false,
     L: 0, Wmax: 0, ReceiptRate: 1.0, ReceiptWindow: Array.from({ length: 30 }, () => ({ withTicket: 0, total: 0 })), P: 20,
 
     PriceTier: 'standard', PricePerJin: PRICE_TIERS.standard.perJin, PriceCoefToday: 1.0, PriceCoefYday: 1.0,
@@ -106,10 +106,13 @@ export function loadGame() {
   const raw = localStorage.getItem(STORAGE_KEY);
   if (!raw) return null;
   const parsed = JSON.parse(raw);
-  // 正文 3.4 / 附录 F.1：saveVersion 不符即拒绝读档，M1 前的旧档一律作废
-  if (parsed.saveVersion !== SAVE_VERSION) return null;
+  // 正文 3.4 / 附录 F.1：saveVersion 不符即拒绝读档；裁定 9a959bd §一 允许迁移名单内的旧档带入
+  if (parsed.saveVersion !== SAVE_VERSION && !MIGRATABLE_SAVE_VERSIONS.includes(parsed.saveVersion)) return null;
   // feedback-hint-persistence-20261031：教学提示标志只认存档本体；缺字段/脏值按「从未捏过」补齐
   if (typeof parsed.pinchHintUsed !== 'boolean') parsed.pinchHintUsed = false;
+  // 第 11 条豁免（签复 b48ec8e）带来的分量作假池；缺字段按裁定 9a959bd §一「不溯及既往」补 0
+  if (typeof parsed.RiskShort !== 'number' || !Number.isFinite(parsed.RiskShort)) parsed.RiskShort = 0;
+  parsed.saveVersion = SAVE_VERSION;
   return parsed;
 }
 

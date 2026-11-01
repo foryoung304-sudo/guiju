@@ -47,8 +47,8 @@ export function applyShadow(state, { shortOrders, spillBowls }) {
   t.Q = Q;
   t.QZeroSales = zeroSales;
 
-  const addC = state.AdditiveTier === 'more' ? 0.6 : state.AdditiveTier === 'less' ? 0.3 : 0;
-  const addRisk = state.AdditiveTier === 'more' ? 3 : state.AdditiveTier === 'less' ? 2 : 0;
+  const addC = zeroSales ? 0 : (state.AdditiveTier === 'more' ? 0.6 : state.AdditiveTier === 'less' ? 0.3 : 0);
+  const addRisk = zeroSales ? 0 : (state.AdditiveTier === 'more' ? 3 : state.AdditiveTier === 'less' ? 2 : 0);
   const spill = spillRepPenalty(spillBowls);
 
   // 黑心增量只由 Q 驱动；零销量时跳过 Q 驱动项，事件与实际操作增量照常
@@ -57,8 +57,16 @@ export function applyShadow(state, { shortOrders, spillBowls }) {
   state.C = clamp(state.C + inc, 0, 100);
   state.H += inc;
   if (!zeroSales && Q >= 85) state.C = Math.max(0, state.C - 0.5);
-  state.Risk = clamp(state.Risk + 黑心 * 5 + addRisk + shortOrders * 0.5, 0, 100);
-  if (!zeroSales && state.Rep >= 60) state.Risk = clamp(state.Risk - 2, 0, 100);
+  // §〇.1 第 11 条（签复 b48ec8e §三，店主签「豁免」）：分量作假产生的 Risk 增量不受 Rep ≥60 的 −2/日 抵扣，
+  // 其余来源照常吃抵扣。Risk 因此分两池记：RiskShort = 分量作假池（亲手短斤，显多秤接线后 ΔJ×0.3 同进本池，
+  // 裁定 9a959bd §三）；非分量来源为可抵扣池。
+  // 若不分池（先加短斤再整体 −2），天天短斤 +1.5 与 −2 相加为净 −0.5/日，Risk 恒在低位，
+  // 正本 3.4「约 27 天到 40 入池 / 约 47 天到 70 硬触发」这条时间线就守不住。
+  const shortInc = shortOrders * 0.5;
+  let 可抵 = Math.max(0, state.Risk - state.RiskShort) + 黑心 * 5 + addRisk;
+  if (!zeroSales && state.Rep >= 60) 可抵 = Math.max(0, 可抵 - 2);
+  state.RiskShort = clamp(state.RiskShort + shortInc, 0, 100);
+  state.Risk = clamp(state.RiskShort + 可抵, 0, 100);
 
   state.Rep = clamp(state.Rep + (zeroSales ? 0 : (Q - 50) * 0.06) - spill, 0, 100);
 
