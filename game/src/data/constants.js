@@ -1,6 +1,9 @@
-export const SAVE_VERSION = 'v4.9.2-cal.2';
+// v4.9.3 整合批：只并文书（附录 F 的 31 键 + 三条勘误 + §〇.1 标签收口），一个已签数值没动 ⇒ 版号升 v4.9.3、
+// 定稿轮次沿用 cal.2（后缀 `-cal.N` 的含义是 M1 数值定稿轮次，见附录 F.1，本轮次未开启）
+export const SAVE_VERSION = 'v4.9.3-cal.2';
 // 裁定 9a959bd §一：M2 首个可玩构建升版，列在此的旧档不作废、按迁移规则带入（RiskShort 补 0，不溯及既往）
-export const MIGRATABLE_SAVE_VERSIONS = ['v4.9.2-cal.1'];
+// v4.9.3 把 cal.2 也列进来：那一段存档字段已全（各批只加不改），照旧逐键补初值续档、不作废
+export const MIGRATABLE_SAVE_VERSIONS = ['v4.9.2-cal.2', 'v4.9.2-cal.1'];
 // 附录 F.3 / G.5 的量纲按 final-calibration-20261031 第一节+第三节重锚：现金 600、供应商额度 600（三轮车期），一律以分存整数
 export const START_CASH_CENTS = 60000;
 export const START_CREDIT_CAP_CENTS = 60000;

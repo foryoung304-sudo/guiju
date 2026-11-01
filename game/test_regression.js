@@ -1951,6 +1951,19 @@ for (const seed of [SEED, 7979, 36832]) {
     check('花钱补锅走事件账晚间一栏（现金桥口径）：当场 −180 元、eventCashEvening 同步记一笔、NP 在第 11 步才吃这一笔',
       q.Cash === cashBefore - 18000 && q.today.eventCashEvening === -18000
       && r.judgment === null && q.NP === 0, `现金 ${(q.Cash / 100).toFixed(2)} 元｜事件账 ${(q.today.eventCashEvening / 100).toFixed(2)}`);
+    // v4.9.3 整合批：第八批回报 ⑤ 店主裁定「补上」——补锅那颗照事件通则置灰，另一颗不花钱故不构成死局
+    const P = EV('evt_d_pot');
+    const poor = newGame(SEED); poor.Cash = 10000;
+    const g100 = isActionAffordable(poor, P.actions[0]);
+    poor.Cash = 20000;
+    const g200 = isActionAffordable(poor, P.actions[0]);
+    check('掏不起 180 元时「花钱补锅」置灰（gate:afford，与赔礼 260 / 涨薪 1,800 同一道门），「拿盆将就」不吃这道门 ⇒ 两个都付不起的死局选项不出现（正文 3.5 / 3.7）',
+      g100 === false && g200 === true && isActionAffordable({ ...poor, Cash: 10000 }, P.actions[1]) === true,
+      `100 元 → ${g100}｜200 元 → ${g200}`);
+    const gated = newGame(SEED); gated.Cash = 10000;
+    resolveChoice(gated, P, 'patch');
+    check('这道门只写在界面侧：无头线现金不足照样走「花钱补锅」并扣成负数，引擎不因置灰改道（与 gate 的既有口径逐字同构）',
+      gated.Cash === 10000 - 18000 && gated.pendingSoupHalf === false, `现金 ${(gated.Cash / 100).toFixed(2)} 元`);
   }
 
   // 8) 吃坏肚子来理论：双分支、双入池路、近 3 日窗口
