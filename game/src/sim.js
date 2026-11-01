@@ -141,6 +141,12 @@ export function simulate(seed, days, strategy, closer = 'headless', opts = {}) {
   if (opts.additive) state.AdditiveTier = opts.additive;
   // 产能探针（回归 §9 用）：不改数值口径，只把 3.12 的档位斤数临时压小，验第 7g 步截断顺序
   if (opts.capacity) state.CapacityBase = opts.capacity;
+  // 人工线口径开关：正文 3.5:141 的压力测试带跑在 M1 构建（无小豆人工），「人工与产能数值不参与本区间判定」，
+  // M2 重跑要另立区间（店主尚未签发）→ 凡是对已签发带的断言一律传 labor:false 复现 M1 口径。
+  if (opts.labor !== undefined) state.laborOn = !!opts.labor;
+  // 试吃 / 显多秤探针（回归 §10 用）：直接给到"已置办"的前置，只验开与关的账面差别，不模拟攒钱买的过程
+  if (opts.tasting) { state.Facilities.push('fac_taste'); state.TastingCount = opts.tasting; }
+  if (opts.scale) { state.Tools.push('JI_SCALE'); state.ScaleShowOn = true; }
   const buy = opts.buy ?? 'appc';
   const log = [];
   const invests = [];
@@ -182,6 +188,9 @@ export function simulate(seed, days, strategy, closer = 'headless', opts = {}) {
       revenue: state.today.revenueCents / 100, cogs: state.today.cogsCents / 100,
       gross: state.today.grossCents / 100, writeoff: state.today.writeoffCents / 100,
       netOps: state.today.netOpsCents / 100, eventNet: state.today.eventNetCents / 100,
+      // 3.12 生产链前段第三批：显多秤虚增斤数 ΔJ / 当日工资 / 试吃净额（三项都是"当日账面上多出来"的数）
+      deltaJ: state.today.deltaJ || 0, labor: state.LaborCost / 100,
+      tasting: (state.today.tastingIncomeCents || 0) / 100 - (state.today.tastingCostCents || 0) / 100,
       cash: state.Cash / 100, debt: state.DebtSupplier / 100, NP: state.NP / 100,
       Rep: +state.Rep.toFixed(2), Risk: +state.Risk.toFixed(2),
       C: +state.C.toFixed(2), H: +state.H.toFixed(2), R: state.R, L: state.L,

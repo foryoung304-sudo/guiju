@@ -1,7 +1,7 @@
-import { CONFIG, PRICE_TIERS, ENDING, SOLID_CATS, PACKING, ADDITIVE, BUYOUT_PRICE_CENTS, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN } from '../data/constants.js';
+import { CONFIG, PRICE_TIERS, ENDING, SOLID_CATS, PACKING, ADDITIVE, TASTING, BUYOUT_PRICE_CENTS, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN } from '../data/constants.js';
 import { blankToday, roundJin } from './state.js';
 import { makeRng } from './rng.js';
-import { buildBasket, commitPurchase, planPayment } from './market.js';
+import { buildBasket, commitPurchase, planPayment, ownsTool } from './market.js';
 import { forecastBasket, settleDay, bridgeCheck } from './ledger.js';
 import { runBusiness, priceCoefFor } from './ops.js';
 import { applyShadow } from './shadow.js';
@@ -21,6 +21,13 @@ export function beginDay(state) {
   state.dayStarted = true;
   state.risk_100_pending = false;
   if (state.R_frozen_days > 0) state.R_frozen_days -= 1;
+  // 附录 E evt_s_poach「让他走 → 14 日后回来」/「小豆请假一天」：缺席按第 1 步递减，减到 0 即恢复在场
+  if (state.XiaodouAbsentDays > 0) state.XiaodouAbsentDays -= 1;
+  // 正文 3.6 注：试吃转化「每转化 1 人次日 R +1」——当日第 8 步记下，第二天第 1 步进存量
+  if (state.tasting_pending_R > 0) {
+    state.R += state.tasting_pending_R;
+    state.tasting_pending_R = 0;
+  }
   state.PriceIndex = Math.round((state.PriceIndex * (state.Day >= 100 ? 1.003 : 1.0)) * 1000) / 1000;
 
   state.today = blankToday();
@@ -78,7 +85,7 @@ export function commitPrep(state, prep, wakeEarly = state.WakeEarly) {
   return { ok: true, used, budget };
 }
 
-// 第 5 步：营业前定版（六开关一次性锁定；⑤ 试吃、⑥ 显多秤尚无生效落点，本批只登记不做假开关）
+// 第 5 步：营业前定版（正文 3.14 六个开关一次性锁定：①定价 ②打包 ③调味 ④掺量 ⑤试吃份数 ⑥显多秤）
 export function lockTradingDay(state, opts = {}) {
   const priceTierId = opts.priceTier || state.PriceTier;
   const packingTier = opts.packingTier || state.PackingTier;
@@ -98,8 +105,16 @@ export function lockTradingDay(state, opts = {}) {
   state.Flavor = { ...flavor };
   state.M_base = computeMBase(state.Flavor, state.today.scenario);
   state.AdditiveTier = additiveTier;
+  // ⑤ 试吃份数：附录 F.5 值域「0 或 3–6」，没挂试吃一元角这个开关根本不出现（初值列明写恒 0）
+  const askedTasting = opts.tastingCount === undefined ? state.TastingCount : opts.tastingCount;
+  state.TastingCount = state.Facilities.includes('fac_taste')
+    && Number.isInteger(askedTasting) && askedTasting >= TASTING.min && askedTasting <= TASTING.max
+    ? askedTasting : 0;
+  // ⑥ 显多秤：秤不在手上（未购 / 已在第 3 步卖回）时按卸下收
+  const askedScale = opts.scaleShowOn === undefined ? state.ScaleShowOn : !!opts.scaleShowOn;
+  state.ScaleShowOn = askedScale && ownsTool(state, 'JI_SCALE');
   state.today.locked = true;
-  return { ok: true, M_base: state.M_base };
+  return { ok: true, M_base: state.M_base, tastingCount: state.TastingCount, scaleShowOn: state.ScaleShowOn };
 }
 
 // 第 6 步：晨间事件（严队长占道）
@@ -214,7 +229,11 @@ export function dailyReport(state) {
     day: state.Day, weather: t.scenario?.label, pricePerJin: state.PricePerJin,
     bowls: Math.round(t.bowls), J: roundJin(t.J), revenueCents: t.revenueCents,
     cogsCents: t.cogsCents, grossCents: t.grossCents, writeoffCents: t.writeoffCents,
-    fixedCents: state.FixedCost, netOpsCents: t.netOpsCents,
+    fixedCents: state.FixedCost, laborCents: state.LaborCost,
+    tastingPortions: t.tastingPortions, tastingIncomeCents: t.tastingIncomeCents,
+    tastingCostCents: t.tastingCostCents, tastingNetCents: t.tastingNetCents,
+    tastingConvert: t.tastingConvert, deltaJ: t.deltaJ,
+    netOpsCents: t.netOpsCents,
     eventCashMorning: t.eventCashMorning, eventCashEvening: t.eventCashEvening,
     eventNetCents: t.eventNetCents, cash: state.Cash, debt: state.DebtSupplier,
     comments: t.comments.map(c => c.text),

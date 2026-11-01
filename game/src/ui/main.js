@@ -1,15 +1,16 @@
 // 《先把规矩立住！》M1 呈现层：只做 3.14 十二步的界面投影，一切数字来自引擎，界面不许自己算账。
 // 红线照正本 3.1 / 3.4 / 九：不许出现品质数字、不许出现道德标签、不许有一句劝善或劝坏的话。
 import { CAT, SOLID_CATS, ALL_CATS, PRICE_TIERS, FACILITIES, ENDING, CONFIG, TIERS_STALL, START_CASH_CENTS, START_CREDIT_CAP_CENTS,
-  PACKING, PACKING_NAMES, PREP_STATIONS, PREP_LEVELS, ADDITIVE, FLAVOR_DIMS, FLAVOR_DIM_NAMES, CLIENT_MIX } from '../data/constants.js';
+  PACKING, PACKING_NAMES, PREP_STATIONS, PREP_LEVELS, ADDITIVE, FLAVOR_DIMS, FLAVOR_DIM_NAMES, CLIENT_MIX,
+  TASTING, TOOLS, SCALE_AUTO_MUL } from '../data/constants.js';
 import { SKUS_BY_CAT, SKU_BY_ID } from '../data/skus.js';
 import { newGame, loadGame, saveGame, clearSave, makeRng, roundJin, centsToYuan } from '../index.js';
 import {
   beginDay, morningPreEvent, previewBasket, submitBasket, commitPrep, lockTradingDay, runDay,
   nightSettle, eveningDraw, nightClose, dailyReport, replayPage, closeShop,
 } from '../engine/day.js';
-import { additiveUnlocked, prepBudget, prepGridUsed } from '../engine/production.js';
-import { effectivePrice, skuAvailable, creditAvailable, buyFacility, rampCoef } from '../engine/market.js';
+import { additiveUnlocked, prepBudget, prepGridUsed, xiaodouPresent, laborCostCents, tastingConvert } from '../engine/production.js';
+import { effectivePrice, skuAvailable, creditAvailable, buyFacility, rampCoef, ownsTool, buyTool, sellBackTool } from '../engine/market.js';
 import { drawEvent, resolveChoice } from '../engine/events.js';
 import { evalCondition } from '../engine/dsl.js';
 import { EVENTS } from '../data/events.js';
@@ -39,6 +40,8 @@ let wakePick = false;                        // 早起勾选（占 1 格工时�
 let packingPick = CONFIG.packingTier;        // 第 5 步②打包档
 let flavorPick = { spicy: 3, numbing: 2, umami: 3 };   // 第 5 步③调味三维
 let additivePick = CONFIG.additiveTier;      // 第 5 步④添加剂档
+let tastingPick = 0;                 // 第 5 步⑤试吃份数（挂了试吃角才出现）
+let scalePick = false;               // 第 5 步⑥显多秤开关（秤在手才出现）
 let ledgerBack = 'morning';
 let okRef = {};          // 本日每单是否已进入足称带（只在跨进那一刻震一次）
 
@@ -54,7 +57,7 @@ function saveFlow() {
   localStorage.setItem(FLOW_KEY, JSON.stringify({
     pre: preEvent?.id ?? null, pending: pendingEvent?.id ?? null,
     orders, gramsBy, pricePick, draft,
-    prepPick, wakePick, packingPick, flavorPick, additivePick,
+    prepPick, wakePick, packingPick, flavorPick, additivePick, tastingPick, scalePick,
   }));
 }
 
@@ -79,6 +82,10 @@ function restoreFlow() {
   packingPick = PACKING[f.packingPick] ? f.packingPick : state.PackingTier;
   flavorPick = { ...state.Flavor, ...(f.flavorPick || {}) };
   additivePick = ADDITIVE[f.additivePick] ? f.additivePick : state.AdditiveTier;
+  // ⑤⑥ 同样只认合法草稿：份数越界、开关没有秤，退回引擎当前值（界面草稿不许比引擎更野）
+  tastingPick = Number.isInteger(f.tastingPick) && f.tastingPick >= TASTING.min && f.tastingPick <= TASTING.max
+    ? f.tastingPick : state.TastingCount;
+  scalePick = typeof f.scalePick === 'boolean' ? f.scalePick : state.ScaleShowOn;
 }
 
 // 每一天的前段草稿从引擎当前值起（调味是常驻配方，备菜照昨天）
@@ -88,6 +95,8 @@ function syncProdPicks() {
   packingPick = state.PackingTier;
   flavorPick = { ...state.Flavor };
   additivePick = state.AdditiveTier;
+  tastingPick = state.TastingCount;
+  scalePick = state.ScaleShowOn;
 }
 
 function hud() {
@@ -185,6 +194,10 @@ function act(host) {
     case 'submit': return submitDraft();
     case 'shrink': return shrinkToAffordable();
     case 'facility': buyFacility(state, d.fac); return go('market');
+    case 'buyTool': buyTool(state, d.tool); return go('market');
+    case 'taste': tastingPick = Number(d.n) || 0; return go('lock');
+    case 'scale': scalePick = d.on === '1'; return go('lock');
+    case 'sellTool': sellBackTool(state, d.tool); return go('market');
     case 'price': pricePick = d.price; return go('lock');
     case 'pack': packingPick = d.pack; return go('lock');
     case 'flavor': flavorPick[d.dim] = Math.max(0, Math.min(5, flavorPick[d.dim] + Number(d.delta))); return go('lock');
@@ -302,11 +315,12 @@ function commitPrepDraft() {
 }
 
 function openShop() {
-  // 第 5 步：六开关一次性定版（试吃、显多秤两项待生效落点，界面上还没出现）
+  // 第 5 步：六开关一次性定版（①定价 ②打包 ③调味 ④添加剂 ⑤试吃份数 ⑥显多秤）
   if (!state.today.locked) {
     lockTradingDay(state, {
       priceTier: pricePick, packingTier: packingPick,
       flavor: flavorPick, additiveTier: additivePick,
+      tastingCount: tastingPick, scaleShowOn: scalePick,
     });
   }
   // 预检必修③：滑杆开局一律空碗（0 克）。原来预填成顾客的要量，核心操作被架空；
@@ -625,6 +639,8 @@ const VIEWS = {
       <div class="panel ${over ? 'warn' : ''}">
       <div class="row"><h2>备菜</h2><span class="tag ${over ? 'due' : 'keep'}">工时 ${used} / ${budget} 格</span></div>
       <p class="muted">认真 2 格 · 将就 1 格 · 跳过 0 格。这一天的活计按摊位档给预算，够不够你自己排。</p>
+      ${xiaodouPresent(state) ? `<p class="muted">小豆在帮厨：工时多 1 格，今天出餐也快一成；工钱 ${y(laborCostCents(state))} 元按日结，收摊时扣。</p>`
+        : state.laborOn ? '<p class="muted">小豆今天不在：多出来的那一格工时、出餐加成与工钱一起落空。</p>' : ''}
       ${PREP_STATIONS.map((s, i) => `<div class="row tight"><b>${s.name}</b><span class="muted">${s.cats.map(c => CAT[c].name).join(' / ')}</span></div>
         <div class="row">${PREP_LEVELS.map(l => `<button class="${prepPick[i] === l.id ? 'sel' : 'ghost'}" data-act="prepLevel" data-station="${i}" data-level="${l.id}">
           ${l.id} · ${l.grid} 格</button>`).join('')}</div>`).join('')}
@@ -672,6 +688,8 @@ const VIEWS = {
         <div class="row">${Object.values(ADDITIVE).map(a => `<button class="${additivePick === a.id ? 'sel' : 'ghost'}" data-act="additive" data-add="${a.id}">
           ${a.goods || a.name}</button>`).join('')}</div>
         <p class="muted">「${ADDITIVE[additivePick].pitch}」· 按售出的碗结成本。</p>` : ''}
+      ${tasteSwitch()}
+      ${scaleSwitch()}
       <button class="go" style="margin-top:14px" data-act="open">开门营业</button>
     </div>`;
   },
@@ -697,7 +715,7 @@ const VIEWS = {
       <div class="panel">
       <h2>收摊账目</h2>
       <table>
-        <tr><td>卖出</td><td class="r num">${r.bowls} 碗 / ${r.J.toFixed(2)} 斤</td></tr>
+        <tr><td>卖出</td><td class="r num">${r.bowls} 碗 / ${r.J.toFixed(2)} 斤${t.deltaJ ? `（秤上按 ${t.J_bill.toFixed(2)} 斤收的钱）` : ''}</td></tr>
         <tr><td>流水</td><td class="r num">${y(r.revenueCents)}</td></tr>
         <tr><td>食材成本（卖掉的才算）</td><td class="r num">−${y(t.ingredientCents)}</td></tr>
         <tr><td>${PACKING_NAMES[state.PackingTier]} · ${r.bowls} 碗 × ${PACKING[state.PackingTier].toFixed(2)} 元</td><td class="r num">−${y(t.packingCents)}</td></tr>
@@ -706,12 +724,16 @@ const VIEWS = {
         <tr><td>销售毛利</td><td class="r num">${sign(r.grossCents)}</td></tr>
         <tr><td>隔夜报损</td><td class="r num">${sign(-r.writeoffCents)}</td></tr>
         <tr><td>固定支出</td><td class="r num">−${y(r.fixedCents)}</td></tr>
+        ${r.laborCents ? `<tr><td>人工 · 小豆日结</td><td class="r num">−${y(r.laborCents)}</td></tr>` : ''}
+        ${t.tastingPortions ? `<tr><td>试吃 ${t.tastingPortions} 份 · 每份 1 元</td><td class="r num">${sign(t.tastingIncomeCents)}</td></tr>
+        <tr><td>样品食材（今天从柜里出，不另掏现金）</td><td class="r num">−${y(t.tastingCostCents)}</td></tr>` : ''}
         <tr><td><b>经营净额</b></td><td class="r num"><b>${sign(r.netOpsCents)}</b></td></tr>
         <tr><td>今晚自动还款</td><td class="r num">${y(t.repaidCents || 0)}</td></tr>
         <tr><td>现金</td><td class="r num ${state.Cash < 0 ? 'negv' : ''}">${y(state.Cash)}</td></tr>
         <tr><td>还欠</td><td class="r num">${y(state.DebtSupplier)}</td></tr>
       </table>
       ${out.length ? `<p class="negv" style="margin-top:8px">今天这些卖断了：${out.join('、')}。</p>` : ''}
+      ${t.tastingConvert ? `<p class="muted">试吃尝过的人里有 ${t.tastingConvert} 位明天算回头熟客。</p>` : ''}
       ${(t.handRefused || 0) > 0 ? '<p class="negv">有亲手单没接住（超出当天能出的碗数）。</p>' : ''}
       ${t.spillBowls ? `<p class="muted">外带漏洒 ${t.spillBowls} 碗。</p>` : ''}
       ${t.deferredBowls ? `<p class="muted">锅出到头了：熟客有 ${t.deferredBowls} 碗当天没排上${t.regLost ? `，走了 ${t.regLost} 位。` : '，留到明天。'}</p>` : ''}
@@ -762,6 +784,7 @@ const VIEWS = {
         <td class="r num">${sign(r.eventNetCents)}</td><td class="r num">${y(r.cash)}</td><td class="r num">${y(r.debt)}</td></tr>`).join('')}</table>
       <p class="muted" style="margin-top:8px">对账：现金 ${y(p.bridge.cash)} · 桥 ${y(p.bridge.bridge)} · 差 ${y(p.bridge.diff)}
         ${p.bridge.ok ? '（平）' : '（不平，报开发）'}</p>
+      <p class="muted">经营净额这一列不只减报损：还扣了当日固定支出与人工（小豆在场才结），并把试吃的份钱减样品成本算了进去。要逐行看，每天收摊那屏都列全了。</p>
     </div>${state.EndingId ? endPanel(p) : ''}`;
   },
 
@@ -876,15 +899,62 @@ function basketSplit(plan) {
       <td class="r num">${l.credit > 0 ? y(l.credit) : '—'}</td></tr>`).join('')}</table>`;
 }
 
+// 置办面板文案照附录 D.3 的「效果」列直译（六件设施此前界面上只有先钱后货牌一件，其余没有已签发文案）
+const FACILITY_BLURB = {
+  fac_prepay: '挂上这块牌，赊账不用一句一句说；赵大妈那笔上门赊账也不再抽到。',
+  fac_taste: '挂上这一角，开门前多一个试吃开关：3–6 份、每份收 1 元，尝过的人明天回不回来按转化算。',
+  fac_display: '用料上墙：第 7a 步的客流系数 F 加 5%，检查时也加分。',
+  fac_cert: '证件墙 + 明厨亮灶：F 再加 5%，检查加分更多。',
+  fac_contract: '把小豆的工钱写进合同：日结升到合同价、产能加成升到 15%（覆盖在场那一成，不叠加），人也不容易被挖走。',
+  fac_sign: '招牌上刻一条你自己定的规矩：不做数字，只在终局演出里出现。',
+};
+
+// 正文 3.6 / 附录 D.3：六件设施 + 杂货摊器具一件。没解锁的不列（玩家看不见自己还没够到的东西），
+// 解锁了的原地挂着，买过的标"已置办"。显多秤是器具：不进 Facilities、不计 L（附录 E 实现约束第 2 条）。
 function facilityRow() {
-  const f = FACILITIES.fac_prepay;
-  const owned = state.Facilities.includes(f.id);
-  if (!owned && !evalCondition(f.unlock, state)) return '';
-  return `<div class="panel warn"><div class="row"><div><h3>${f.name}</h3>
-    <p class="muted">挂上这块牌，赊账不用一句一句说。${f.price / 100} 元，一次性。</p></div>
-    <button data-act="facility" data-fac="${f.id}" ${owned || state.Cash < f.price ? 'disabled' : ''}>${owned ? '已挂' : '挂上'}</button>
-  </div></div>`;
+  const facs = Object.values(FACILITIES).filter(f => state.Facilities.includes(f.id) || evalCondition(f.unlock, state));
+  const tools = Object.values(TOOLS).filter(t => ownsTool(state, t.id) || evalCondition(t.unlock, state));
+  if (!facs.length && !tools.length) return '';
+  return `<div class="panel warn"><h3>小店置办</h3>
+    ${facs.map(f => {
+    const owned = state.Facilities.includes(f.id);
+    return `<div class="row tight"><div><b>${f.name}</b>
+        <p class="muted">${FACILITY_BLURB[f.id] || ''} ${f.price / 100} 元，一次性。</p></div>
+      <button data-act="facility" data-fac="${f.id}" ${owned || state.Cash < f.price ? 'disabled' : ''}>${owned ? '已置办' : '买下'}</button></div>`;
+  }).join('')}
+    ${tools.map(t => {
+    const owned = ownsTool(state, t.id);
+    return `<div class="row tight"><div><b>${t.name}</b>
+        <p class="muted">杂货摊有卖：${t.price / 100} 元买、${t.sellBack / 100} 元卖回（第 3 步按半价回收）。
+          装上后散客那一层的计费斤数按 ×${SCALE_AUTO_MUL} 记账，开关在开门前定版、当日锁定。</p></div>
+      <span class="row tight">${owned ? `<button class="ghost" data-act="sellTool" data-tool="${t.id}">卖回</button>` : ''}
+        <button data-act="buyTool" data-tool="${t.id}" ${owned || state.Cash < t.price ? 'disabled' : ''}>${owned ? '已上秤' : '买下'}</button></span></div>`;
+  }).join('')}</div>`;
 }
+
+// 第 5 步⑤试吃份数（附录 D.5 / 正文 3.6 注）：没挂试吃一元角这个开关根本不出现；份数玩家定，引擎不掷随机
+function tasteSwitch() {
+  if (!state.Facilities.includes('fac_taste')) return '';
+  const conv = tastingConvert(tastingPick);
+  return `<h3 style="margin-top:14px">试吃</h3>
+      <div class="row">${[0, TASTING.min, 4, 5, TASTING.max].map(n => `<button class="${tastingPick === n ? 'sel' : 'ghost'}" data-act="taste" data-n="${n}">
+        ${n === 0 ? '不试吃' : `${n} 份`}</button>`).join('')}</div>
+      <p class="muted">${tastingPick >= TASTING.min
+    ? `${tastingPick} 份收 ${tastingPick} 元，大约留下 ${conv} 个人明天回来；样品今天从柜里出，按食材成本记，不另掏现金。`
+    : '试吃满 3 人才开始留下人；样品今天从柜里出，按食材成本记，不另掏现金。'}</p>`;
+}
+
+// 第 5 步⑥显多秤（附录 D.3）：秤不在手上（没买、或今天已在第 3 步卖回）开关不出现；当日锁定，营业中不许回改
+function scaleSwitch() {
+  if (!ownsTool(state, 'JI_SCALE')) return '';
+  return `<h3 style="margin-top:14px">${TOOLS.JI_SCALE.name}</h3>
+      <div class="row">
+        <button class="${scalePick ? 'sel' : 'ghost'}" data-act="scale" data-on="1">开着 · 照秤上的数收钱</button>
+        <button class="${scalePick ? 'ghost' : 'sel'}" data-act="scale" data-on="0">不开 · 递多少收多少</button>
+      </div>
+      <p class="muted">开着的时候，散客那一层记账的斤数比真正递出去的多 ${Math.round((SCALE_AUTO_MUL - 1) * 100)}%，多出来的部分照样收钱、不给货，这一天的账面上会留痕。</p>`;
+}
+
 
 function orderCard(o) {
   const g = gramsBy[o.customerId];

@@ -1,4 +1,4 @@
-import { CAT, CONFIG, PREP_STATIONS } from '../data/constants.js';
+import { CAT, CONFIG, PREP_STATIONS, SCALE_C_PER_JIN, SCALE_RISK_PER_JIN } from '../data/constants.js';
 import { additiveOf, prepStationLevel, qTaste } from './production.js';
 import { roundJin } from './state.js';
 
@@ -42,7 +42,7 @@ export function receiptRate(state) {
   return state.ReceiptWindow.reduce((s, x) => s + x.withTicket, 0) / total;
 }
 
-// 正文 3.14 第 9 步暗线结算（M1 口径：无添加剂项、无显多秤 ΔJ）
+// 正文 3.14 第 9 步暗线结算（添加剂项 M2 第二批已接，显多秤 ΔJ 项本批接）
 export function applyShadow(state, { shortOrders, spillBowls }) {
   const t = state.today;
   const { Q, zeroSales } = computeQ(state);
@@ -54,19 +54,22 @@ export function applyShadow(state, { shortOrders, spillBowls }) {
   const addC = zeroSales ? 0 : add.c;
   const addRisk = zeroSales ? 0 : add.risk;
   const spill = spillRepPenalty(spillBowls);
+  // 附录 D.3 显多秤列：ΔJ = 自动层实际斤数 × 0.08（第 7h 步单列），C/H += ΔJ × 0.05、Risk += ΔJ × 0.3。
+  // 没开关或柜里没售出时 ΔJ 恒 0，不必另走 G.1 零销量例外
+  const dJ = roundJin(t.deltaJ || 0);
 
   // 黑心增量只由 Q 驱动；零销量时跳过 Q 驱动项，事件与实际操作增量照常
   const 黑心 = zeroSales ? 0 : Math.max(0, (60 - Q) / 20);
-  const inc = 黑心 + addC + shortOrders * 0.2;
+  const inc = 黑心 + addC + shortOrders * 0.2 + dJ * SCALE_C_PER_JIN;
   state.C = clamp(state.C + inc, 0, 100);
   state.H += inc;
   if (!zeroSales && Q >= 85) state.C = Math.max(0, state.C - 0.5);
   // §〇.1 第 11 条（签复 b48ec8e §三，店主签「豁免」）：分量作假产生的 Risk 增量不受 Rep ≥60 的 −2/日 抵扣，
-  // 其余来源照常吃抵扣。Risk 因此分两池记：RiskShort = 分量作假池（亲手短斤，显多秤接线后 ΔJ×0.3 同进本池，
-  // 裁定 9a959bd §三）；非分量来源为可抵扣池。
+  // 其余来源照常吃抵扣。Risk 因此分两池记：RiskShort = 分量作假池（亲手短斤 + 显多秤 ΔJ×0.3，
+  // 裁定 9a959bd §三：秤的差额与短斤同性质，同进本池）；非分量来源为可抵扣池。
   // 若不分池（先加短斤再整体 −2），天天短斤 +1.5 与 −2 相加为净 −0.5/日，Risk 恒在低位，
   // 正本 3.4「约 27 天到 40 入池 / 约 47 天到 70 硬触发」这条时间线就守不住。
-  const shortInc = shortOrders * 0.5;
+  const shortInc = shortOrders * 0.5 + dJ * SCALE_RISK_PER_JIN;
   let 可抵 = Math.max(0, state.Risk - state.RiskShort) + 黑心 * 5 + addRisk;
   if (!zeroSales && state.Rep >= 60) 可抵 = Math.max(0, 可抵 - 2);
   state.RiskShort = clamp(state.RiskShort + shortInc, 0, 100);

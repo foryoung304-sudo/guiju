@@ -1,5 +1,5 @@
 import { SKU_BY_ID } from '../data/skus.js';
-import { SOLID_CATS, FACILITIES, TIERS_STALL } from '../data/constants.js';
+import { SOLID_CATS, FACILITIES, TIERS_STALL, TOOLS } from '../data/constants.js';
 import { toCents, roundJin, addToCostPool } from './state.js';
 import { evalCondition } from './dsl.js';
 
@@ -137,7 +137,9 @@ export function takeStock(state, cat, amount, taken = []) {
 
 export function buyFacility(state, facId) {
   const fac = FACILITIES[facId];
+  // 解锁条件在引擎这一侧也过一次门：正文 3.6「证件墙干净线买不到」是有意的，只把检查放在界面上等于没放
   if (!fac || state.Cash < fac.price || state.Facilities.includes(facId)) return false;
+  if (!evalCondition(fac.unlock, state)) return false;
   state.Cash -= fac.price;
   state.NetInvestSpent += fac.price;
   state.Facilities.push(facId);
@@ -149,6 +151,34 @@ export function buyFacility(state, facId) {
 
 export function creditAvailable(state) {
   return Math.max(0, state.CreditCap - state.DebtSupplier);
+}
+
+// 附录 D.3 + 正文 3.14 第 3 步：杂货摊器具与设施同一条支付口径（即时扣现金、单列净投资、不进经营净额），
+// 差别只在器具不 +L、不进 Facilities（附录 E evt_s_promo 约束第 2 条）
+export function ownsTool(state, id) {
+  return state.Tools.includes(id);
+}
+
+export function buyTool(state, id) {
+  const tool = TOOLS[id];
+  if (!tool || state.Tools.includes(id) || state.Cash < tool.price) return false;
+  if (!evalCondition(tool.unlock, state)) return false;
+  state.Cash -= tool.price;
+  state.NetInvestSpent += tool.price;
+  state.Tools.push(id);
+  return true;
+}
+
+// 附录 D.3 卖回列（390 = 半价，正文 3.14 第 3 步「显多秤卖回在本步回收半价现金」）；
+// 净投资列随之回冲（附录 F.7 `NetInvestSpent` = 设施/升级 −卖回回收）；秤一卸，当日开关即落回卸下档
+export function sellBackTool(state, id) {
+  const tool = TOOLS[id];
+  if (!tool || !state.Tools.includes(id)) return false;
+  state.Tools = state.Tools.filter(t => t !== id);
+  state.Cash += tool.sellBack;
+  state.NetInvestSpent -= tool.sellBack;
+  if (id === 'JI_SCALE') state.ScaleShowOn = false;
+  return true;
 }
 
 // 小店置办·摊位升级（3.14 第 3 步：投资支出即时扣现金、单列、不进经营净额）

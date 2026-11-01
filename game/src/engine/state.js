@@ -1,4 +1,4 @@
-import { SAVE_VERSION, MIGRATABLE_SAVE_VERSIONS, SUBSTREAMS, TIERS_STALL, CONFIG, ALL_CATS, SOLID_CATS, PRICE_TIERS, START_CASH_CENTS, START_CREDIT_CAP_CENTS } from '../data/constants.js';
+import { SAVE_VERSION, MIGRATABLE_SAVE_VERSIONS, SUBSTREAMS, TIERS_STALL, CONFIG, ALL_CATS, SOLID_CATS, PRICE_TIERS, START_CASH_CENTS, START_CREDIT_CAP_CENTS, TOOLS } from '../data/constants.js';
 import { buildWeatherCycle } from '../data/scenario.js';
 import { makeRng } from './rng.js';
 
@@ -33,6 +33,7 @@ export function newGame(seed) {
     AdditiveTier: CONFIG.additiveTier, TastingCount: 0, ScaleShowOn: false,
     Prep: ['将就', '将就', '将就'], WorkGridUsed: 0, WakeEarly: false,
     Facilities: [], CapacityBase: TIERS_STALL[0].capacity, F: 1.0,
+    Tools: [], XiaodouAbsentDays: 0, tasting_pending_R: 0, laborOn: CONFIG.labor,
 
     EventHistory: [], Cooldowns: {}, WeightShifts: {}, PricewarDays: 0,
     seen_routine_inspection: false, dayStarted: false, pendingReserve: null,
@@ -89,6 +90,11 @@ export function blankToday() {
     soldOutCats: [],
     soupSoldOut: false,
     writeoffCents: 0,
+    deltaJ: 0,
+    tastingPortions: 0,
+    tastingIncomeCents: 0,
+    tastingCostCents: 0,
+    tastingConvert: 0,
     forecast: null,
     pendingHidden: [],
     forecastScenario: null,
@@ -113,6 +119,11 @@ export function loadGame() {
   if (typeof parsed.pinchHintUsed !== 'boolean') parsed.pinchHintUsed = false;
   // 第 11 条豁免（签复 b48ec8e）带来的分量作假池；缺字段按裁定 9a959bd §一「不溯及既往」补 0
   if (typeof parsed.RiskShort !== 'number' || !Number.isFinite(parsed.RiskShort)) parsed.RiskShort = 0;
+  // M2 第三批（设施全量 / 人工线 / 显多秤 / 试吃）新带的四个字段：旧档一律按「从未有过」补，不改任何已签数值
+  if (!Array.isArray(parsed.Tools)) parsed.Tools = [];
+  if (typeof parsed.XiaodouAbsentDays !== 'number' || !Number.isFinite(parsed.XiaodouAbsentDays)) parsed.XiaodouAbsentDays = 0;
+  if (typeof parsed.tasting_pending_R !== 'number' || !Number.isFinite(parsed.tasting_pending_R)) parsed.tasting_pending_R = 0;
+  if (typeof parsed.laborOn !== 'boolean') parsed.laborOn = CONFIG.labor;
   parsed.saveVersion = SAVE_VERSION;
   return parsed;
 }

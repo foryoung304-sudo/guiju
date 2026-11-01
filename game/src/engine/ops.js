@@ -1,7 +1,7 @@
-import { CAT, SOLID_CATS, PACKING, PACKING_SPILL } from '../data/constants.js';
+import { CAT, SOLID_CATS, PACKING, PACKING_SPILL, SCALE_DELTA_J_SHARE } from '../data/constants.js';
 import { toCents, roundJin } from './state.js';
 import { stockAvgCost, takeStock, rampCoef } from './market.js';
-import { capacityJin } from './production.js';
+import { capacityJin, tastingConvert } from './production.js';
 import { PRICE_TIERS } from '../data/constants.js';
 
 // 正文 3.5 定价档系数（招牌档受 Rep 与考试周修正）
@@ -13,11 +13,11 @@ export function priceCoefFor(state, tierId = state.PriceTier, scenario = state.t
   return c;
 }
 
-// 正文 3.14 第 7 步：唯一主公式。样段期 S ≡ 1（无竞争分流），无备菜/调味/人工/产能截断。
+// 正文 3.14 第 7 步：唯一主公式。样段期 S ≡ 1（无竞争分流）；备菜/调味/人工/产能截断 M2 起逐项接线。
 export function runBusiness(state, handResults, rng) {
   const sc = state.today.scenario;
   const t = state.today;
-  // 3.12 出餐产能（斤/日）× 备菜三项连乘（小豆加成随人工线一起接）；未开截断时为 Infinity
+  // 3.12 出餐产能（斤/日）× 备菜三项连乘 × 小豆在场（合同 ×1.15 / 在场 ×1.10）；未开截断时为 Infinity
   const capJin = capacityJin(state);
 
   // 7a 竞争前需求 D0
@@ -38,7 +38,10 @@ export function runBusiness(state, handResults, rng) {
   state.R_v = Math.round(state.R * 0.5);
   const carriedReserved = state.reg_reserved_bowls;
   const N_R_want = Math.min(state.R, state.R_v + carriedReserved);
-  const D_pre = D0 * S + N_R_want + state.event_reserve_bowls;
+  // 正文 3.6 注：试吃转化单「作为正常订单计入当日营业流水与 COGS」→ 并进需求走自动层，
+  // 与散客一样吃库存、汤底与产能；份钱本身在第 8 步的试吃账里，不在这里重复计流水
+  const convertBowls = tastingConvert(state.TastingCount);
+  const D_pre = D0 * S + N_R_want + state.event_reserve_bowls + convertBowls;
   const D = D_pre * state.event_demand_mult;
   state.event_reserve_bowls = 0;
   state.reg_reserved_bowls = 0;
@@ -141,11 +144,15 @@ export function runBusiness(state, handResults, rng) {
     }
   }
 
-  // 7h 销量与流水（产能截断 M2 起，见 §八 范围限定）
-  const J_solid = roundJin(handJin + regularSold + autoSold + overflowSold);
+  // 7h 销量与流水：实际出菜斤数 J = 优先层 + 自动层（单轮溢出与自动层同轨，附录 G.2 把溢出写在 ③ 之后）；
+  // 计费斤数 = 优先层 + 自动层计费斤数，装显多秤时自动层 ×1.08（正文 3.14 第 7h / 附录 D.3），
+  // 差额 ΔJ 单列：计流水不计 COGS（没真给货），暗线代价在第 9 步按 ΔJ 折算
+  const autoJin = roundJin(autoSold + overflowSold);
+  const J_solid = roundJin(handJin + regularSold + autoJin);
   const bowls = roundJin(J_solid / sc.avgJin);
   const soupTaken = takeStock(state, 'SP', Math.min(state.StockSoup, bowls * sc.T), consumed);
-  const J_bill = J_solid;
+  const deltaJ = state.ScaleShowOn ? roundJin(autoJin * SCALE_DELTA_J_SHARE) : 0;
+  const J_bill = roundJin(J_solid + deltaJ);
 
   t.rampCoef = ramp;
   t.D0 = D0; t.D = D; t.D_eff = D_eff; t.S = S; t.W = roundJin(W);
@@ -158,6 +165,8 @@ export function runBusiness(state, handResults, rng) {
   t.soupUsed = soupTaken;
   t.J = J_solid;
   t.J_bill = J_bill;
+  t.autoJin = autoJin;
+  t.deltaJ = deltaJ;
   t.bowls = bowls;
   t.revenueCents = toCents(J_bill * state.PricePerJin);
   // 定版开关②：餐盒 0.30 元/碗（不是每斤）。t.bowls 是斤数换算出来的连续量，

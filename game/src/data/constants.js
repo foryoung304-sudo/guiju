@@ -88,7 +88,28 @@ export const FACILITIES = {
   fac_sign: { id: 'fac_sign', name: '招牌规矩字', price: 90000, unlock: 'BizDays>=45', m1: false },
 };
 
-// 附录 JI_SCALE 显多秤与结局判定用的量纲（ui-spec §一换算表：盘店价 60,000 / 金盆洗手 300,000 / 烧心 Wmax 210 斤）
+// 附录 D.3：显多秤是杂货摊器具（固定摊位后上架），不进 Facilities 集合、不计 L（附录 E evt_s_promo 约束第 2 条明写）
+// unlock 用 DSL 的档位数值：附录原文写「Tier >= 固定摊位」，DSL 词法器不认汉字标识符，按表内档位序号 = 3 落
+export const TOOLS = {
+  JI_SCALE: { id: 'JI_SCALE', name: '显多秤', shop: '杂货摊', price: 78000, sellBack: 39000, unlock: 'Tier>=3' },
+};
+// 附录 D.3 + 正文 3.14 第 7h 步：自动层计费斤数 ×1.08，差额 ΔJ = 自动层实际斤数 × 0.08 计流水不计 COGS
+export const SCALE_AUTO_MUL = 1.08;
+export const SCALE_DELTA_J_SHARE = 0.08;
+export const SCALE_C_PER_JIN = 0.05;      // C/H += ΔJ × 0.05
+export const SCALE_RISK_PER_JIN = 0.3;    // Risk += ΔJ × 0.3（裁定 9a959bd §三：与亲手短斤同进分量作假池）
+
+// 正文 3.5 / 附录 F.7 `LaborCost` 行 + D.3 `fac_contract` 行：小豆在场日结 60 元（三轮车—档口）/ 90 元（门面—双店），
+// 合同后 120 元（覆盖不分档）；在场同时给 工时 +1 格（F.5 `WorkGridUsed` 行）与 全摊产能 ×1.10（G.2 第 7 步产能式，合同 ×1.15 覆盖不叠加）
+export const LABOR = {
+  perDay: 6000, highTierPerDay: 9000, contractPerDay: 12000, highTierFrom: 5,
+  capMul: 1.10, contractCapMul: 1.15, gridBonus: 1,
+};
+
+// 正文 3.6 注 / 附录 D.5：试吃份数 n ∈ 3–6（第 5 步定版、不掷随机）；一份 = 0.3 碗的料；1 元/份；转化 = floor(n ÷ 3)
+export const TASTING = { min: 3, max: 6, bowlSharePerPortion: 0.3, incomeCentsPerPortion: 100, convertPer: 3 };
+
+// 附录 J：结局判定用的量纲（ui-spec §一换算表：盘店价 60,000 / 金盆洗手 300,000 / 烧心 Wmax 210 斤）
 export const BUYOUT_PRICE_CENTS = 6000000;
 export const RETIRE_NP_CENTS = 30000000;
 export const HEARTBURN_WMAX_JIN = 210;
@@ -109,7 +130,8 @@ export const CONFIG = {
   // 正文 3.12 生产链前段：M2 接线（备菜工时与产能修正、调味台 M_base、添加剂三档、打包三档）
   prep: true,
   flavor: true,
-  labor: false,
+  // 正文 3.5 / 3.12 人工线：M2 第三批接线（小豆在场 +1 格工时、产能 ×1.10/×1.15、日结 60·90·120）
+  labor: true,
   capacityTruncation: true,
   packingTier: 'normal',
   additiveTier: 'none',

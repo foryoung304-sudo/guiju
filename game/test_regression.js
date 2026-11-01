@@ -4,17 +4,18 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { simulate, STRATEGIES } from './src/sim.js';
-import { bridgeCheck, settleDay, settleWriteoff } from './src/engine/ledger.js';
+import { bridgeCheck, settleDay, settleWriteoff, settleTasting } from './src/engine/ledger.js';
 import { newGame, roundJin, loadGame, STORAGE_KEY } from './src/engine/state.js';
-import { effectivePrice, buildBasket, planPayment, recomputeStock } from './src/engine/market.js';
+import { effectivePrice, buildBasket, planPayment, recomputeStock, buyTool, sellBackTool, ownsTool } from './src/engine/market.js';
 import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, PACKING_SPILL, CONFIG, SAVE_VERSION,
-  ADDITIVE, PREP_LEVELS } from './src/data/constants.js';
+  ADDITIVE, PREP_LEVELS, LABOR, TASTING, TOOLS, SCALE_DELTA_J_SHARE, SCALE_C_PER_JIN, SCALE_RISK_PER_JIN } from './src/data/constants.js';
 import { SKU_BY_ID } from './src/data/skus.js';
 import { scenarioOf, WEATHER } from './src/data/scenario.js';
 import { evalCondition } from './src/engine/dsl.js';
 import { EVENTS } from './src/data/events.js';
 import { beginDay, morningPreEvent, submitBasket, previewBasket, commitPrep, lockTradingDay, morningEvent, runDay, nightSettle, eveningDraw, nightClose } from './src/engine/day.js';
-import { additiveOf, additiveUnlocked, capacityJin, computeMBase, prepBudget, prepGridUsed, qTaste, washSkipped } from './src/engine/production.js';
+import { additiveOf, additiveUnlocked, capacityJin, computeMBase, prepBudget, prepGridUsed, qTaste, washSkipped,
+  xiaodouPresent, laborCapMul, laborCostCents, tastingConvert } from './src/engine/production.js';
 import { drawHandOrders, handOrderCount } from './src/engine/weigh.js';
 import { applyHidden } from './src/engine/events.js';
 import { applyShadow, computeQ } from './src/engine/shadow.js';
@@ -33,8 +34,11 @@ function check(name, cond, detail) {
 const NEAR = (a, b, eps = 1) => Math.abs(a - b) <= eps;
 
 // ── 1. 三条极端玩法 ───────────────────────────────────────────────
+// M1 口径：正文 3.5:141 明写压力测试带跑在 M1 构建（无小豆人工），「人工与产能数值不参与本区间判定」。
+// M2 开人工线后本段一律传 labor:false 复现签发时的口径；M2 在场口径的另立区间店主还没给，只作证据不套带。
+const M1 = { labor: false };
 const runs = {};
-for (const [key, strategy] of Object.entries(STRATEGIES)) runs[key] = simulate(SEED, 10, strategy);
+for (const [key, strategy] of Object.entries(STRATEGIES)) runs[key] = simulate(SEED, 10, strategy, 'headless', M1);
 
 function npSum(run, days) {
   return run.log.slice(0, days).reduce((s, d) => s + d.netOps + d.eventNet, 0);
@@ -91,11 +95,11 @@ for (const [key, run] of Object.entries(runs)) {
 }
 
 // ── 3. 同种子复现 ────────────────────────────────────────────────
-const again = simulate(SEED, 10, STRATEGIES.cheap);
+const again = simulate(SEED, 10, STRATEGIES.cheap, 'headless', M1);
 const same = JSON.stringify(again.state.DailyReports) === JSON.stringify(runs.cheap.state.DailyReports)
   && JSON.stringify(again.state.streamCounter) === JSON.stringify(runs.cheap.state.streamCounter);
 check('同种子复现（暗线 + 账目 + 子流计数全一致）', same);
-const otherSeed = simulate(SEED + 1, 10, STRATEGIES.cheap);
+const otherSeed = simulate(SEED + 1, 10, STRATEGIES.cheap, 'headless', M1);
 check('换种子结果不同（子流确实在用种子）',
   JSON.stringify(otherSeed.log.map(l => l.Rep)) !== JSON.stringify(runs.cheap.log.map(l => l.Rep)));
 
@@ -103,7 +107,7 @@ check('换种子结果不同（子流确实在用种子）',
 // 无头线一步 closeDay。两条线必须逐字段一样：这一步拆错过一次，抽到的晚间事件没传进 nightClose，
 // 账面照样平、事件却永远不落地——界面玩家看到的账和跑表账就此分家
 for (const key of ['clean', 'mid', 'cheap']) {
-  const split = simulate(SEED, 10, STRATEGIES[key], 'ui');
+  const split = simulate(SEED, 10, STRATEGIES[key], 'ui', M1);
   check(`界面拆步打烊与无头 closeDay 同源 ${key}`,
     JSON.stringify(split.state) === JSON.stringify(runs[key].state),
     `晚间事件落地：无头 ${runs[key].state.EventHistory.join(',')}｜界面 ${split.state.EventHistory.join(',')}`);
@@ -376,9 +380,12 @@ for (const seed of [SEED, 7979, 36832]) {
 }
 {
   // 第 4 步：工时预算 = 摊位档 workGrid，超预算不许提交（附录 F.5）
+  // 人工线开线后小豆在场会 +1 格，所以这一段先把 laborOn 关掉量"光摊位档"的基数，
+  // 在场加成单独一条断言（正文 3.5 / §10），否则同一张摊位表会被在场状态来回推着走
   const t1 = newGame(SEED), t3 = newGame(SEED), t5 = newGame(SEED);
   t3.Tier = 3; t5.Tier = 5;
-  check('备菜工时预算按摊位档 4 / 5 / 6（小豆 +1 随人工线）',
+  for (const t of [t1, t3, t5]) t.laborOn = false;
+  check('备菜工时预算按摊位档 4 / 5 / 6（本段关人工，在场 +1 格另见 §10）',
     prepBudget(t1) === 4 && prepBudget(t3) === 5 && prepBudget(t5) === 6,
     `三轮车 ${prepBudget(t1)} / 固定摊位 ${prepBudget(t3)} / 门面 ${prepBudget(t5)}`);
   const over = commitPrep(t1, ['认真', '认真', '认真'], false);
@@ -396,7 +403,9 @@ for (const seed of [SEED, 7979, 36832]) {
 }
 {
   // 第 7g 步：产能上限 = 档位斤数 × 三项备菜连乘；截断顺序 = 亲手全额 → 熟客顺延 → 只缩自动层
+  // 本段关人工：130 × 1.05³ 的锚是"只有备菜三项"的口径，人工 ×1.10 单列一条（§10）
   const s = newGame(SEED);
+  s.laborOn = false;
   s.Prep = ['认真', '认真', '认真'];
   check('全认真产能 = 130 × 1.05³ = 150.5 斤', Math.abs(capacityJin(s) - 130 * 1.157625) < 0.01, `${capacityJin(s).toFixed(2)} 斤`);
   s.Prep = ['跳过', '跳过', '跳过'];
@@ -406,7 +415,7 @@ for (const seed of [SEED, 7979, 36832]) {
     { sku: 'BF1', qty: 60 }, { sku: 'NS1', qty: 60 }, { sku: 'SP1', qty: 300 }];
   const starved = (cap, days) => {
     const st = newGame(SEED);
-    st.CapacityBase = cap; st.R = 30; st.Cash = 4000000;
+    st.CapacityBase = cap; st.R = 30; st.Cash = 4000000; st.laborOn = false;
     const out = [];
     for (let i = 0; i < days; i++) {
       const r = makeRng(st);
@@ -571,6 +580,169 @@ for (const seed of [SEED, 7979, 36832]) {
   check('第 4 步与第 5 步的先后不锁定也不串档：未备菜的日子照旧用昨日档位（引擎默认将就）',
     newGame(SEED).Prep.join('/') === '将就/将就/将就' && prepGridUsed(newGame(SEED)) === 3,
     `开局 ${newGame(SEED).Prep.join('/')} · ${prepGridUsed(newGame(SEED))} 格`);
+}
+
+// ── 10. M2 第三批：人工线 / 显多秤 / 试吃一元角（正文 3.5、3.6 注、3.12 / 附录 D.3、D.5、F.7）──
+{
+  // 附录 F.7 `LaborCost` 行：在场日结 6000（三轮车—档口）/ 9000（门面—双店）/ 正式合同后 12000
+  const wageAt = (tier, contract) => {
+    const s = newGame(SEED);
+    s.Tier = tier;
+    if (contract) s.Facilities.push('fac_contract');
+    return laborCostCents(s);
+  };
+  check('人工三档：Tier 1–4 日结 60 元、Tier 5–6 90 元、正式合同 120 元（附录 F.7 LaborCost 行 + D.3 合同行）',
+    wageAt(1) === LABOR.perDay && wageAt(4) === LABOR.perDay && wageAt(5) === LABOR.highTierPerDay
+    && wageAt(6) === LABOR.highTierPerDay && wageAt(1, true) === LABOR.contractPerDay
+    && wageAt(6, true) === LABOR.contractPerDay,
+    `${wageAt(1) / 100} / ${wageAt(5) / 100} / ${wageAt(6, true) / 100} 元`);
+  // 退场开关：正文 3.5:141 的压力测试带跑在 M1 构建（无小豆人工），M1 口径全靠这一条把三项效果一次性摘掉
+  const noXiaodou = newGame(SEED);
+  noXiaodou.laborOn = false;
+  check('laborOn=false 一次性摘掉整条人工线（工资 0 + 产能不加成 + 工时不加格）= M1 口径',
+    xiaodouPresent(noXiaodou) === false && laborCostCents(noXiaodou) === 0
+    && laborCapMul(noXiaodou) === 1 && prepBudget(noXiaodou) === 4,
+    `三轮车 ${prepBudget(noXiaodou)} 格、工资 ${laborCostCents(noXiaodou)} 分`);
+  const absent = newGame(SEED);
+  absent.XiaodouAbsentDays = 1;
+  check('在场三效果同起同落：请假 / 被挖角当日工资 0、×1.10 与 +1 格同时消失',
+    xiaodouPresent(absent) === false && laborCostCents(absent) === 0 && laborCapMul(absent) === 1
+    && prepBudget(absent) === prepBudget(noXiaodou), `${prepBudget(absent)} 格 / ×${laborCapMul(absent)}`);
+  const on = newGame(SEED), contract = newGame(SEED);
+  contract.Facilities.push('fac_contract');
+  check('在场产能 ×1.10、工时 +1 格；正式合同 ×1.15 覆盖不叠加（正文 3.5 / 附录 F.5 WorkGridUsed 行）',
+    laborCapMul(on) === LABOR.capMul && laborCapMul(contract) === LABOR.contractCapMul
+    && LABOR.contractCapMul > LABOR.capMul && prepBudget(on) === 5,
+    `×${laborCapMul(on)} → 合同 ×${laborCapMul(contract)}；工时 4 → ${prepBudget(on)}`);
+  beginDay(absent);
+  check('缺席天数在第 1 步递减，期满自动回场（不等事件再判一次）',
+    absent.XiaodouAbsentDays === 0 && xiaodouPresent(absent) === true, `递减后 ${absent.XiaodouAbsentDays} 日`);
+
+  // 钱：工资既扣现金又进经营净额，逐日恒等式与桥都要平
+  const laborOn5 = simulate(SEED, 5, STRATEGIES.clean, 'headless', { labor: true });
+  const reps = laborOn5.state.DailyReports;
+  const idOK = reps.every(r => r.grossCents - r.writeoffCents - r.fixedCents - r.laborCents
+    + r.tastingNetCents === r.netOpsCents);
+  check('在场日经营净额 = 毛利 − 报损 − 固定 − 人工 + 试吃净额（逐日核 5 天）',
+    idOK && reps.every(r => r.laborCents === LABOR.perDay),
+    `5 日工资合计 ${reps.reduce((s, r) => s + r.laborCents, 0) / 100} 元`);
+  const lb = bridgeCheck(laborOn5.state);
+  check('在场 5 日现金桥对平（工资走现金这条腿没漏）', lb.ok, `差 ${lb.diff / 100} 元`);
+  check('NP 含人工：Σ(经营净额 + 事件账净额) = NP',
+    reps.reduce((s, r) => s + r.netOpsCents + r.eventNetCents, 0) === laborOn5.state.NP,
+    `NP ${laborOn5.state.NP / 100} 元`);
+  check('关人工的同一 5 日 = M1 已签口径（位移全部来自第三批，不动带）',
+    npSum(simulate(SEED, 5, STRATEGIES.clean, 'headless', M1), 5) === clean5
+    && laborOn5.log.every(d => d.labor === 60), `M1 ${clean5.toFixed(2)} 元 vs 在场 ${npSum(laborOn5, 5).toFixed(2)} 元`);
+}
+{
+  // 附录 D.3 显多秤：杂货摊器具（780 买 / 390 卖回、固定摊位后上架），与设施同一条支付口径但不计 L
+  const g = newGame(SEED);
+  g.Cash = 2000000;
+  g.Tier = 2;
+  check('显多秤 Tier 2 买不到（unlock 原文「Tier >= 固定摊位」，DSL 词法器不认汉字，按档位序号落 3）',
+    buyTool(g, 'JI_SCALE') === false && ownsTool(g, 'JI_SCALE') === false);
+  g.Tier = 3;
+  g.Cash = TOOLS.JI_SCALE.price - 1;
+  check('显多秤现金不足整笔驳回（与进货同口径，不自动减量、不许赊）', buyTool(g, 'JI_SCALE') === false);
+  g.Cash = 2000000;
+  const cash0 = g.Cash, inv0 = g.NetInvestSpent, fac0 = g.Facilities.length, L0 = g.L;
+  check('显多秤 780 元即时扣现金并单列净投资（正文 3.14 第 3 步）',
+    buyTool(g, 'JI_SCALE') === true && g.Cash === cash0 - TOOLS.JI_SCALE.price
+    && g.NetInvestSpent === inv0 + TOOLS.JI_SCALE.price, `净投资 ${g.NetInvestSpent / 100} 元`);
+  check('器具不进 Facilities、不 +L（附录 E evt_s_promo 实现约束第 2 条明写显多秤不计 L）',
+    g.Facilities.length === fac0 && g.L === L0, `设施 ${g.Facilities.length} 件 / L ${g.L}`);
+  g.ScaleShowOn = true;
+  const cash1 = g.Cash;
+  check('卖回半价 390 元、净投资回冲、当日开关随之落回卸下档',
+    sellBackTool(g, 'JI_SCALE') === true && g.Cash === cash1 + TOOLS.JI_SCALE.sellBack
+    && g.NetInvestSpent === inv0 + TOOLS.JI_SCALE.price - TOOLS.JI_SCALE.sellBack
+    && ownsTool(g, 'JI_SCALE') === false && g.ScaleShowOn === false,
+    `回冲后净投资 ${g.NetInvestSpent / 100} 元`);
+  check('手上没有的秤不许卖回（不凭空回收半价）', sellBackTool(g, 'JI_SCALE') === false);
+
+  // 双轨计费：实际出餐 J 不动，只有计费斤数抬起来；暗线代价按裁定 9a959bd §三 进分量作假池
+  const off = simulate(SEED, 1, STRATEGIES.mid, 'headless', M1);
+  const scaled = simulate(SEED, 1, STRATEGIES.mid, 'headless', { ...M1, scale: true });
+  const a = off.state.today, c = scaled.state.today;
+  check('装秤只改计费不改出菜：J 一致、ΔJ = 自动层 ×0.08、计费斤数 = J + ΔJ',
+    a.J === c.J && a.deltaJ === 0 && c.deltaJ === roundJin(c.autoJin * SCALE_DELTA_J_SHARE)
+    && c.J_bill === roundJin(c.J + c.deltaJ),
+    `J ${a.J} 斤｜自动层 ${c.autoJin} 斤 → ΔJ ${c.deltaJ}｜计费 ${c.J_bill} 斤`);
+  check('ΔJ 计流水不计 COGS（附录 B :445：多出来的斤数没真给货）',
+    c.revenueCents > a.revenueCents && c.cogsCents === a.cogsCents,
+    `流水 ${a.revenueCents / 100} → ${c.revenueCents / 100} 元，COGS ${a.cogsCents / 100} 元不变`);
+  const dR = scaled.state.Risk - off.state.Risk, dC = scaled.state.C - off.state.C;
+  check('ΔJ 的暗线代价整段落进分量作假池：Risk +ΔJ×0.3、C/H +ΔJ×0.05（裁定 9a959bd §三）',
+    scaled.state.today.deltaJ > 0 && NEAR(dR, c.deltaJ * SCALE_RISK_PER_JIN, 0.01)
+    && NEAR(scaled.state.RiskShort - off.state.RiskShort, c.deltaJ * SCALE_RISK_PER_JIN, 0.01)
+    && NEAR(dC, c.deltaJ * SCALE_C_PER_JIN, 0.01),
+    `ΔJ ${c.deltaJ} 斤 → Risk +${dR.toFixed(2)}（作假池累计 ${scaled.state.RiskShort.toFixed(2)}）、C/H +${dC.toFixed(2)}`);
+  // ΔJ 只进流水这一条腿：三日连续装秤，桥与 NP 仍要逐日对平（跑表线自然开局款，不手工注入现金）
+  const scaled3 = simulate(SEED, 3, STRATEGIES.mid, 'headless', { ...M1, scale: true });
+  const sb = bridgeCheck(scaled3.state);
+  check('装秤三日账仍平：ΔJ 进流水、桥与 NP 逐日对得上（不虚增成本也不虚增现金）',
+    sb.ok && scaled3.state.DailyReports.reduce((x, r) => x + r.netOpsCents + r.eventNetCents, 0) === scaled3.state.NP
+    && scaled3.log.every(d => d.deltaJ > 0),
+    `逐日 ΔJ ${scaled3.log.map(d => d.deltaJ).join('/')} 斤，桥差 ${sb.diff / 100} 元`);
+}
+{
+  // 附录 D.5 / 正文 3.6 注 试吃一元角：份数玩家定（0 或 3–6，不掷随机）、转化 floor(n/3)、次日进 R
+  const g = newGame(SEED);
+  beginDay(g);   // 定版要按当日情境重算 M_base，没 beginDay 的裸状态进不了第 5 步
+  check('没挂试吃一元角时这个开关根本不出现（定版一律 0，附录 F.5 初值列明写恒 0）',
+    lockTradingDay(g, { tastingCount: 5 }).tastingCount === 0 && g.TastingCount === 0);
+  g.Facilities.push('fac_taste');
+  const pick = n => lockTradingDay(g, { tastingCount: n }).tastingCount;
+  check('份数越界驳回：1 / 2 / 7 / 小数 / 字符串 / null 一律 0，3–6 原样保留',
+    [1, 2, 7, 0.5, '3', null, undefined].every(v => pick(v) === 0)
+    && [3, 4, 5, 6].every(n => pick(n) === n),
+    `3–6 → ${[3, 4, 5, 6].map(pick).join('/')}`);
+  check('转化 = floor(n ÷ 3)：3、4、5 → 1 人次，6 → 2 人次',
+    [3, 4, 5].every(n => tastingConvert(n) === 1) && tastingConvert(6) === 2 && tastingConvert(0) === 0);
+
+  const runOne = tastingN => {
+    const s = newGame(SEED);
+    s.Cash = 4000000;
+    s.laborOn = false;
+    if (tastingN) { s.Facilities.push('fac_taste'); s.TastingCount = tastingN; }
+    const r = makeRng(s);
+    beginDay(s);
+    submitBasket(s, [{ sku: 'MB1', qty: 40 }, { sku: 'MT1', qty: 40 }, { sku: 'VG1', qty: 40 },
+      { sku: 'BF1', qty: 40 }, { sku: 'NS1', qty: 40 }, { sku: 'SP1', qty: 200 }], r);
+    lockTradingDay(s, { priceTier: 'standard' });
+    const orders = drawHandOrders(s, r);
+    runDay(s, orders, o => Object.fromEntries(o.lines.map(l => [l.cat, l.grams])), r);
+    return { s, r, D: s.today.D, consumed: s.today.consumed.reduce((x, y) => x + y.qty, 0),
+      stock: Object.values(s.StockSolid).reduce((x, y) => x + y, 0) + s.StockSoup, R: s.R };
+  };
+  const bare = runOne(0), sampled = runOne(3);
+  check('转化单并入当日需求（D 多出 floor(n/3) 碗），不是只写在注解里',
+    Math.abs(sampled.D - bare.D - tastingConvert(3)) < 1e-9,
+    `不试吃 D ${bare.D.toFixed(2)} → 3 份 D ${sampled.D.toFixed(2)} 碗`);
+  nightSettle(sampled.s, sampled.r);
+  const t = sampled.s.today;
+  check('份钱 n × 1 元进收入、样品成本 = n × 单碗食材成本 × 0.3 按批次成本从库存扣',
+    t.tastingPortions === 3 && t.tastingIncomeCents === 3 * TASTING.incomeCentsPerPortion
+    && t.tastingCostCents > 0 && t.tastingNetCents === t.tastingIncomeCents - t.tastingCostCents
+    && t.tastingConvert === 1,
+    `3 份收 ${t.tastingIncomeCents / 100} 元、样品成本 ${t.tastingCostCents / 100} 元、净额 ${t.tastingNetCents / 100} 元`);
+  check('样品计入当日耗用（批次质量参与 Q）并压低库存——不是记一笔费用了事',
+    t.consumed.reduce((x, y) => x + y.qty, 0) > sampled.consumed
+    && Object.values(sampled.s.StockSolid).reduce((x, y) => x + y, 0) + sampled.s.StockSoup < sampled.stock,
+    `耗用 ${sampled.consumed.toFixed(2)} → ${t.consumed.reduce((x, y) => x + y.qty, 0).toFixed(2)} 斤`);
+  // 桥用正常跑表线核：上面 runOne 是手工注入现金的探针，桥右端按开局款起算，探针自己必差
+  const tastingRun = simulate(SEED, 2, STRATEGIES.mid, 'headless', { ...M1, tasting: 3 });
+  check('试吃两日现金桥对平：份钱进现金、样品成本由库存资产项吸收（附录 B :441）',
+    bridgeCheck(tastingRun.state).ok && tastingRun.log.every(d => d.tasting < 0),
+    `逐日试吃净额 ${tastingRun.log.map(d => d.tasting.toFixed(2)).join('/')} 元，桥差 ${(bridgeCheck(tastingRun.state).diff / 100).toFixed(2)} 元`);
+  const R0 = sampled.s.R;
+  beginDay(sampled.s);
+  check('转化人次次日进熟客存量 R（第 1 步过账，不记在当日）',
+    sampled.s.R === R0 + tastingConvert(3) && sampled.s.tasting_pending_R === 0,
+    `R ${R0} → ${sampled.s.R}（pending 已清）`);
+  check('没开试吃时 pending 与份数都是 0（不给自己留一个隐形的 +1 R）',
+    bare.s.TastingCount === 0 && bare.s.tasting_pending_R === 0);
 }
 
 // ── 输出 ─────────────────────────────────────────────────────────

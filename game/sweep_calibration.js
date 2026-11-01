@@ -9,10 +9,14 @@
 //   · "大正反馈" 全量口径自 M2 事件池齐备后生效（审复 §五）；M1 替代验收 = evt_d_031 第 4–6 天保底
 //   · 三审复 R7：③÷① 周毛利比只取两线共同存活日，重叠 <5 天的周标 ⊘；R8：无投资腿诚实线不作破产验收，
 //     改登记为停滞线观察，破产验收的唯一口径是审复 §四 双验（G 段第 3 项）
-import { simulate, STRATEGIES, REF_STRATEGIES } from './src/sim.js';
+import { simulate as simRaw, STRATEGIES, REF_STRATEGIES } from './src/sim.js';
 import { WEATHER } from './src/data/scenario.js';
 import { EVENTS } from './src/data/events.js';
 import { ENDING, RETIRE_NP_CENTS } from './src/data/constants.js';
+
+// M1 口径（正文 3.5:141：压力测试带跑在 M1 构建，「人工与产能数值不参与本区间判定」）：
+// 本脚本凡是压到已签发带的线一律关人工，M2 在场口径的区间店主还没签 → 只在文末 H 段出证据，不在此套带。
+const simulate = (seed, days, strat, closer, opts) => simRaw(seed, days, strat, closer, { labor: false, ...opts });
 
 const BAND = [-450, 360];
 const SEEDS = [20261031, 7979, 12345, 4242, 90210];
@@ -27,6 +31,7 @@ const POLICIES = ['appc', 'd0'];
 
 const f2 = x => (x >= 0 ? '+' : '') + x.toFixed(2);
 const cum = (log, days) => log.slice(0, days).reduce((s, d) => s + d.netOps + d.eventNet, 0);
+const cumField = (log, key, days) => log.slice(0, days).reduce((s, d) => s + (d[key] || 0), 0);
 const deciles = arr => {
   const a = [...arr].sort((x, y) => x - y);
   const at = p => a[Math.min(a.length - 1, Math.floor(p * a.length))];
@@ -325,6 +330,42 @@ function sweepG() {
   console.log(`     120 天内无结局，原因均为盘店要 L>=4 / 金盆洗手要 C>=5（M1 内容给不出），打 ⊘ 不记红。`);
 }
 
+// ── H. M2 在场口径证据（不套带：正文 3.5:141「M2 重跑时另立区间」，区间店主未签发）──
+// 只报三件事：人工线开/关对同一条线的位移、位移里有多少是工资、余下的那截到底是什么。
+// 这里给的是证据不是验收，A/D/G 段的带仍是 M1 口径（labor:false），两者并存直到店主另立区间。
+function sweepH() {
+  const fmtCap = c => (c === null ? '未开截断' : +c.toFixed(2));
+  console.log(`\n${line(100)}\nH. M2 在场口径证据（人工线开，区间未签 → 只出数不判红绿）\n${line(100)}`);
+  for (const strat of Object.values(STRATEGIES)) {
+    const rows = SEEDS.map(s => {
+      const off = simulate(s, 5, strat, 'headless', { labor: false });
+      const on = simulate(s, 5, strat, 'headless', { labor: true });
+      return {
+        d: cum(on.log, 5) - cum(off.log, 5),
+        labor: on.log.slice(0, 5).reduce((a, x) => a + x.labor, 0),
+        capOff: off.log[0].cap, capOn: on.log[0].cap,
+        peakOff: Math.max(...off.log.map(x => x.bowls)), peakOn: Math.max(...on.log.map(x => x.bowls)),
+        buyGap: cumField(on.log, 'bought', 5) - cumField(off.log, 'bought', 5),
+        bowlGap: on.log.slice(0, 5).reduce((a, x) => a + x.bowls, 0) - off.log.slice(0, 5).reduce((a, x) => a + x.bowls, 0),
+      };
+    });
+    const deltas = rows.map(r => r.d);
+    const dec = deciles(deltas);
+    const wage = rows.reduce((a, r) => a + r.labor, 0) / SEEDS.length;
+    const midRow = rows[deltas.indexOf(dec.p50)] || rows[0];
+    console.log(`  ${strat.name}｜5 日累计位移（在场 − 不在场）：`);
+    console.log(`     ${deltas.map(x => f2(x)).join(' / ')}　元｜最小 ${f2(dec.min)} 中位 ${f2(dec.p50)} 最大 ${f2(dec.max)}`
+      + `｜工资成本 ${wage.toFixed(2)} 元（60 元/日 × 5）`);
+    console.log(`     出餐上限：不在场 ${fmtCap(midRow.capOff)} / 在场 ${fmtCap(midRow.capOn)} 斤，`
+      + `而 5 日出餐峰值只到 ${Math.max(midRow.peakOff, midRow.peakOn)} 斤 → ×1.10 从不撞顶，位移里拿不到产能的钱`);
+    const rest = dec.p50 + wage;
+    console.log(`     位移扣工资后余 ${f2(rest)} 元：这截不是产能，是工资先扣现金 → 篮子被现金额夹住`
+      + `（进货差 ${f2(midRow.buyGap)} 元、出餐差 ${midRow.bowlGap} 碗）的二阶效应`
+      + `${Math.abs(rest) < 0.005 ? '；这条线现金还没紧到会夹篮子，位移 = 纯工资' : '；越靠近现金下限的一条线，这截越负'}`);
+  }
+  console.log('  ⚠️ 以上位移需要店主回签 M2 在场区间后才能进验收门；未签之前 A/D/G 段一律按 M1 口径跑。');
+}
+
 console.log(`M1 定稿 §七.2 回签证据表｜验收带 ${BAND} 元｜种子 ${SEEDS.join('/')}`);
 sweepA();
 sweepB();
@@ -333,3 +374,4 @@ sweepD();
 sweepE();
 sweepF();
 sweepG();
+sweepH();

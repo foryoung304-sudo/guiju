@@ -1,6 +1,6 @@
 import {
-  ADDITIVE, ADDITIVE_TIER_MIN, CLIENT_MIX, CLIENT_PREF, CONFIG, FLAVOR_DIMS, PREP_LEVELS, PREP_STATIONS,
-  TIERS_STALL, WAKE_EARLY_GRID,
+  ADDITIVE, ADDITIVE_TIER_MIN, CLIENT_MIX, CLIENT_PREF, CONFIG, FLAVOR_DIMS, LABOR, PREP_LEVELS, PREP_STATIONS,
+  TASTING, TIERS_STALL, WAKE_EARLY_GRID,
 } from '../data/constants.js';
 
 const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
@@ -11,10 +11,9 @@ export function prepStationLevel(state, i) {
   return levelOf(state.Prep[i]);
 }
 
-// 工时预算 = 摊位档 workGrid（三轮车/餐车 4 · 固定摊位/档口 5 · 门面/双店 6）；
-// 小豆在场 +1 格随人工线一起接（CONFIG.labor 未开）
+// 工时预算 = 摊位档 workGrid（三轮车/餐车 4 · 固定摊位/档口 5 · 门面/双店 6）+ 小豆在场 1 格（附录 F.5 `WorkGridUsed` 行）
 export function prepBudget(state) {
-  return TIERS_STALL[state.Tier - 1].workGrid;
+  return TIERS_STALL[state.Tier - 1].workGrid + (xiaodouPresent(state) ? LABOR.gridBonus : 0);
 }
 
 export function prepGridUsed(state, prep = state.Prep, wakeEarly = state.WakeEarly) {
@@ -30,9 +29,29 @@ export function prepCapMul(state) {
   return state.Prep.map(levelOf).reduce((m, l) => m * l.cap, 1);
 }
 
+// 正文 3.5 / 附录 E：小豆在场是人工线三条收益（工时 +1 格、产能 ×1.10、日结工资）的共同门。
+// 不在场的两种成因都由事件写 `XiaodouAbsentDays`（"小豆请假一天" = 1 日；被挖角"让他走" = 14 日后回来，
+// 合同在手则不被挖）；第 1 步递减。人工线整条关着时（M1 构建 / 压测口径）按不在场算，三条一起退场。
+export function xiaodouPresent(state) {
+  return !!state.laborOn && state.XiaodouAbsentDays <= 0;
+}
+
+// 附录 G.2 第 7 步产能式：在场 → 合同 ? ×1.15 : ×1.10（覆盖不叠加）
+export function laborCapMul(state) {
+  if (!xiaodouPresent(state)) return 1.0;
+  return state.Facilities.includes('fac_contract') ? LABOR.contractCapMul : LABOR.capMul;
+}
+
+// 附录 F.7 `LaborCost` 行：日结 60（三轮车—档口）/ 90（门面—双店），合同后 120 覆盖不分档；不在场 0
+export function laborCostCents(state) {
+  if (!xiaodouPresent(state)) return 0;
+  if (state.Facilities.includes('fac_contract')) return LABOR.contractPerDay;
+  return state.Tier >= LABOR.highTierFrom ? LABOR.highTierPerDay : LABOR.perDay;
+}
+
 export function capacityJin(state) {
   if (!CONFIG.capacityTruncation) return Infinity;
-  return state.CapacityBase * prepCapMul(state);
+  return state.CapacityBase * prepCapMul(state) * laborCapMul(state);
 }
 
 export function washSkipped(state) {
@@ -74,4 +93,11 @@ export function computeMBase(flavor, scenario) {
 
 export function qTaste(mBase) {
   return clamp((mBase - 0.70) * 20, -6, 6);
+}
+
+// 正文 3.6 注 / 附录 D.5：转化人数 = floor(试吃份数 ÷ 3)，不掷随机。
+// 「转化单是正常订单，计入当日流水与 COGS」→ 这份人数在第 7c 步并入当日需求（走自动层，吃库存与汤底与产能），
+// 第 8 步的试吃账只管 1 元/份的份钱与样品库存消耗，不再重复计一遍流水。
+export function tastingConvert(n) {
+  return n >= TASTING.min ? Math.floor(n / TASTING.convertPer) : 0;
 }
