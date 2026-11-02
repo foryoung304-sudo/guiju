@@ -136,12 +136,19 @@ input[type=number], input[type=text] {
 /* 批 A（task-ui-fidelity-batch A 项 / mockup 12）：通栏分段条 → 胶囊浮条；纯文字 → 图标 + 文字；
    选中由「一道细红顶边」改为番茄红圆角底衬；角标红点只两语义（账本=有未清欠款、置办=有可购买）；
    夜间态整条换墨蓝底、字与图标奶油色、选中芥末黄底衬。 */
-:root { --tab-h: 74px; }
+/* 排版批 L8（task-layout-l8-overlap-20261102，店主真机截图：篮子条第二行被胶囊压住半行）：
+   胶囊是悬浮件，nav 的盒子从屏幕底边一直占到「条高 + 条内下垫 + 安全区」。旧让位量只吃 --tab-h，
+   把条内那 10px 下垫漏掉了，等于贴底条的下沿落在 nav 盒里 ⇒ 被压住。现在让位量按盒子全高算，
+   并额外留 --tab-gap 这一格固定间距；--tab-pad 与 .tabbar 的下垫同一枚 token，改一处两处一起动，不再各写各的。 */
+:root {
+  --tab-h: 74px; --tab-pad: 10px; --tab-gap: 10px;
+  --tab-clear: calc(var(--tab-h) + var(--tab-pad) + var(--tab-gap) + env(safe-area-inset-bottom));
+}
 .ic { width: 20px; height: 20px; display: inline-block; vertical-align: -.28em; flex: none; }
 .tabbar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 7;
   display: flex; justify-content: center;
-  padding: 0 10px calc(10px + env(safe-area-inset-bottom));
+  padding: 0 10px calc(var(--tab-pad) + env(safe-area-inset-bottom));
   background: transparent;   /* 通栏底色撤掉：奶油底由胶囊自己带，屏幕两侧露出页面 */
 }
 .tabbar .tabrow {
@@ -175,9 +182,9 @@ input[type=number], input[type=text] {
 .tabbar.night button { color: var(--cream); }
 .tabbar.night button.on { background: var(--mustard); color: var(--ink); }
 .tabbar.night button.on .dot { border-color: var(--ink); }
-/* 有标签才把底部那一条高度让出来；吸底汇总条跟着抬高一格，不被浮条压住 */
-#app.hasTabs { padding-bottom: calc(96px + var(--tab-h) + env(safe-area-inset-bottom)); }
-#app.hasTabs .stickfoot { bottom: calc(var(--tab-h) - 12px); }
+/* 有标签才把底部那一条高度让出来；让的是 nav 盒全高 + 固定间距（--tab-clear），不是条自身那一段高 */
+#app.hasTabs { padding-bottom: calc(96px + var(--tab-clear)); }
+#app.hasTabs .stickfoot { bottom: var(--tab-clear); }
 
 /* ── 小图标随文（批 A/E：标签栏用 22px，正文里的语义图标跟着字号走）── */
 .tag .ic, .muted .ic, .tierbody .ic, h2 .ic, h3 .ic { width: 15px; height: 15px; margin-right: 3px; }

@@ -944,7 +944,7 @@ const VIEWS = {
         <tr><td>还欠</td><td class="r num">${y(state.DebtSupplier)}</td></tr>
       </table>
       ${out.length ? `<p class="negv" style="margin-top:8px">今天这些卖断了：${out.join('、')}。</p>` : ''}
-      <p class="muted">经营净额 = 销售毛利 − 隔夜报损 − 固定支出 − 人工 + 试吃净额，与账本「逐日账」那一列同一个式子、同一个数。</p>
+      <p class="muted">经营净额 = 销售毛利 − 隔夜报损 − 固定支出 − 人工 + 试吃净额，与账本「逐日账」那一项同一个式子、同一个数。</p>
       ${t.tastingConvert ? `<p class="muted">试吃尝过的人里有 ${t.tastingConvert} 位明天算回头熟客。</p>` : ''}
       ${(t.handRefused || 0) > 0 ? '<p class="negv">有亲手单没接住（超出当天能出的碗数）。</p>' : ''}
       ${t.spillBowls ? `<p class="muted">外带漏洒 ${t.spillBowls} 碗。</p>` : ''}
@@ -999,7 +999,7 @@ const VIEWS = {
       <div class="lrows">${p.reports.map(dayRow).join('')}</div>
       <p class="muted" style="margin-top:8px">对账：现金 ${y(p.bridge.cash)} · 账面 ${y(p.bridge.bridge)} · 差 ${y(p.bridge.diff)}
         ${p.bridge.ok ? '（平）' : '（不平，报开发）'}</p>
-      <p class="muted">经营净额这一列不只减报损：还扣了当日固定支出与人工（小豆在场才结），并把试吃的份钱减样品成本算了进去——这三笔就写在净额那一格的下面。要连着流水、包装一起逐行看，每天收摊那屏都列全了。</p>
+      <p class="muted">经营净额这一项不只减报损：还扣了当日固定支出与人工（小豆在场才结），并把试吃的份钱减样品成本算了进去——这三笔就写在净额下面。要连着流水、包装一起逐行看，每天收摊那屏都列全了。</p>
     </div>${state.EndingId ? endPanel(p) : ''}`;
   },
 
