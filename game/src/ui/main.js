@@ -2,7 +2,7 @@
 // 红线照正本 3.1 / 3.4 / 九：不许出现品质数字、不许出现道德标签、不许有一句劝善或劝坏的话。
 import { CAT, SOLID_CATS, ALL_CATS, PRICE_TIERS, FACILITIES, ENDING, CONFIG, TIERS_STALL, START_CASH_CENTS, START_CREDIT_CAP_CENTS,
   PACKING, PACKING_NAMES, PREP_STATIONS, PREP_LEVELS, ADDITIVE, FLAVOR_DIMS, FLAVOR_DIM_NAMES, CLIENT_MIX,
-  TASTING, TOOLS, SCALE_AUTO_MUL, BLANCH, RETIRE_NP_CENTS } from '../data/constants.js';
+  TASTING, TOOLS, SCALE_AUTO_MUL, BLANCH, RETIRE_NP_CENTS, SAVE_VERSION } from '../data/constants.js';
 import { SKUS_BY_CAT, SKU_BY_ID } from '../data/skus.js';
 import { newGame, loadGame, saveGame, clearSave, makeRng, roundJin, centsToYuan } from '../index.js';
 import {
@@ -25,6 +25,11 @@ const SKU_SHEET = { MB: 'sku-mb', MT: 'sku-mt', VG: 'sku-vg', BF: 'sku-bf', NS: 
 const TIER_CELL = { 1: 'tl', 2: 'tr', 3: 'bl', 6: 'br' };
 // 事件配图（实测反馈 §二.3）：M1 四条每类一张，牌面/告示纸留白，字由 UI 排
 const EVENT_ART = { evt_d_001: 'event-zhaodama', evt_d_002: 'event-002', evt_d_011: 'event-011', evt_d_031: 'event-031' };
+// 预检反馈 F9（0366bd6）：没有配图的事件行原先一律回落 chenshi 立绘（一张 900×1800 的竖构图），
+// 于是「夜晚连着两单同一张图」「情报卡只见下半身」（F10）都成了它的表现。四张成品图是 5:2 横构图，
+// 卡框也是 5:2，竖图被横裁必然切头。现在无图的行走剪影件（同 5:2，不裁），补图按行等签。
+const EVENT_NO_ART = 'event-silhouette.svg';
+const eventArt = id => `./img/${EVENT_ART[id] ? `${EVENT_ART[id]}.webp` : EVENT_NO_ART}`;
 const AVA_SHEET = './img/avatars.webp';
 const PHASE_KEY = 'guiju-m1-phase';
 const FLOW_KEY = 'guiju-m1-flow';
@@ -120,8 +125,41 @@ function hud() {
   </div>`;
 }
 
+// 预检反馈 F11（店主裁定 signoff-f11-tabbar-20261102）：五标签只挂 hub 屏，流程屏（备菜/定版/称重/结算/事件/结局）全屏无标签。
+// 标签切换是纯视图行为：不推进天数、不触发结算与事件，也不给任何操作开新的时点。
+const TABS = [{ id: 'stall', label: '出摊' }, { id: 'market', label: '采购' }, { id: 'ledger', label: '账本' },
+  { id: 'shop', label: '置办' }, { id: 'me', label: '我的' }];
+const HUB_PHASES = ['morning', 'night', 'market', 'ledger', 'shop', 'me'];
+const TAB_OF = { morning: 'stall', night: 'stall', market: 'market', ledger: 'ledger', shop: 'shop', me: 'me' };
+// 当日 hub：这一天还没收摊就落在晨间屏，已经收摊就落在夜屏（留言与目标墙都在那一屏）
+const stallHub = () => (state.today && state.today.revenueCents !== undefined ? 'night' : 'morning');
+// 采购窗口 = 第 3 步提交之前。市场页本来就只在这段里出现，标签按同一条件放行，不新增操作时点。
+const buyWindowOpen = () => !!state.today && !state.EndingId
+  && !state.today.committed && state.today.revenueCents === undefined;
+// 从流程屏（结算等）经顶栏「进货单」进来的账本不给标签：那一步的过账动作不能被导航绕过去
+const showTabs = () => HUB_PHASES.includes(phase) && !(phase === 'ledger' && !HUB_PHASES.includes(ledgerBack));
+function tabBar() {
+  if (!showTabs()) return '';
+  const active = TAB_OF[phase];
+  return `<nav class="tabbar"><div class="tabrow">${TABS.map(t => {
+    const off = t.id === 'market' && !buyWindowOpen();
+    return `<button data-tab="${t.id}" class="${active === t.id ? 'on' : ''}"${off ? ' disabled title="今天已经收摊，明早开市再去市场"' : ''}>${t.label}</button>`;
+  }).join('')}</div></nav>`;
+}
+function goTab(id) {
+  if (id === 'market' && !buyWindowOpen()) return undefined;
+  // 草稿是空的才铺默认篮（和「去市场」那颗按钮同一份 defaultDraft）；已经有草稿就原样带过去，
+  // 不然人在置办与账本之间跳一回，篮子就被重置一次。
+  if (id === 'market' && !Object.keys(draft).length) draft = defaultDraft();
+  if (id === 'ledger') ledgerBack = phase;
+  return go(tabPhase(id));
+}
+const tabPhase = id => (id === 'stall' ? stallHub() : id);
+
 // 按钮点击绑在 #app 上做一次：试算汇总条要就地刷新，刷新后不该再回头重绑一遍监听
 app.addEventListener('click', e => {
+  const tab = e.target.closest('[data-tab]');
+  if (tab) return goTab(tab.dataset.tab);
   const nav = e.target.closest('[data-nav]');
   if (nav) {
     if (nav.dataset.nav === 'ledger') { ledgerBack = phase; return go('ledger'); }
@@ -133,7 +171,8 @@ app.addEventListener('click', e => {
 
 function render() {
   stopAllBlanch();   // 换屏就把还在扫的熟度条收掉：没夹出的那一单按「没下手」走，不留着后台跑
-  app.innerHTML = (VIEWS[phase] || VIEWS.boot)();
+  app.innerHTML = (VIEWS[phase] || VIEWS.boot)() + tabBar();
+  app.classList.toggle('hasTabs', showTabs());   // 有标签才留那一条底部高度，流程屏照旧全屏
   // 实测问题 #8：数量框一边打字一边刷试算（原来 input 用 change，必须回车/失焦才动）
   app.querySelectorAll('input[data-qty]').forEach(el => {
     // 复验 #21：任何来源（预填/缩量/旧档）落在控件上的值，渲染时先按 0.1 斤写回控件与草稿，
@@ -205,11 +244,11 @@ function act(host) {
     case 'setqty': draft[d.qty] = round01(Number(d.value) || 0); return go('market');
     case 'submit': return submitDraft();
     case 'shrink': return shrinkToAffordable();
-    case 'facility': buyFacility(state, d.fac); return go('market');
-    case 'buyTool': buyTool(state, d.tool); return go('market');
+    case 'facility': buyFacility(state, d.fac); return go('shop');
+    case 'buyTool': buyTool(state, d.tool); return go('shop');
     case 'taste': tastingPick = Number(d.n) || 0; return go('lock');
     case 'scale': scalePick = d.on === '1'; return go('lock');
-    case 'sellTool': sellBackTool(state, d.tool); return go('market');
+    case 'sellTool': sellBackTool(state, d.tool); return go('shop');
     case 'price': pricePick = d.price; return go('lock');
     case 'pack': packingPick = d.pack; return go('lock');
     case 'flavor': flavorPick[d.dim] = Math.max(0, Math.min(5, flavorPick[d.dim] + Number(d.delta))); return go('lock');
@@ -228,6 +267,14 @@ function act(host) {
     case 'quit': return quitShop();
     case 'upgrade': return buyNextTier();
     case 'restart': clearSave(); return startNew((Date.now() % 100000) + 1);
+    // 「我的」里的清除：不可逆，先问一句再动（存档与界面续件一起清，落回开屏）
+    case 'clear':
+      if (!window.confirm('清除存档会丢掉这一局，浏览器里那份账也一起没。确定？')) return undefined;
+      clearSave();
+      go('boot');
+      // 续件要落在 go() 之后删：go 里那次 saveFlow 会原样把它写回来，先删等于没删
+      localStorage.removeItem(FLOW_KEY);
+      return undefined;
     default: return undefined;
   }
 }
@@ -626,7 +673,7 @@ function quitShop() {
 
 function buyNextTier() {
   const price = TIERS_STALL[state.Tier - 1].upgradePrice;
-  if (!price || state.Cash < price) return go('market');
+  if (!price || state.Cash < price) return go('shop');
   // 门面 → 整街双店这一笔就是正文 §六 说的"盘下对面铺子"：#3/#4 判在付钱当刻，判空即过、只升档
   if (state.Tier === 5) {
     const e = judgeBuyout(state);
@@ -638,7 +685,7 @@ function buyNextTier() {
   }
   upgradeStall(state);
   saveGame(state);
-  return go('market');
+  return go('shop');
 }
 
 // ── 画面 ─────────────────────────────────────────────────
@@ -675,7 +722,7 @@ const VIEWS = {
         <div class="row">${ALL_CATS.map(c => `<span class="muted">${CAT[c].name}<br><b class="num">${(c === 'SP' ? state.StockSoup : state.StockSolid[c]).toFixed(2)}</b>${c === 'SP' ? ' 份' : ' 斤'}</span>`).join('')}</div>
         ${state.YesterdaySoldOut ? '<p class="negv">昨天卖断过货。</p>' : ''}</div>
       ${preEvent ? `<div class="panel good"><h3>晨间情报</h3>
-        <img class="inlineart" src="./img/${EVENT_ART[preEvent.id] || 'chenshi'}.webp" alt="" />
+        <img class="inlineart" src="${eventArt(preEvent.id)}" alt="" />
         <p class="text">${esc(preEvent.text)}</p>
         <p class="muted">市场页的标价已经按这个变了。</p></div>` : ''}
       <button class="go" data-act="toMarket">去市场</button>`;
@@ -686,9 +733,35 @@ const VIEWS = {
     return hud() + `
       <img class="scene" src="./img/market.webp" alt="市场采购" />
       ${ALL_CATS.map(cat => shelfRow(cat, forecast)).join('')}
-      ${facilityRow()}
       <div id="marketDetail">${forecastBar(forecast) + buyPanel(forecast)}</div>
       <div id="marketFoot" class="stickfoot">${footStrip(forecast)}</div>`;
+  },
+
+  // 预检反馈 F11（signoff-f11-tabbar）：设施货架与摊位升级从市场页底部拆出来，成整屏页。
+  // 任何 hub 时点都「看得见」，但买与升的操作时点一个字没动——采购窗口之外一律置灰并给一句世界内的理由。
+  shop() {
+    return hud() + `<img class="scene" src="./img/stall.webp" alt="摊位的置办" />
+      ${facilityRow()}`;
+  },
+
+  // 「我的」只做存档状态只读 + 重开 + 清除 + 版本号。裁定 §一 的红线：Rep/Risk/C/H/L/Q 一律不进这一屏，
+  // 所以这里五格全是顶栏本来就摆着的量，不做成属性面板。
+  me() {
+    return hud() + `<div class="panel">
+      <h2>我的摊子</h2>
+      <div class="grid2">
+        <div><div class="muted">营业天数</div><div class="num">${state.Day} 天</div></div>
+        <div><div class="muted">摊位</div><div class="num">${state.tierName}</div></div>
+        <div><div class="muted">现金</div><div class="num ${state.Cash < 0 ? 'negv' : ''}">${y(state.Cash)} 元</div></div>
+        <div><div class="muted">欠着</div><div class="num">${y(state.DebtSupplier)} 元</div></div>
+        <div><div class="muted">可赊</div><div class="num">${y(creditAvailable(state))} 元</div></div>
+      </div>
+      <p class="muted">存档存在这台设备的这个浏览器里，换浏览器或清浏览器数据就带不走。规则版本 ${SAVE_VERSION}。</p>
+      <div class="row" style="margin-top:10px">
+        <button class="ghost" data-act="restart">重开一局</button>
+        <button class="ghost" data-act="clear">清除存档</button>
+      </div>
+    </div>`;
   },
 
   prep() {
@@ -776,7 +849,7 @@ const VIEWS = {
     // 预检反馈 F6（0366bd6）：晚间事件弹层原先整屏换掉这张账，事件日就从「打烊」那一刻起再也看不到净额行。
     // 账目与事件各回各位：先把账排在屏上，弹层作为覆盖层追加，玩家点完分支照样落第 10–12 步。
     const overlay = pendingEvent ? eventOverlay() : '';
-    return hud() + `<img class="scene" src="./img/settlement.webp" alt="收摊结算" />
+    return hud() + `<img class="scene settle" src="./img/settlement.webp" alt="收摊结算" />
       <div class="panel">
       <h2>收摊账目</h2>
       <table>
@@ -849,11 +922,11 @@ const VIEWS = {
           ${ticketCell(r)}</tr>`).join('')}</table>`).join('')
         : '<p class="muted">还没买过东西。</p>'}
       <hr /><h3>逐日账</h3>
-      <table><tr><th>天</th><th class="r">流水</th><th class="r">COGS</th><th class="r">报损</th><th class="r">经营净额</th><th class="r">事件账</th><th class="r">现金</th><th class="r">欠款</th></tr>
+      <table><tr><th>天</th><th class="r">流水</th><th class="r">成本</th><th class="r">报损</th><th class="r">经营净额</th><th class="r">事件账</th><th class="r">现金</th><th class="r">欠款</th></tr>
       ${p.reports.map(r => `<tr><td>${r.day}</td><td class="r num">${y(r.revenueCents)}</td><td class="r num">${y(r.cogsCents)}</td>
         <td class="r num">${y(r.writeoffCents)}</td><td class="r num">${sign(r.netOpsCents)}</td>
         <td class="r num">${sign(r.eventNetCents)}</td><td class="r num">${y(r.cash)}</td><td class="r num">${y(r.debt)}</td></tr>`).join('')}</table>
-      <p class="muted" style="margin-top:8px">对账：现金 ${y(p.bridge.cash)} · 桥 ${y(p.bridge.bridge)} · 差 ${y(p.bridge.diff)}
+      <p class="muted" style="margin-top:8px">对账：现金 ${y(p.bridge.cash)} · 账面 ${y(p.bridge.bridge)} · 差 ${y(p.bridge.diff)}
         ${p.bridge.ok ? '（平）' : '（不平，报开发）'}</p>
       <p class="muted">经营净额这一列不只减报损：还扣了当日固定支出与人工（小豆在场才结），并把试吃的份钱减样品成本算了进去。要逐行看，每天收摊那屏都列全了。</p>
     </div>${state.EndingId ? endPanel(p) : ''}`;
@@ -1012,12 +1085,13 @@ const UNLOCK_HINT = {
 function tierBlock() {
   const nextPrice = TIERS_STALL[state.Tier - 1].upgradePrice;
   const next = state.Tier < 6 ? TIERS_STALL[state.Tier] : null;
+  const closed = !buyWindowOpen();
   // 第五档往第六档那一笔就是正文 §六 说的"盘下对面铺子"（60,000 与升双店价同值同原则，见换算表第 16 行）
   const label = state.Tier === 5 ? '盘下对面铺子' : '升级';
   return `<h3 style="margin-top:0">摊位</h3>
     <div class="row tight">${TIERS_STALL.map(t => `<span class="muted" style="${t.level === state.Tier ? 'color:var(--ink);font-weight:700' : ''}">${t.name}</span>`).join('')}</div>
-    ${next ? `<p class="muted">下一档 ${next.name}：${nextPrice / 100} 元，一次性。${state.Cash < nextPrice ? `（现金不够，还差 ${(nextPrice - state.Cash) / 100}）` : ''}</p>
-      <button data-act="upgrade" ${state.Cash < nextPrice ? 'disabled' : ''}>${label}</button>`
+    ${next ? `<p class="muted">下一档 ${next.name}：${nextPrice / 100} 元，一次性。${closed ? '（今天已经收摊，明早开市再升）' : state.Cash < nextPrice ? `（现金不够，还差 ${(nextPrice - state.Cash) / 100}）` : ''}</p>
+      <button data-act="upgrade" ${closed || state.Cash < nextPrice ? 'disabled' : ''}>${label}</button>`
       : '<p class="muted">这条街两个铺子都是你的了，往上没有档了。</p>'}`;
 }
 
@@ -1026,13 +1100,16 @@ function tierBlock() {
 function facilityRow() {
   const facs = Object.values(FACILITIES);
   const tools = Object.values(TOOLS);
-  return `<div class="panel warn"><h3>小店置办</h3>${tierBlock()}<hr />
+  // 预检反馈 F11：这一屏改成整屏页后，任何 hub 时点都进得来。看得见，但操作时点照旧——
+  // 采购窗口（第 3 步提交前）之外一律置灰，理由写成世界内的一句话。
+  const closed = !buyWindowOpen();
+  return `<div class="panel warn"><h3>小店置办</h3>${closed ? '<p class="muted">今天已经收摊——这里只看得见图。要动钱，等明早开市一并置办。</p>' : ''}${tierBlock()}<hr />
     ${facs.map(f => {
     const owned = state.Facilities.includes(f.id);
     const open = isFacilityUnlocked(state, f.id);
     return `<div class="row tight"><div><b>${f.name}</b>
         <p class="muted">${open ? `${FACILITY_BLURB[f.id] || ''} ${f.price / 100} 元，一次性。` : UNLOCK_HINT[f.id] || ''}</p></div>
-      <button data-act="facility" data-fac="${f.id}" ${owned || !open || state.Cash < f.price ? 'disabled' : ''}>${owned ? '已置办' : '买下'}</button></div>`;
+      <button data-act="facility" data-fac="${f.id}" ${owned || !open || state.Cash < f.price || closed ? 'disabled' : ''}>${owned ? '已置办' : '买下'}</button></div>`;
   }).join('')}
     ${tools.map(t => {
     const owned = ownsTool(state, t.id);
@@ -1042,8 +1119,8 @@ function facilityRow() {
           ? `杂货摊有卖：${t.price / 100} 元买、${t.sellBack / 100} 元卖回（第 3 步按半价回收）。
               装上后散客那一层的计费斤数按 ×${SCALE_AUTO_MUL} 记账，开关在开门前定版、当日锁定。`
           : UNLOCK_HINT[t.id] || ''}</p></div>
-      <span class="row tight">${owned ? `<button class="ghost" data-act="sellTool" data-tool="${t.id}">卖回</button>` : ''}
-        <button data-act="buyTool" data-tool="${t.id}" ${owned || !open || state.Cash < t.price ? 'disabled' : ''}>${owned ? '已上秤' : '买下'}</button></span></div>`;
+      <span class="row tight">${owned ? `<button class="ghost" data-act="sellTool" data-tool="${t.id}" ${closed ? 'disabled' : ''}>卖回</button>` : ''}
+        <button data-act="buyTool" data-tool="${t.id}" ${owned || !open || state.Cash < t.price || closed ? 'disabled' : ''}>${owned ? '已上秤' : '买下'}</button></span></div>`;
   }).join('')}</div>`;
 }
 
@@ -1210,7 +1287,7 @@ function eventOverlay() {
   // E.6 的销毁决策要在点下去之前看得见数额：无票货按成本记多少，全从自己那张进货单的「票」列推出来
   const risk = ev.scoreCheck === 'big' ? ticketlessCostCents(state) : 0;
   return `<div class="overlay"><div class="event">
-    <img class="art" src="./img/${EVENT_ART[ev.id] || 'chenshi'}.webp" alt="" />
+    <img class="art" src="${eventArt(ev.id)}" alt="" />
     <div class="body"><span class="who">${esc(ev.kind)} · ${ev.timing === 'evening' ? '打烊后' : '清早'}</span>
       <p class="text">${esc(ev.text)}</p>
       ${risk ? `<p class="muted">按成本记，无票的货是 ${y(risk)}——销毁不动现金，动的是柜里的货。</p>` : ''}
@@ -1220,6 +1297,10 @@ function eventOverlay() {
 
 function endPanel(p, standalone) {
   const r = p.reveal;
+  // 预检反馈 F2（0366bd6）：累计净赚与逐日经营净额合计对不上，差的正是事件账——口径没错（附录 B 就这么定义），
+  // 缺的是把这一层换算摆在卡片上。下面这行只做加法还原，不新增任何数。
+  const opsSum = p.reports.reduce((s, x) => s + x.netOpsCents, 0);
+  const evSum = p.reports.reduce((s, x) => s + x.eventNetCents, 0);
   return (standalone ? hud() : '') + `<div class="panel accent">
     <h2 class="kind-bad">结局：${ENDING_NAMES[p.endingId]}</h2>
     ${p.endingId === ENDING.MEDIOCRE ? `<p class="text">${esc(quitBlurb(state))}</p>` : ''}
@@ -1229,6 +1310,7 @@ function endPanel(p, standalone) {
       <div><div class="muted">票据覆盖率</div><div class="num">${(r.ReceiptRate * 100).toFixed(1)}%</div></div>
       <div><div class="muted">最大单日出菜</div><div class="num">${r.Wmax} 斤</div></div>
     </div>
+    <p class="muted">累计净赚 ${y(r.NP)} = 逐日经营净额合计 ${sign(opsSum)} + 事件账合计 ${sign(evSum)}。罚款、赔礼、涨薪这些当天就记进净赚；买摊位的钱与欠供应商的账不算在这里。</p>
     <hr /><p class="muted">这一路一共 ${p.purchases.length} 笔进货，逐笔在上面的进货单里。</p>
     <button class="go" style="margin-top:10px" data-act="restart">换个买法重开</button>
   </div>`;
@@ -1243,7 +1325,10 @@ const warmedImgs = (function preloadScenes() {
   const list = ['business', 'stall', 'market', 'pricing', 'weighing', 'settlement', 'night',
     'event-zhaodama', 'event-002', 'event-011', 'event-031', 'chenshi', 'scale',
     'avatars', 'sku-mb', 'sku-mt', 'sku-vg', 'sku-bf', 'sku-ns', 'sku-sp'];
-  return list.map(n => { const im = new Image(); im.src = `./img/${n}.webp`; return im; });
+  const imgs = list.map(n => { const im = new Image(); im.src = `./img/${n}.webp`; return im; });
+  const silhouette = new Image();   // 事件剪影是 svg，后缀与上面那批不同，单独取
+  silhouette.src = `./img/${EVENT_NO_ART}`;
+  return [...imgs, silhouette];
 })();
 // 绑定挂在 window 上：模块级 const 若无人引用，打包后可能只剩调用、数组被丢，解码结果又被回收
 window.guijuWarm = warmedImgs;
