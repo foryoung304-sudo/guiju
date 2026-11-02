@@ -19,6 +19,7 @@ import { EVENTS } from '../data/events.js';
 import { drawHandOrders, GRAMS_PER_JIN } from '../engine/weigh.js';
 import { judgeBlanch, blanchValueAt } from '../engine/blanch.js';
 import { regularLine, REGULAR_SLOTS } from '../data/customers.js';
+import { icon, weatherIcon, calendarIcon } from './icons.js';
 
 // 美术资产（ui-spec §五）：24 款 SKU 图标 = 六品类各一张 2×2 拼版（档1/档2/档3/强哥特供），同品类三档必须一眼可辨
 const SKU_SHEET = { MB: 'sku-mb', MT: 'sku-mt', VG: 'sku-vg', BF: 'sku-bf', NS: 'sku-ns', SP: 'sku-sp' };
@@ -153,12 +154,30 @@ const buyWindowOpen = () => !!state.today && !state.EndingId
   && !state.today.committed && state.today.revenueCents === undefined;
 // 从流程屏（结算等）经顶栏「进货单」进来的账本不给标签：那一步的过账动作不能被导航绕过去
 const showTabs = () => HUB_PHASES.includes(phase) && !(phase === 'ledger' && !HUB_PHASES.includes(ledgerBack));
+// 角标两语义（ui-spec §四：角标红点仅两种语义）：账本 = 有未清欠款；置办 = 有可购买的升级/设施。
+// 「可购买」直接抄 facilityRow/tierBlock 那三条置灰条件（采购窗口内 + 已解锁 + 现金够），不新增任何判定，也不给操作开新时点。
+const badgeLedger = () => state.DebtSupplier > 0;
+function badgeShop() {
+  if (!buyWindowOpen()) return false;
+  if (state.Tier < 6 && state.Cash >= TIERS_STALL[state.Tier - 1].upgradePrice) return true;
+  if (Object.values(FACILITIES).some(f => !state.Facilities.includes(f.id)
+    && isFacilityUnlocked(state, f.id) && state.Cash >= f.price)) return true;
+  return Object.values(TOOLS).some(t => !ownsTool(state, t.id)
+    && evalCondition(t.unlock, state) && state.Cash >= t.price);
+}
+const BADGE_TITLE = { ledger: '有未清欠款', shop: '有能置办的东西' };
+// 批 A（mockup 12 / ui-spec §四）：胶囊浮条 + 5 图标 + 选中番茄红底衬 + 角标 + 夜间态。
+// 挂载范围、置灰条件、切换行为一律照旧——本批只换皮，导航规则一个字没动。
 function tabBar() {
   if (!showTabs()) return '';
   const active = TAB_OF[phase];
-  return `<nav class="tabbar"><div class="tabrow">${TABS.map(t => {
+  const night = phase === 'night';   // 夜间态整条换墨蓝底（UI-13 那一屏）
+  return `<nav class="tabbar${night ? ' night' : ''}"><div class="tabrow">${TABS.map(t => {
     const off = t.id === 'market' && !buyWindowOpen();
-    return `<button data-tab="${t.id}" class="${active === t.id ? 'on' : ''}"${off ? ' disabled title="今天已经收摊，明早开市再去市场"' : ''}>${t.label}</button>`;
+    const dot = (t.id === 'ledger' && badgeLedger()) || (t.id === 'shop' && badgeShop());
+    const tip = off ? ' title="今天已经收摊，明早开市再去市场"' : (dot ? ` title="${BADGE_TITLE[t.id]}"` : '');
+    return `<button data-tab="${t.id}" class="${active === t.id ? 'on' : ''}"${dot ? ' data-badge="1"' : ''}${off ? ' disabled' : ''}${tip}>`
+      + `<span class="tabic">${icon('tab-' + t.id)}${dot ? '<i class="dot"></i>' : ''}</span>${t.label}</button>`;
   }).join('')}</div></nav>`;
 }
 function goTab(id) {
@@ -749,22 +768,24 @@ const VIEWS = {
         新摊子前 3 天没人气（客流 ×0.4 / ×0.6 / ×0.8）。卖断货是看得见的信号，第二天买多少你说了算。</p></div>`;
   },
 
+  // 批 E（task-ui-fidelity-batch E 项）：三块信息各配语义图标（天气 / 校历 / 人气 / 欠款 / 价签 / 库存），
+  // 关键数字加同色底衬。内容、条目与口径一字未改——系统演化后的现内容为准，不回退 mockup 02 的旧条目。
   morning() {
     const sc = state.today.scenario;
     return hud() + `
       ${sceneImg('stall', '三轮车摊位')}
       <div class="panel">
-        <div class="row"><h2>今晨结转</h2><span class="tag">${sc.label}</span></div>
+        <div class="row"><h2>今晨结转</h2><span class="tag">${weatherIcon(sc.weather.id)}${calendarIcon(sc.calendar.id)}${sc.label}</span></div>
         <div class="grid2">
           <div><div class="muted">明日</div>${state.today.forecast}</div>
-          <div><div class="muted">人气</div>开业第 ${4 - state.RampDays} 天 · 客流 ×${rampCoef(state)}</div>
-          <div><div class="muted">现金</div><span class="num ${state.Cash < 0 ? 'negv' : ''}">${y(state.Cash)} 元</span></div>
-          <div><div class="muted">欠着</div><span class="num">${y(state.DebtSupplier)} / ${y(state.CreditCap)} 元</span></div>
+          <div><div class="muted">${icon('s-people')}人气</div>开业第 ${4 - state.RampDays} 天 · 客流 <span class="chip num">×${rampCoef(state)}</span></div>
+          <div><div class="muted">现金</div><span class="chip num ${state.Cash < 0 ? 'neg' : ''}">${y(state.Cash)} 元</span></div>
+          <div><div class="muted">${icon('s-debt')}欠着</div><span class="chip num">${y(state.DebtSupplier)} / ${y(state.CreditCap)} 元</span></div>
         </div>
       </div>
       ${streetPanel()}
-      <div class="panel warn"><h3>柜里还剩</h3>
-        <div class="row">${ALL_CATS.map(c => `<span class="muted">${CAT[c].name}<br><b class="num">${(c === 'SP' ? state.StockSoup : state.StockSolid[c]).toFixed(2)}</b>${c === 'SP' ? ' 份' : ' 斤'}</span>`).join('')}</div>
+      <div class="panel warn"><h3>${icon('s-stock')}柜里还剩</h3>
+        <div class="row">${ALL_CATS.map(c => `<span class="muted">${CAT[c].name}<br><b class="chip num">${(c === 'SP' ? state.StockSoup : state.StockSolid[c]).toFixed(2)}</b>${c === 'SP' ? ' 份' : ' 斤'}</span>`).join('')}</div>
         ${state.YesterdaySoldOut ? '<p class="negv">昨天卖断过货。</p>' : ''}</div>
       ${preEvent ? `<div class="panel good"><h3>晨间情报</h3>
         <img class="inlineart" src="${eventArt(preEvent.id)}" alt="" />
@@ -784,16 +805,22 @@ const VIEWS = {
 
   // 预检反馈 F11（signoff-f11-tabbar）：设施货架与摊位升级从市场页底部拆出来，成整屏页。
   // 任何 hub 时点都「看得见」，但买与升的操作时点一个字没动——采购窗口之外一律置灰并给一句世界内的理由。
+  // 批 B：六档逐行上图之后，页首那张借来的营业图撤了（施工单：撤留自决，但不许再挂营业图充数）。
   shop() {
-    return hud() + `${sceneImg('stall', '摊位的置办')}
-      ${facilityRow()}`;
+    return hud() + `${facilityRow()}`;
   },
 
   // 「我的」只做存档状态只读 + 重开 + 清除 + 版本号。裁定 §一 的红线：Rep/Risk/C/H/L/Q 一律不进这一屏，
   // 所以这里五格全是顶栏本来就摆着的量，不做成属性面板。
+  // 批 C（task-ui-fidelity-batch C 项）：下半屏那片空白用画面填——陈实立绘 + 当前档位形态图（随档切换，复用 B 的六档图）。
+  // 填版只填画面：数据项一格没加、条与箭头一个没添，红线照旧。
   me() {
     return hud() + `<div class="panel">
       <h2>我的摊子</h2>
+      <div class="meband">
+        <img class="mechar" src="./img/chenshi.webp" alt="陈实" decoding="async" />
+        <img class="metier" src="./img/tier-${state.Tier}.webp" alt="${state.tierName}" decoding="async" />
+      </div>
       <div class="grid2">
         <div><div class="muted">营业天数</div><div class="num">${state.Day} 天</div></div>
         <div><div class="muted">摊位</div><div class="num">${state.tierName}</div></div>
@@ -953,6 +980,8 @@ const VIEWS = {
         ${state.C >= 5 && state.NP >= RETIRE_NP_CENTS ? '<button class="ghost" data-act="sellout">把摊子盘出去</button>' : ''}</div>`}`;
   },
 
+  // 批 D（task-ui-fidelity-batch D 项）：进货单每行配一枚 SKU 缩略图（复用市场那张 2×2 拼版的同一格，不另出图），
+  // 逐日账的经营净额加色块底衬（文字色本就走 .pos/.negv，这里只是让正负在密表里一眼分得开）。表格结构与口径一字未动。
   ledger() {
     const p = replayPage(state);
     const byDay = {};
@@ -962,7 +991,7 @@ const VIEWS = {
       <div class="row"><h2>进货单</h2><button class="mini ghost" data-nav="back">返回</button></div>
       ${days.length ? days.map(d => `<h3 style="margin-top:10px">第 ${d} 天</h3><table>
         <tr><th>货</th><th>来源</th><th class="r">数量</th><th class="r">单价</th><th class="r">金额</th><th class="r">现金/赊</th><th>票</th></tr>
-        ${byDay[d].map(r => `<tr><td>${CAT[r.cat].name}</td><td>${r.supplier}</td>
+        ${byDay[d].map(r => `<tr><td class="goodsh">${buyThumb(r)}<span>${CAT[r.cat].name}</span></td><td>${r.supplier}</td>
           <td class="r num">${r.qty}${r.unit}</td><td class="r num">${r.unitPrice.toFixed(2)}</td>
           <td class="r num">${y(r.cost)}</td><td class="r num">${y(r.cash)} / ${y(r.credit)}</td>
           ${ticketCell(r)}</tr>`).join('')}</table>`).join('')
@@ -970,7 +999,7 @@ const VIEWS = {
       <hr /><h3>逐日账</h3>
       <table><tr><th>天</th><th class="r">流水</th><th class="r">成本</th><th class="r">报损</th><th class="r">经营净额</th><th class="r">事件账</th><th class="r">现金</th><th class="r">欠款</th></tr>
       ${p.reports.map(r => `<tr><td>${r.day}</td><td class="r num">${y(r.revenueCents)}</td><td class="r num">${y(r.cogsCents)}</td>
-        <td class="r num">${y(r.writeoffCents)}</td><td class="r num">${sign(r.netOpsCents)}${deductCell(r)}</td>
+        <td class="r num">${y(r.writeoffCents)}</td><td class="r num">${netChip(r.netOpsCents)}${deductCell(r)}</td>
         <td class="r num">${sign(r.eventNetCents)}</td><td class="r num">${y(r.cash)}</td><td class="r num">${y(r.debt)}</td></tr>`).join('')}</table>
       <p class="muted" style="margin-top:8px">对账：现金 ${y(p.bridge.cash)} · 账面 ${y(p.bridge.bridge)} · 差 ${y(p.bridge.diff)}
         ${p.bridge.ok ? '（平）' : '（不平，报开发）'}</p>
@@ -988,6 +1017,16 @@ const ENDING_NAMES = { 1: '翻车', 2: '破产', 3: '规矩立住', 4: '烧心�
 // 预检反馈 F1（0366bd6）：这一列原先只有「有 / 无」两态，把手气没抽中、本来就不给票、自制不进取数三种情况全塌成了「无」。
 // 于是外购全带票的日子，结局屏按口径算出的覆盖率是 100%（自制两边都不进），玩家拿明细自己除却得到 90%——
 // 数没错，是这一列把口径说反了。自制行从此单列「自制·不计」，与外购无票分开。
+// 进货行的缩略图 = 市场货架同一张 2×2 拼版的同一格（品类决定哪张表、货源档决定哪一格），不另出一批小图。
+// 认不出货或认不出档的行不画空格——宁可少一格图，也不给一行挂错卖相。
+const buyThumb = r => {
+  const s = SKU_BY_ID[r.sku];
+  if (!s || !SKU_SHEET[r.cat] || !TIER_CELL[s.tier]) return '';
+  return `<i class="thumb" data-cell="${TIER_CELL[s.tier]}" style="background-image:url(./img/${SKU_SHEET[r.cat]}.webp)"></i>`;
+};
+// 净额色块：文字色与数一律还是 sign() 那一档给的（正青绿 / 负番茄红），这里只加一层同色底衬，不新增任何判定
+const netChip = c => `<span class="chip${c > 0 ? ' pos' : c < 0 ? ' neg' : ''}">${sign(c)}</span>`;
+
 function ticketCell(r) {
   if (SKU_BY_ID[r.sku]?.receipt === 'excluded') return '<td class="muted">自制·不计</td>';
   return `<td>${r.hasReceipt ? '有' : '无'}</td>`;
@@ -1128,6 +1167,17 @@ const UNLOCK_HINT = {
 
 // UI-05 上段：六档、当前高亮、下一档价与升级按钮。档名与价在附录 G.5:609（赊购额另见 D.1:52）与 ui-spec 换算表里，
 // 基础销量那一列属 3.1 可见清单之外（它只在留言与情境里以体感出现），所以这一段不印数字，只印档名与价。
+// 批 B（task-ui-fidelity-batch B 项 / mockup 10）：六档由「挤成一行小字」改为逐行上图——
+// 每行 = 形态图 + 档名 + 一句描述 + 芥末黄价格胶囊 + 升级按钮（番茄红），当前档红框 + 「当前」标，未达档锁标置灰。
+// 可点的按钮仍然只有「下一档」那一颗，条件仍是采购窗口内 + 现金够：本批只换皮，操作时点一个字没动。
+const TIER_BLURB = {
+  1: '车斗摆得下一台冷柜，收摊就骑走——破的是车况，不是货。',
+  2: '车厢改出来的货台，漆面补过几处，冷柜多出一层。',
+  3: '靠墙一台两米冷柜，灶台另起一台，两台之间留得出地面。',
+  4: '学校后门租下的凹间：瓷砖墙、吊灯，冷柜进了屋，灶还在门外。',
+  5: '整间门面、玻璃门脸，灶有了自己的隔间，门口摆得下桌凳。',
+  6: '街角两间打通：两块牌面、两台大柜、两口灶，两头都是你的。',
+};
 function tierBlock() {
   const nextPrice = TIERS_STALL[state.Tier - 1].upgradePrice;
   const next = state.Tier < 6 ? TIERS_STALL[state.Tier] : null;
@@ -1135,12 +1185,29 @@ function tierBlock() {
   // 第五档往第六档那一笔就是正文 §六 说的"盘下对面铺子"（60,000 与升双店价同值同原则，见换算表第 16 行）
   const label = state.Tier === 5 ? '盘下对面铺子' : '升级';
   return `<h3 style="margin-top:0">摊位</h3>
-    <div class="row tight">${TIERS_STALL.map(t => `<span class="muted" style="${t.level === state.Tier ? 'color:var(--ink);font-weight:700' : ''}">${t.name}</span>`).join('')}</div>
-    ${next ? `<p class="muted">下一档 ${next.name}：${nextPrice / 100} 元，一次性。${closed ? '（今天已经收摊，明早开市再升）' : state.Cash < nextPrice ? `（现金不够，还差 ${(nextPrice - state.Cash) / 100}）` : ''}</p>
-      <button data-act="upgrade" ${closed || state.Cash < nextPrice ? 'disabled' : ''}>${label}</button>`
-      : '<p class="muted">这条街两个铺子都是你的了，往上没有档了。</p>'}`;
+    ${TIERS_STALL.map(t => {
+    const cur = t.level === state.Tier;
+    const isNext = !!next && t.level === state.Tier + 1;
+    const priceCents = t.level > 1 ? TIERS_STALL[t.level - 2].upgradePrice : null;
+    const mark = cur ? '当前' : t.level < state.Tier ? '旧档' : isNext ? '' : '未达';
+    return `<div class="tierrow${cur ? ' cur' : ''}${isNext ? ' next' : ''}${t.level > state.Tier && !isNext ? ' lock' : ''}">
+        <img class="tierimg" src="./img/tier-${t.level}.webp" alt="${t.name}" decoding="async" />
+        <div class="tierbody">
+          <div class="row tight"><b>${t.name}</b>${mark ? `<span class="tierstate">${mark}</span>` : ''}</div>
+          <p class="muted">${TIER_BLURB[t.level]}</p>
+          <div class="row tight">
+            ${priceCents ? `<span class="pill num">${priceCents / 100} 元 · 一次性</span>` : '<span class="pill">起步就有</span>'}
+            ${isNext ? `<button class="up" data-act="upgrade" ${closed || state.Cash < nextPrice ? 'disabled' : ''}>${label}</button>` : ''}
+          </div>
+          ${isNext ? `<p class="muted reason">${closed ? '今天已经收摊，明早开市再升。'
+      : state.Cash < nextPrice ? `现金不够，还差 ${(nextPrice - state.Cash) / 100} 元。` : ''}</p>` : ''}
+        </div></div>`;
+  }).join('')}${next ? '' : '<p class="muted">这条街两个铺子都是你的了，往上没有档了。</p>'}`;
 }
 
+// 批 B：设施七件各配一枚小图标（语义照 mockup 10——牌 / 试吃碗 / 展示柜 / 证件墙 / 合同 / 招牌字 / 秤）。
+// 价格、解锁条件、置灰条件、按钮文案全部照现口径，一个字段没动；价改挂芥末黄胶囊，与摊位那一列同一件皮。
+const FAC_ICON = { JI_SCALE: 'fac_scale' };
 // 正文 3.6 / 附录 D.3：六件设施 + 杂货摊器具一件。UI-05 要"未解锁显示解锁条件文案"，所以七件全列、
 // 没解锁的那几件挂着档名与那句条件话、按钮置灰。显多秤是器具：不进 Facilities、不计 L（附录 E 实现约束第 2 条）。
 function facilityRow() {
@@ -1153,20 +1220,22 @@ function facilityRow() {
     ${facs.map(f => {
     const owned = state.Facilities.includes(f.id);
     const open = isFacilityUnlocked(state, f.id);
-    return `<div class="row tight"><div><b>${f.name}</b>
-        <p class="muted">${open ? `${FACILITY_BLURB[f.id] || ''} ${f.price / 100} 元，一次性。` : UNLOCK_HINT[f.id] || ''}</p></div>
-      <button data-act="facility" data-fac="${f.id}" ${owned || !open || state.Cash < f.price || closed ? 'disabled' : ''}>${owned ? '已置办' : '买下'}</button></div>`;
+    return `<div class="facrow${owned ? ' owned' : ''}${open ? '' : ' lock'}">${icon(FAC_ICON[f.id] || f.id)}
+      <div class="facbody"><div class="row tight"><b>${f.name}</b>${owned ? '<span class="tierstate">已置办</span>' : ''}</div>
+        <p class="muted">${open ? `${FACILITY_BLURB[f.id] || ''} <span class="pill num">${f.price / 100} 元 · 一次性</span>` : UNLOCK_HINT[f.id] || ''}</p>
+        <button data-act="facility" data-fac="${f.id}" ${owned || !open || state.Cash < f.price || closed ? 'disabled' : ''}>${owned ? '已置办' : '买下'}</button></div></div>`;
   }).join('')}
     ${tools.map(t => {
     const owned = ownsTool(state, t.id);
     const open = evalCondition(t.unlock, state);
-    return `<div class="row tight"><div><b>${t.name}</b>
+    return `<div class="facrow${owned ? ' owned' : ''}${open ? '' : ' lock'}">${icon(FAC_ICON[t.id] || t.id)}
+      <div class="facbody"><div class="row tight"><b>${t.name}</b>${owned ? '<span class="tierstate">已上秤</span>' : ''}</div>
         <p class="muted">${open
-          ? `杂货摊有卖：${t.price / 100} 元买、${t.sellBack / 100} 元卖回（第 3 步按半价回收）。
+      ? `杂货摊有卖：<span class="pill num">${t.price / 100} 元买、${t.sellBack / 100} 元卖回</span>（第 3 步按半价回收）。
               装上后散客那一层的计费斤数按 ×${SCALE_AUTO_MUL} 记账，开关在开门前定版、当日锁定。`
-          : UNLOCK_HINT[t.id] || ''}</p></div>
+      : UNLOCK_HINT[t.id] || ''}</p>
       <span class="row tight">${owned ? `<button class="ghost" data-act="sellTool" data-tool="${t.id}" ${closed ? 'disabled' : ''}>卖回</button>` : ''}
-        <button data-act="buyTool" data-tool="${t.id}" ${owned || !open || state.Cash < t.price || closed ? 'disabled' : ''}>${owned ? '已上秤' : '买下'}</button></span></div>`;
+        <button data-act="buyTool" data-tool="${t.id}" ${owned || !open || state.Cash < t.price || closed ? 'disabled' : ''}>${owned ? '已上秤' : '买下'}</button></span></div></div>`;
   }).join('')}</div>`;
 }
 
@@ -1311,8 +1380,8 @@ function streetPanel() {
   // 正文 3.13：每天清晨玩家能看见三家的价签与昨日排队长度；四摊的 P 属传闻层，不进面板（3.1 豁免条）
   if (!competitionOn(state)) return '';
   const rows = streetBoard(state).map(r =>
-    `<span class="muted">${esc(r.name)}<br><b class="num">${r.price.toFixed(1)}</b> 元/斤 · ${r.queue}</span>`).join('');
-  return `<div class="panel"><h3>街面价签</h3><div class="row">${rows}</div>
+    `<span class="muted">${esc(r.name)}<br><b class="chip num">${r.price.toFixed(1)}</b> 元/斤 · ${r.queue}</span>`).join('');
+  return `<div class="panel"><h3>${icon('s-tag')}街面价签</h3><div class="row">${rows}</div>
     <p class="muted">价是人家自己挂出来的，排队是人自己站出来的。</p></div>`;
 }
 
@@ -1377,9 +1446,12 @@ const warm = file => { const im = new Image(); im.src = `./img/${file}`; warmedI
     'chenshi', 'scale', 'avatars', 'sku-mb', 'sku-mt', 'sku-vg', 'sku-bf', 'sku-ns', 'sku-sp'];
   list.forEach(n => warm(`${n}.webp`));
 })();
-// 事件卡文件名自带后缀（成品 webp 与剪影 svg 混装），清单从 EVENT_ART 直接取，免得两处对不上
+// 事件卡与六档形态图都排在首屏之后取（批 B 新增的 tier-1…6 共约 480KB，与事件卡同一批）：
+// 首屏那一帧的取图量维持修复单 P2-3 之后的水位，不让新素材把场景头图挤回收。
+// 文件名自带后缀（成品 webp 与剪影 svg 混装），清单从 EVENT_ART 直接取，免得两处对不上。
 addEventListener('load', () => {
   Object.values(EVENT_ART).concat([EVENT_NO_ART]).forEach(f => warm(f));
+  TIERS_STALL.forEach(t => warm(`tier-${t.level}.webp`));
 }, { once: true });
 // 绑定挂在 window 上：模块级 const 若无人引用，打包后可能只剩调用、数组被丢，解码结果又被回收
 window.guijuWarm = warmedImgs;

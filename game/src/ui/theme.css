@@ -118,22 +118,108 @@ input[type=number], input[type=text] {
 
 /* ── 五标签栏（预检反馈 F11 / 裁定 signoff-f11-tabbar-20261102：hub 挂标签、流程屏全屏）── */
 /* 只挂 hub 屏：出摊（当日 hub）/ 采购 / 账本 / 置办 / 我的。切换是视图行为，不推进天数、不触发结算。 */
-:root { --tab-h: 54px; }
+/* 批 A（task-ui-fidelity-batch A 项 / mockup 12）：通栏分段条 → 胶囊浮条；纯文字 → 图标 + 文字；
+   选中由「一道细红顶边」改为番茄红圆角底衬；角标红点只两语义（账本=有未清欠款、置办=有可购买）；
+   夜间态整条换墨蓝底、字与图标奶油色、选中芥末黄底衬。 */
+:root { --tab-h: 74px; }
+.ic { width: 20px; height: 20px; display: inline-block; vertical-align: -.28em; flex: none; }
 .tabbar {
   position: fixed; bottom: 0; left: 0; right: 0; z-index: 7;
-  background: var(--paper); border-top: 2px solid var(--ink);
-  display: flex; justify-content: center; padding-bottom: env(safe-area-inset-bottom);
+  display: flex; justify-content: center;
+  padding: 0 10px calc(10px + env(safe-area-inset-bottom));
+  background: transparent;   /* 通栏底色撤掉：奶油底由胶囊自己带，屏幕两侧露出页面 */
 }
-.tabbar .tabrow { display: grid; grid-template-columns: repeat(5, 1fr); width: 100%; max-width: 520px; }
+.tabbar .tabrow {
+  display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px;
+  width: 100%; max-width: 460px; padding: 6px;
+  background: var(--cream); border: 2px solid var(--ink);
+  border-radius: 999px; box-shadow: 4px 4px 0 var(--ink-2);
+}
 .tabbar button {
-  min-height: var(--tab-h); border: 0; border-top: 3px solid transparent; background: transparent;
-  color: var(--ink); font: inherit; font-size: 13px; letter-spacing: .06em; padding: 6px 2px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  min-height: 0; border: 0; border-radius: 999px; background: transparent;
+  color: var(--ink); font: inherit; font-size: 10.5px; letter-spacing: .04em; padding: 7px 2px 6px;
+  box-shadow: none;
 }
-.tabbar button.on { border-top-color: var(--tomato); background: var(--cream-2); font-weight: 700; }
-.tabbar button:disabled { color: rgba(27, 42, 74, .38); }
-/* 有标签才把底部那一条高度让出来；吸底汇总条跟着抬高一格，不被标签栏压住 */
+.tabbar button:active { transform: none; }
+.tabbar .tabic { position: relative; display: block; width: 22px; height: 22px; }
+.tabbar .tabic .ic { width: 22px; height: 22px; }
+/* 角标只是一颗点：数值语义（欠多少、能买什么）不进这一格，红线照旧 */
+.tabbar .dot {
+  position: absolute; top: -3px; right: -5px; width: 9px; height: 9px;
+  border-radius: 50%; background: var(--tomato); border: 1.5px solid var(--ink);
+}
+.tabbar button.on { background: var(--tomato); color: var(--paper); font-weight: 700; }
+.tabbar button.on .dot { background: var(--mustard); }
+.tabbar button:disabled { color: rgba(27, 42, 74, .38); background: transparent; }
+.tabbar.night .tabrow { background: var(--ink); border-color: var(--ink); }
+.tabbar.night button { color: var(--cream); }
+.tabbar.night button.on { background: var(--mustard); color: var(--ink); }
+.tabbar.night button.on .dot { border-color: var(--ink); }
+/* 有标签才把底部那一条高度让出来；吸底汇总条跟着抬高一格，不被浮条压住 */
 #app.hasTabs { padding-bottom: calc(96px + var(--tab-h) + env(safe-area-inset-bottom)); }
-#app.hasTabs .stickfoot { bottom: var(--tab-h); }
+#app.hasTabs .stickfoot { bottom: calc(var(--tab-h) - 12px); }
+
+/* ── 小图标随文（批 A/E：标签栏用 22px，正文里的语义图标跟着字号走）── */
+.tag .ic, .muted .ic, .tierbody .ic, h2 .ic, h3 .ic { width: 15px; height: 15px; margin-right: 3px; }
+
+/* ── 批 B：小店置办（六档逐行形态图 + 设施七件带图标，对照 mockup 10）── */
+.tierrow {
+  display: flex; gap: 10px; align-items: stretch; margin-bottom: 8px; padding: 8px;
+  background: var(--paper); border: 2px solid var(--ink);
+}
+/* 当前档 = 番茄红框 + 同色硬阴影；未达档整行压灰，锁标在名字后面 */
+.tierrow.cur { border-color: var(--tomato); box-shadow: 4px 4px 0 var(--tomato); }
+.tierrow.lock { opacity: .58; background: var(--cream); }
+.tierimg {
+  width: 128px; aspect-ratio: 3 / 2; object-fit: cover; object-position: center; flex: none;
+  align-self: center; border: 2px solid var(--ink); background: var(--cream-2);
+}
+.tierbody { flex: 1; min-width: 0; }
+.tierstate {
+  font-size: 10px; padding: 1px 6px; border: 1.5px solid var(--ink);
+  background: var(--cream-2); letter-spacing: .06em;
+}
+.tierrow.cur .tierstate { background: var(--tomato); border-color: var(--tomato); color: var(--paper); }
+/* 芥末黄价格胶囊：价还是那一格价，只是从行里的一句话升成一枚标 */
+.pill {
+  display: inline-block; margin-top: 2px; padding: 2px 9px; font-size: 11px;
+  color: var(--ink); background: var(--mustard); border: 1.5px solid var(--ink); border-radius: 999px;
+}
+button.up { background: var(--tomato); color: var(--paper); }
+.reason { min-height: 1.2em; }
+.facrow { display: flex; gap: 8px; align-items: flex-start; padding: 8px 0; border-bottom: 1.5px solid var(--ink-2); }
+.facrow > .ic { width: 26px; height: 26px; margin-top: 2px; }
+.facrow.owned > .ic { color: var(--teal); }
+.facrow.lock { opacity: .58; }
+.facbody { flex: 1; min-width: 0; }
+.facbody button { margin-top: 4px; }
+
+/* ── 批 C：我的页填版（立绘 + 当前档位图，数据一格不增）── */
+.meband { display: grid; grid-template-columns: 96px 1fr; gap: 10px; margin-bottom: 12px; }
+.mechar {
+  width: 100%; aspect-ratio: 2 / 3; object-fit: cover; object-position: 50% 10%;
+  border: 2px solid var(--ink); background: var(--cream-2);
+}
+.metier {
+  width: 100%; aspect-ratio: 3 / 2; object-fit: cover; object-position: center;
+  align-self: center; border: 2px solid var(--ink); background: var(--cream-2);
+}
+
+/* ── 批 D：账本（进货行缩略图 + 净额色块）── */
+.goodsh { display: flex; align-items: center; gap: 6px; }
+.thumb {
+  width: 26px; height: 26px; flex: none; display: inline-block; border: 1.5px solid var(--ink);
+  background-color: var(--cream); background-size: 200% 200%; background-repeat: no-repeat;
+}
+.thumb[data-cell="tl"] { background-position: 0% 0%; }
+.thumb[data-cell="tr"] { background-position: 100% 0%; }
+.thumb[data-cell="bl"] { background-position: 0% 100%; }
+.thumb[data-cell="br"] { background-position: 100% 100%; }
+/* 色块底衬与文字色同两档（正青绿 / 负番茄红），数与判定一律还由 sign() 给 */
+.chip { display: inline-block; padding: 1px 6px; background: var(--cream-2); }
+.chip.pos { color: var(--teal); background: rgba(46, 158, 143, .18); }
+.chip.neg { color: var(--tomato); background: rgba(226, 75, 51, .16); }
 
 /* ── 电子秤（第 7 步亲手单）─────────────────────────────── */
 .scale { display: flex; gap: 10px; }
