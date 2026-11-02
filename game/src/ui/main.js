@@ -981,7 +981,10 @@ const VIEWS = {
   },
 
   // 批 D（task-ui-fidelity-batch D 项）：进货单每行配一枚 SKU 缩略图（复用市场那张 2×2 拼版的同一格，不另出图），
-  // 逐日账的经营净额加色块底衬（文字色本就走 .pos/.negv，这里只是让正负在密表里一眼分得开）。表格结构与口径一字未动。
+  // 逐日账的经营净额加色块底衬（文字色本就走 .pos/.negv，这里只是让正负在密表里一眼分得开）。
+  // 排版批 L1（task-mobile-layout-batch-20261102）：八列表在 360px 下每格被压成一列单字，整张表改堆叠行——
+  // 第一排 = 缩略图 + 品名 + 大号金额，第二排 = 来源·数量·单价·现金/赊·票 的小字元信息。
+  // 撤掉表头后，原先靠表头表意的三格（单价 / 现金·赊 / 票）把字段名就近写回行内；数与口径一个字没动。
   ledger() {
     const p = replayPage(state);
     const byDay = {};
@@ -989,18 +992,11 @@ const VIEWS = {
     const days = Object.keys(byDay).sort((a, b) => a - b);
     return hud() + `<div class="panel">
       <div class="row"><h2>进货单</h2><button class="mini ghost" data-nav="back">返回</button></div>
-      ${days.length ? days.map(d => `<h3 style="margin-top:10px">第 ${d} 天</h3><table>
-        <tr><th>货</th><th>来源</th><th class="r">数量</th><th class="r">单价</th><th class="r">金额</th><th class="r">现金/赊</th><th>票</th></tr>
-        ${byDay[d].map(r => `<tr><td class="goodsh">${buyThumb(r)}<span>${CAT[r.cat].name}</span></td><td>${r.supplier}</td>
-          <td class="r num">${r.qty}${r.unit}</td><td class="r num">${r.unitPrice.toFixed(2)}</td>
-          <td class="r num">${y(r.cost)}</td><td class="r num">${y(r.cash)} / ${y(r.credit)}</td>
-          ${ticketCell(r)}</tr>`).join('')}</table>`).join('')
+      ${days.length ? days.map(d => `<h3 style="margin-top:10px">第 ${d} 天</h3>
+        <div class="lrows">${byDay[d].map(purchaseRow).join('')}</div>`).join('')
         : '<p class="muted">还没买过东西。</p>'}
       <hr /><h3>逐日账</h3>
-      <table><tr><th>天</th><th class="r">流水</th><th class="r">成本</th><th class="r">报损</th><th class="r">经营净额</th><th class="r">事件账</th><th class="r">现金</th><th class="r">欠款</th></tr>
-      ${p.reports.map(r => `<tr><td>${r.day}</td><td class="r num">${y(r.revenueCents)}</td><td class="r num">${y(r.cogsCents)}</td>
-        <td class="r num">${y(r.writeoffCents)}</td><td class="r num">${netChip(r.netOpsCents)}${deductCell(r)}</td>
-        <td class="r num">${sign(r.eventNetCents)}</td><td class="r num">${y(r.cash)}</td><td class="r num">${y(r.debt)}</td></tr>`).join('')}</table>
+      <div class="lrows">${p.reports.map(dayRow).join('')}</div>
       <p class="muted" style="margin-top:8px">对账：现金 ${y(p.bridge.cash)} · 账面 ${y(p.bridge.bridge)} · 差 ${y(p.bridge.diff)}
         ${p.bridge.ok ? '（平）' : '（不平，报开发）'}</p>
       <p class="muted">经营净额这一列不只减报损：还扣了当日固定支出与人工（小豆在场才结），并把试吃的份钱减样品成本算了进去——这三笔就写在净额那一格的下面。要连着流水、包装一起逐行看，每天收摊那屏都列全了。</p>
@@ -1027,10 +1023,22 @@ const buyThumb = r => {
 // 净额色块：文字色与数一律还是 sign() 那一档给的（正青绿 / 负番茄红），这里只加一层同色底衬，不新增任何判定
 const netChip = c => `<span class="chip${c > 0 ? ' pos' : c < 0 ? ' neg' : ''}">${sign(c)}</span>`;
 
-function ticketCell(r) {
-  if (SKU_BY_ID[r.sku]?.receipt === 'excluded') return '<td class="muted">自制·不计</td>';
-  return `<td>${r.hasReceipt ? '有' : '无'}</td>`;
-}
+// 排版批 L1：表头撤了，字段名就近写回行内（票这一格仍按 F1 的三态：自制单列，不与「无票」混为一谈）
+const ticketText = r => SKU_BY_ID[r.sku]?.receipt === 'excluded' ? '自制·不计' : `票 ${r.hasReceipt ? '有' : '无'}`;
+// 元信息一格一段：段内不许折行，段与段之间整段换行——宁可两行放完，也不许任何一格被压成单字竖排
+const metaSeg = (t, cls) => `<span class="seg${cls ? ' ' + cls : ''}">${t}</span>`;
+
+const purchaseRow = r => `<div class="lrow">
+  <div class="lrowtop">${buyThumb(r)}<span class="lname">${CAT[r.cat].name}</span><b class="lamt num">${y(r.cost)}</b></div>
+  <div class="lmeta">${metaSeg(r.supplier)}${metaSeg(`${r.qty}${r.unit}`)}
+    ${metaSeg(`${r.unitPrice.toFixed(2)}/${r.unit}`)}${metaSeg(`现金 ${y(r.cash)} / 赊 ${y(r.credit)}`)}
+    ${metaSeg(ticketText(r), SKU_BY_ID[r.sku]?.receipt === 'excluded' ? 'muted' : '')}</div></div>`;
+
+const dayRow = r => `<div class="lrow">
+  <div class="lrowtop"><span class="lname">第 ${r.day} 天</span><b class="lamt num">${netChip(r.netOpsCents)}</b></div>
+  <div class="lmeta">${metaSeg(`流水 ${y(r.revenueCents)}`)}${metaSeg(`成本 ${y(r.cogsCents)}`)}${metaSeg(`报损 ${y(r.writeoffCents)}`)}
+    ${metaSeg(`事件账 ${sign(r.eventNetCents)}`)}${metaSeg(`现金 ${y(r.cash)}`)}${metaSeg(`欠款 ${y(r.debt)}`)}</div>
+  ${deductCell(r)}</div>`;
 
 function shelfRow(cat, forecast) {
   const all = SKUS_BY_CAT[cat];
@@ -1045,34 +1053,46 @@ function shelfRow(cat, forecast) {
   // 预检反馈 F7（0366bd6）：每碗耗汤份数 T 是与天气同级的情境参数（不是暗线），看不见就会拿 1 份/碗直算，
   // 于是「买 12 份卖 11 碗却报卖断」看起来就是 bug。T 进市场汤底行，也算得清那碗数从哪儿被封顶。
   const soupT = cat === 'SP' ? ` · 每碗耗 ${state.today.scenario.T} 份` : '';
-  return `<div class="panel"><div class="row"><h3>${CAT[cat].name}${cat === 'SP' ? '（份）' : '（斤）'}</h3>
+  return `<div class="panel"><div class="row shelfhead"><h3>${CAT[cat].name}${cat === 'SP' ? '（份）' : '（斤）'}</h3>
       <span class="muted">柜里 ${have}${cat === 'SP' ? ' 份' : ''}${soupT} · 试算今天能出 ${forecast.capped.toFixed(0)} 碗</span>${delist}</div>
-    <div class="shelf">${list.map(s => skuCard(cat, s)).join('')}${absent ? absentCard(cat) : ''}</div></div>`;
+    <div class="shelf">${list.map(s => skuCard(cat, s, forecast)).join('')}${absent ? absentCard(cat) : ''}</div></div>`;
 }
 
 function absentCard(cat) {
-  return `<div class="sku absent"><div class="skuimg" style="background-image:url(./img/${SKU_SHEET[cat]}.webp)"></div>
-    <div class="src">强哥</div><div class="desc">今天强哥没带这个</div></div>`;
+  return `<div class="sku absent"><div class="skumain">
+    <div class="skuimg" style="background-image:url(./img/${SKU_SHEET[cat]}.webp)"></div>
+    <div class="skubody"><div class="src">强哥</div><div class="desc">今天强哥没带这个</div></div>
+  </div></div>`;
 }
 
-function skuCard(cat, s) {
+// 排版批 L3（task-mobile-layout-batch-20261102 + 例图）：三列窄卡改纵排宽卡——图左、名与大号单价在右、描述随后，
+// 步进器占满卡底一整行（输入框给到两位小数 + 内边距的宽度）。
+// 机制护栏照旧：三家可混买，每张卡留自家步进器，数量 >0 就入篮汇总；红框只是「这一张在用」，不是单选互斥。
+// 卡底那个小计取的是本篮计划里这一行的既有数（plan.lines 的 cost，与「就照这一篮买」扣的钱同源），不另起一套算法。
+function skuCard(cat, s, forecast) {
   const price = effectivePrice(state, s);
   const q = draft[s.sku] || 0;
+  const line = q > 0 && forecast.plan.lines.find(l => l.sku === s.sku);
   const ticket = s.receipt === 'auto' ? '<span class="tag ticket">带票</span>'
     : s.receipt === 'excluded' ? ''
       : s.receipt === 'none' ? '<span class="tag nodoc">无票</span>' : '<span class="tag nodoc">票看手气</span>';
   const step = cat === 'SP' ? 1 : 0.5;
   return `<div class="sku ${q > 0 ? 'on' : ''}">
-    <div class="skuimg" data-cell="${TIER_CELL[s.tier]}" style="background-image:url(./img/${SKU_SHEET[cat]}.webp)" role="img" aria-label="${CAT[cat].name} · ${s.supplier}"></div>
-    <div class="src">${s.supplier}</div>
-    <div class="price num">${price.toFixed(2)}<span class="muted">/${s.unit}</span></div>
-    <div class="desc">${esc(s.desc)}</div>
-    <div>${s.credit ? '<span class="tag credit">可赊</span>' : '<span class="tag cash">只收现金</span>'} ${ticket}
-      ${cat === 'SP' ? '<span class="tag due">隔夜全损</span>' : s.keep ? '<span class="tag keep">能留明天</span>' : '<span class="tag due">当天清</span>'}</div>
+    <div class="skumain">
+      <div class="skuimg" data-cell="${TIER_CELL[s.tier]}" style="background-image:url(./img/${SKU_SHEET[cat]}.webp)" role="img" aria-label="${CAT[cat].name} · ${s.supplier}"></div>
+      <div class="skubody">
+        <div class="src">${s.supplier}</div>
+        <div class="price num">${price.toFixed(2)}<span class="muted">/${s.unit}</span></div>
+        <div class="desc">${esc(s.desc)}</div>
+        <div>${s.credit ? '<span class="tag credit">可赊</span>' : '<span class="tag cash">只收现金</span>'} ${ticket}
+          ${cat === 'SP' ? '<span class="tag due">隔夜全损</span>' : s.keep ? '<span class="tag keep">能留明天</span>' : '<span class="tag due">当天清</span>'}</div>
+      </div>
+    </div>
     <div class="qty">
       <button class="mini" data-act="setqty" data-qty="${s.sku}" data-value="${round01(Math.max(0, q - step))}">−</button>
       <input type="number" min="0" step="${step}" value="${round01(q)}" data-qty="${s.sku}" />
       <button class="mini" data-act="setqty" data-qty="${s.sku}" data-value="${round01(q + step)}">＋</button>
+      ${line ? `<span class="subtotal num muted">小计 <b class="num">${y(line.cost)}</b></span>` : ''}
     </div></div>`;
 }
 
@@ -1369,8 +1389,10 @@ function orderCard(o) {
         <span class="skuimg bowlchip" id="ch-${o.customerId}-${l.cat}" data-cell="tl" style="background-image:url(./img/${SKU_SHEET[l.cat]}.webp)"></span>
         <span class="grabname">${CAT[l.cat].name}<b class="want">要 ${l.grams} 克</b><span class="step" id="tap-${o.customerId}-${l.cat}">轻点 +${stepFor(o.customerId, l.cat)} 克</span></span>
       </button>
-      <span class="gavecell"><span class="num gave" id="lv-${o.customerId}-${l.cat}">你称 ${g[l.cat]} 克</span><span class="exact" id="ex-${o.customerId}-${l.cat}" ${exactNow(o.customerId, l.cat) ? '' : 'hidden'}>正好</span></span>
-      <button class="pinch" id="pn-${o.customerId}-${l.cat}" data-pinch data-cust="${o.customerId}" data-cat="${l.cat}">捏出 −${stepFor(o.customerId, l.cat)} 克</button></div>
+      <div class="grabfoot">
+        <span class="gavecell"><span class="num gave" id="lv-${o.customerId}-${l.cat}">你称 ${g[l.cat]} 克</span><span class="exact" id="ex-${o.customerId}-${l.cat}" ${exactNow(o.customerId, l.cat) ? '' : 'hidden'}>正好</span></span>
+        <button class="pinch" id="pn-${o.customerId}-${l.cat}" data-pinch data-cust="${o.customerId}" data-cat="${l.cat}">捏出 −${stepFor(o.customerId, l.cat)} 克</button>
+      </div></div>
     <div class="muted kind-bad" id="flag-${o.customerId}-${l.cat}">${flagText(o.customerId, l, Number(g[l.cat] || 0))}</div>`).join('')}
     ${blanchBlock(o)}
   </div>`;

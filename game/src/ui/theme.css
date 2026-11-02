@@ -1,6 +1,9 @@
 /* 精细扁平（赛璐璐平涂）呈现层口径：纯色平涂 + 每物 1–2 层平涂阴影 + 中等粗细干净墨线。
    禁：渐变、肌理、纸纹、写实光影、模糊阴影。色板照 STYLE-FLATPLUS：奶油底 + 番茄红 + 芥末黄 + 青绿 + 墨蓝。 */
 :root {
+  /* 排版批 L6：系统深色模式不许反过来改这套色板（WebView 强制反色会把奶油底/墨线整屏翻掉）。
+     声明只吃浅色：表单控件、滚动条、浏览器强制深色都按 light 走。 */
+  color-scheme: light only;
   --cream: #fbf3e4;
   --cream-2: #f3e6cf;
   --ink: #1b2a4a;
@@ -72,18 +75,30 @@ button.mini { padding: 4px 9px; font-size: 13px; background: var(--paper); }
 button.sel { background: var(--teal); color: var(--paper); }
 
 /* ── 货架卡片（招牌画面：市场采购）───────────────────────── */
-.shelf { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+/* 排版批 L3（task-mobile-layout-batch-20261102 + 例图）：每品类下三家供货商由三列窄卡改纵排宽卡。
+   卡内两段：上段 = 图左（恒 96px，不随屏缩）+ 右列（名 / 大号单价 / 描述 / 标签），
+   下段 = 占满整行的步进器。挤的时候收的是卡的外边距与图高，输入框这一格有 min-width 兜底，不再被压成竖条。
+   机制护栏没动：三家照旧可混买，每卡留自家步进器，数量 >0 即入篮汇总。 */
+.shelf { display: grid; grid-template-columns: 1fr; gap: 10px; }
+.shelfhead { flex-wrap: wrap; }
 .sku {
-  background: var(--paper); border: 2px solid var(--ink); padding: 6px;
-  display: flex; flex-direction: column; gap: 4px; position: relative;
+  background: var(--paper); border: 2px solid var(--ink); padding: 8px;
+  display: flex; flex-direction: column; gap: 8px; position: relative;
 }
+.skumain { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 10px; align-items: start; }
+.skubody { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .sku img { width: 100%; height: 62px; object-fit: contain; background: var(--cream); border: 2px solid var(--ink); }
-.sku .price { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.sku .src { font-size: 11px; color: rgba(27, 42, 74, .62); }
-.sku .desc { font-size: 11px; line-height: 1.35; min-height: 3em; }
-.sku .qty { display: flex; align-items: center; gap: 4px; }
-.sku .qty input { width: 100%; min-width: 0; text-align: center; }
-.sku.on { background: #fff3d6; box-shadow: 4px 4px 0 var(--tomato); }
+.sku .skuimg { width: 96px; }
+.sku .price { font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sku .src { font-size: 13px; font-weight: 700; color: var(--ink); }
+.sku .desc { font-size: 11px; line-height: 1.4; }
+.sku .qty { display: grid; grid-template-columns: auto minmax(76px, 1fr) auto auto; align-items: center; gap: 6px; }
+.sku .qty input { width: 100%; min-width: 0; text-align: center; font-size: 16px; padding: 5px 2px; }
+.sku .subtotal { font-size: 11px; text-align: right; white-space: nowrap; }
+.sku .subtotal b { font-size: 14px; color: var(--ink); }
+/* 排版批 L5：在用态原先是 4px 番茄红硬阴影——那圈红本来就画在卡框之外，窄屏下看着像探出分区框。
+   改由卡自己的边框承担红框（粗细不变），硬阴影收回墨色二层，红框与卡框同一条线，撑不破也溢不出。 */
+.sku.on { background: #fff3d6; border-color: var(--tomato); box-shadow: 3px 3px 0 var(--ink-2); }
 .sku.absent { opacity: .55; }
 .tag { font-size: 10px; padding: 1px 5px; border: 1.5px solid var(--ink); display: inline-block; }
 .tag.credit { background: var(--teal); color: var(--paper); }
@@ -134,10 +149,14 @@ input[type=number], input[type=text] {
   width: 100%; max-width: 460px; padding: 6px;
   background: var(--cream); border: 2px solid var(--ink);
   border-radius: 999px; box-shadow: 4px 4px 0 var(--ink-2);
+  /* 排版批 L4：胶囊条自己就是选中底衬的边界——条内画不下的部分一律裁掉，不再有任何东西探出条体 */
+  overflow: hidden;
 }
+/* 排版批 L4：选中底衬由「跟着按钮高度走的全圆角」收成内嵌圆角矩形（14px），
+   上下各留 6px 条内垫，看着是一枚嵌在胶囊里的标，不是压在条上的圆盘。 */
 .tabbar button {
   display: flex; flex-direction: column; align-items: center; gap: 3px;
-  min-height: 0; border: 0; border-radius: 999px; background: transparent;
+  min-height: 0; border: 0; border-radius: 14px; background: transparent;
   color: var(--ink); font: inherit; font-size: 10.5px; letter-spacing: .04em; padding: 7px 2px 6px;
   box-shadow: none;
 }
@@ -186,7 +205,11 @@ input[type=number], input[type=text] {
   display: inline-block; margin-top: 2px; padding: 2px 9px; font-size: 11px;
   color: var(--ink); background: var(--mustard); border: 1.5px solid var(--ink); border-radius: 999px;
 }
-button.up { background: var(--tomato); color: var(--paper); }
+/* 排版批 L1 连带（同一条扫表口径扫出来的，不在施工单 L1–L6 里）：置办每档的行只有 ~142px 可用，
+   「800 元 · 一次性」胶囊和「升级」按钮同排时放不下，按钮里的「升级」被折成一字一行。
+   改：这一行允许整段换行 + 按钮不许拆字——挤不下就各占一行，字还是横排的两个字。 */
+.tierbody .row { flex-wrap: wrap; }
+button.up { background: var(--tomato); color: var(--paper); white-space: nowrap; }
 .reason { min-height: 1.2em; }
 .facrow { display: flex; gap: 8px; align-items: flex-start; padding: 8px 0; border-bottom: 1.5px solid var(--ink-2); }
 .facrow > .ic { width: 26px; height: 26px; margin-top: 2px; }
@@ -207,9 +230,8 @@ button.up { background: var(--tomato); color: var(--paper); }
 }
 
 /* ── 批 D：账本（进货行缩略图 + 净额色块）── */
-.goodsh { display: flex; align-items: center; gap: 6px; }
 .thumb {
-  width: 26px; height: 26px; flex: none; display: inline-block; border: 1.5px solid var(--ink);
+  width: 34px; height: 34px; flex: none; display: inline-block; border: 1.5px solid var(--ink);
   background-color: var(--cream); background-size: 200% 200%; background-repeat: no-repeat;
 }
 .thumb[data-cell="tl"] { background-position: 0% 0%; }
@@ -220,6 +242,23 @@ button.up { background: var(--tomato); color: var(--paper); }
 .chip { display: inline-block; padding: 1px 6px; background: var(--cream-2); }
 .chip.pos { color: var(--teal); background: rgba(46, 158, 143, .18); }
 .chip.neg { color: var(--tomato); background: rgba(226, 75, 51, .16); }
+
+/* ── 排版批 L1：账本两张表 → 堆叠行卡（360px 下八列每列被压成单字竖排，表头撤掉只留一版）── */
+/* 一行一卡：第一排 = 缩略图 + 品名 + 大号金额（右对齐），第二排 = 元信息分段。
+   段内 white-space:nowrap、段间整段换行——放不下就换行，任何一格都不许折成单字竖排，也不许省略号截字。 */
+.lrows { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+.lrow {
+  background: var(--paper); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink-2);
+  padding: 8px;
+}
+.lrowtop { display: flex; align-items: center; gap: 8px; }
+.lname { flex: 1; min-width: 0; font-size: 15px; font-weight: 700; letter-spacing: .04em; }
+.lamt { font-size: 19px; font-weight: 700; text-align: right; white-space: nowrap; }
+.lmeta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 0; font-size: 11px; color: rgba(27, 42, 74, .68); }
+.lmeta .seg { white-space: nowrap; }
+.lmeta .seg:not(:last-child)::after { content: " ·"; }
+.lmeta .muted { color: rgba(27, 42, 74, .62); font-size: inherit; }
+.lrow > .muted { font-size: 11px; line-height: 1.45; margin-top: 4px; }
 
 /* ── 电子秤（第 7 步亲手单）─────────────────────────────── */
 .scale { display: flex; gap: 10px; }
@@ -242,9 +281,12 @@ button.up { background: var(--tomato); color: var(--paper); }
 /* 双读数条（实测反馈 #2）：顾客要的与你实际称的必须同时在场 */
 .dual { font-size: 12px; margin-bottom: 8px; letter-spacing: .02em; }
 /* 称重手感：按住抓菜 / 松手定格 / 捏出一点（滑杆已删）
-   窄屏（390px）下一行要放下「图+名 / 你称 / 捏出」，三列都用 auto、只有按钮列可缩，
-   否则贪心列会把按钮挤到 100px 以下，图被拉成扁条、标签溢出到邻列。 */
-.grabrow { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; margin-top: 6px; }
+   排版批 L2（task-mobile-layout-batch-20261102）：原先「图+名 / 你称 / 捏出」挤在同一行三列，
+   1fr 列被两边的 auto 列压到放不下「要 250 克」，目标克数就成了截字。现在整行只放抓菜按钮，
+   「你称 X 克 + 正好」与「捏出」收到按钮下方一行——抓菜按钮独占整行宽度，目标克数（250/325/700 克级）全文在场。 */
+.grabrow { display: grid; grid-template-columns: minmax(0, 1fr); gap: 6px; margin-top: 8px; }
+.grabfoot { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.grabfoot .gavecell { justify-content: flex-start; }
 .grab {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px; text-align: left;
   min-width: 0; overflow: hidden;
@@ -259,7 +301,7 @@ button.up { background: var(--tomato); color: var(--paper); }
 /* 食材缩略：近方形（同市场 SKU 格），用双类压过 .skuimg 的 width:100% —— 扁条就是那条规则压出来的
    恒 40×40：不随克数、不随行状态缩放，碗里堆多堆少都看得清 */
 .grab .bowlchip { width: 40px; height: 40px; flex: none; border: 2px solid var(--ink); }
-.grabrow .gave { text-align: right; font-size: 12px; white-space: nowrap; }
+.grabrow .gave { text-align: left; font-size: 12px; white-space: nowrap; }
 .pinch {
   padding: 8px 4px; font-size: 11px; font-weight: 700; white-space: nowrap; color: var(--ink);
   background: transparent; border: 2px dashed var(--ink-2); cursor: pointer;
@@ -352,3 +394,18 @@ td.r, th.r { text-align: right; }
 .kind-bad { color: var(--tomato); }
 .kind-good { color: var(--teal); }
  hr { border: 0; border-top: 2px solid var(--ink-2); margin: 10px 0; }
+
+/* ── 排版批 L7（店主 2026-11-02 晚口头：「稍微圆角一点行不，不要都是直角」）── */
+/* 只加半径：色板、2px 墨线粗细、硬阴影、每一格的内容与数都不动。
+   卡与按钮一档 9px，小件（标签 / 色块 / 输入 / 拼版缩略图）一档 5px——要调轻重只改这两行 token。
+   两类不动：通栏件（顶栏 .hud、吸底 .stickfoot）贴的是屏幕边，圆了露缝；
+   胶囊件（.pill、标签栏与其中的选中块）本来就是圆角语言。 */
+:root { --r: 9px; --r-sm: 5px; }
+.panel, .event, .forecast, .tierrow, .lrow, .sku, .grab, .comment, .pinch, .pinchhint,
+.readout, .scale img, .scene, .inlineart, .tierimg, .mechar, .metier, .face, button {
+  border-radius: var(--r);
+}
+.tag, .chip, .gavecell .exact, .thumb, .skuimg, .ava, button.mini,
+input[type=number], input[type=text] { border-radius: var(--r-sm); }
+/* 事件弹层的头图与卡框同一条边：半径按 2px 墨线往里收一格，免得两层圆角错出台阶 */
+.event .art { border-radius: calc(var(--r) - 2px) calc(var(--r) - 2px) 0 0; }

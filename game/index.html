@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
+  <!-- 排版批 L6：系统深色模式不许强改这套色板（WebView 的 Force Dark 见 light only 就不介入）。CSS :root 里同一句兜底。 -->
+  <meta name="color-scheme" content="light only" />
   <title>先把规矩立住！</title>
   <link rel="stylesheet" href="./src/ui/theme.css" />
   <!-- 复验 #24：七张场景头图在 HTML 解析阶段就开始取，不等 JS 启动，首进不出现米色空框。
