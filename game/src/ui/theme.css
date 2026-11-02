@@ -231,6 +231,12 @@ td.r, th.r { text-align: right; }
   border: 2px solid var(--ink); margin-bottom: 8px; background: var(--cream-2); display: block;
 }
 
+/* 修复单 P2-3：图还在取/解的那一帧，这三种框原本整块纯米色——玩家会读成「裁切没修」「图坏了」。
+   换成同框细条纹，意思是「图还没到」；图到了整幅盖住，成图观感一个字不动。 */
+.scene, .inlineart, .event .art {
+  background-image: repeating-linear-gradient(135deg, var(--cream-2) 0 14px, var(--paper) 14px 28px);
+}
+
 /* ── 拼版素材切片（ui-spec §五：24 款 SKU 图标、8 款顾客头像）── */
 /* 六品类各一张 2×2 拼版：档1 左上 / 档2 右上 / 档3 左下 / 强哥特供 右下 */
 .skuimg {

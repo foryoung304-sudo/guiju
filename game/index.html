@@ -5,13 +5,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no" />
   <title>先把规矩立住！</title>
   <link rel="stylesheet" href="./src/ui/theme.css" />
-  <!-- 复验 #24：七张场景头图在 HTML 解析阶段就开始取，不等 JS 启动，首进不出现米色空框 -->
+  <!-- 复验 #24：七张场景头图在 HTML 解析阶段就开始取，不等 JS 启动，首进不出现米色空框。
+       修复单 P2-3：「备菜/结算」两张点名要先行，顺序就按玩家这几屏真会走到的先后排（开屏 → 备菜/置办 → 结算 → 其余）。 -->
   <link rel="preload" as="image" href="./img/business.webp" />
   <link rel="preload" as="image" href="./img/stall.webp" />
+  <link rel="preload" as="image" href="./img/settlement.webp" />
   <link rel="preload" as="image" href="./img/market.webp" />
   <link rel="preload" as="image" href="./img/pricing.webp" />
   <link rel="preload" as="image" href="./img/weighing.webp" />
-  <link rel="preload" as="image" href="./img/settlement.webp" />
   <link rel="preload" as="image" href="./img/night.webp" />
 </head>
 <body>

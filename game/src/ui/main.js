@@ -40,6 +40,10 @@ const EVENT_ART = {
 const EVENT_NO_ART = 'event-silhouette.svg';
 const eventArt = id => `./img/${EVENT_ART[id] || EVENT_NO_ART}`;
 const AVA_SHEET = './img/avatars.webp';
+// 修复单 P2-3：场景头图刚进屏时先亮一块米色底，玩家读成「图坏了/裁切没修」。这几张的名字与预热清单同名，
+// 取图给最高优先、解码要在这帧之前完成——图没到就只见条纹占位（见 theme.css 的 .scene 底纹），到了就整幅盖住。
+const sceneImg = (file, alt, cls = '') =>
+  `<img class="scene${cls ? ' ' + cls : ''}" src="./img/${file}.webp" alt="${alt}" decoding="sync" fetchpriority="high" />`;
 const PHASE_KEY = 'guiju-m1-phase';
 const FLOW_KEY = 'guiju-m1-flow';
 const app = document.getElementById('app');
@@ -61,6 +65,7 @@ let additivePick = CONFIG.additiveTier;      // 第 5 步④添加剂档
 let tastingPick = 0;                 // 第 5 步⑤试吃份数（挂了试吃角才出现）
 let scalePick = false;               // 第 5 步⑥显多秤开关（秤在手才出现）
 let ledgerBack = 'morning';
+let clearArmed = false;            // 「清除存档」的游戏内二次确认：第一击只把按钮变成「确认清除？」
 let okRef = {};          // 本日每单是否已进入足称带（只在跨进那一刻震一次）
 let blanchBy = {};       // customerId → 夹出时的熟度读数；没这格 = 这单没下手（正文 3.11）
 let blanchRun = {};      // customerId → { t0, raf }：只在活着的那一屏存在，刷新即空（读数已落的走 blanchBy）
@@ -68,7 +73,8 @@ let blanchRun = {};      // customerId → { t0, raf }：只在活着的那一�
 const y = c => centsToYuan(c).toFixed(2);
 const sign = c => (c > 0 ? `<span class="pos">+${y(c)}</span>` : c < 0 ? `<span class="negv">${y(c)}</span>` : y(c));
 const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
-const go = p => { phase = p; localStorage.setItem(PHASE_KEY, p); saveFlow(); render(); };
+// 换屏就收回待确认：清除的二次确认只在「我的」这一屏有效，跳走就得重新点一遍
+const go = p => { phase = p; clearArmed = false; localStorage.setItem(PHASE_KEY, p); saveFlow(); render(); };
 // 实测问题 #7：买菜没有人说 1.476 斤，建议篮与缩量预填一律落到 0.1 斤
 const round01 = x => Math.round(x * 10) / 10;
 
@@ -177,6 +183,9 @@ app.addEventListener('click', e => {
   const host = e.target.closest('[data-act]');
   if (host) act(host);
 });
+// 按住与抬起要各记一次：见 refreshForecast 上方的 P2-2 注（捕获阶段先于按钮自身与失焦处理）
+app.addEventListener('pointerdown', startPress, true);
+for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, endPress, true);
 
 function render() {
   stopAllBlanch();   // 换屏就把还在扫的熟度条收掉：没夹出的那一单按「没下手」走，不留着后台跑
@@ -209,7 +218,6 @@ function render() {
       if (e.detail !== 0) return;
       e.preventDefault();
       addGrams(el.dataset.cust, el.dataset.cat, -stepFor(el.dataset.cust, el.dataset.cat));
-      lastLine = { cust: el.dataset.cust, cat: el.dataset.cat };
       usePinchHint();
       refreshOrder(el.dataset.cust);
     });
@@ -229,8 +237,13 @@ function setQty(el, normalize) {
 // 实测反馈 #8：打字时试算区与汇总条都要跟着动。只换这两个容器的内容，不碰输入框所在的面板；
 // 预检必修④：内容没变就不动 DOM——首击落在汇总条上时，输入框失焦会触发 change，
 // 整块重绘会把按钮从光标底下换掉，点击就丢了（表现为「缩量按钮首击无反应」）
+// 修复单 P2-2：内容真的变了还是会被换掉。改数字后第一下点「就照这一篮买」，顺序是
+// pointerdown → mousedown → 输入框 blur（这里触发 change→重绘，按下的节点被摘走）→ mouseup → pointerup → click：
+// mousedown 落在一个已经离开文档树的节点上，浏览器就不再补 click，首击于是凭空消失，二击才执行（不重复扣款）。
+// 按住 [data-act] 期间不重绘，抬手后补一次；click 已经跑完就顺带被换屏覆盖，不留旧账。
 function refreshForecast() {
   const f = previewBasket(state, picksFromDraft(), state.PriceTier).forecast;
+  if (pressedBtn) { refreshQueued = true; return f; }
   const detail = document.getElementById('marketDetail');
   if (detail) {
     const html = forecastBar(f) + buyPanel(f);
@@ -242,6 +255,24 @@ function refreshForecast() {
     if (foot.innerHTML !== html) foot.innerHTML = html;
   }
   return f;
+}
+
+let pressedBtn = null;     // 这一只手按住的那个按钮（只在按下到抬起之间有意义）
+let refreshQueued = false; // 按住期间被推迟的重绘
+
+function startPress(e) {
+  pressedBtn = e.target.closest('[data-act]');
+}
+
+function endPress() {
+  pressedBtn = null;
+  if (!refreshQueued) return;
+  // 抬起这一刻不能直接重绘：click 还没派发，换掉节点等于把这一击又吞一次。留到本回合事件全跑完再补。
+  setTimeout(() => {
+    const q = refreshQueued;
+    refreshQueued = false;
+    if (q && !pressedBtn) refreshForecast();
+  }, 0);
 }
 
 function act(host) {
@@ -276,9 +307,10 @@ function act(host) {
     case 'quit': return quitShop();
     case 'upgrade': return buyNextTier();
     case 'restart': clearSave(); return startNew((Date.now() % 100000) + 1);
-    // 「我的」里的清除：不可逆，先问一句再动（存档与界面续件一起清，落回开屏）
+    // 「我的」里的清除：不可逆，落回开屏前先问一句——问的是屏上的按钮，不是系统弹窗
+    // （原生 confirm() 在托管页的 iframe 里会被吞掉：弹窗不开、直接返回 false，点了等于没点）
     case 'clear':
-      if (!window.confirm('清除存档会丢掉这一局，浏览器里那份账也一起没。确定？')) return undefined;
+      if (!clearArmed) { clearArmed = true; return render(); }
       clearSave();
       go('boot');
       // 续件要落在 go() 之后删：go 里那次 saveFlow 会原样把它写回来，先删等于没删
@@ -321,7 +353,7 @@ function resume() {
 
 function newDay() {
   rng = makeRng(state);
-  orders = []; gramsBy = {}; pendingEvent = null; draft = {}; lastLine = null;   // 昨天的亲手单、待选事件、组篮草稿不带进今天
+  orders = []; gramsBy = {}; pendingEvent = null; draft = {};   // 昨天的亲手单、待选事件、组篮草稿不带进今天
   blanchBy = {};                                                                // 昨天的熟度读数同样不带进今天
   beginDay(state);                          // 第 1 步：晨间结转
   syncProdPicks();
@@ -410,7 +442,6 @@ function openShop() {
     orders = drawHandOrders(state, rng);                       // 第 7 步的亲手单先亮单子
     gramsBy = Object.fromEntries(orders.map(o => [o.customerId, Object.fromEntries(o.lines.map(l => [l.cat, 0]))]));
     okRef = {};
-    lastLine = null;
   }
   saveGame(state);                                       // 定版已落地：刷新/切后台回来不该退回定价页
   return go('weigh');
@@ -432,7 +463,6 @@ const FINE_GAP = 20;
 const PINCH_RATE = 30;
 let grab = null;
 let pinch = null;
-let lastLine = null;     // 最近松手的行：「正好」徽标跟着它点亮（红字不再看这一格，见 flagText 上方的 F8 注）
 
 function lineTarget(cust, cat) {
   const o = orders.find(x => x.customerId === cust);
@@ -489,7 +519,6 @@ function stopGrab(e) {
   g.el.classList.remove('on');
   // 轻点 = 抓起一小撮，按当前档位 +5 或 +1 克；指针被系统收走（pointercancel）不算点按
   if (performance.now() - g.t0 < HOLD_DELAY && e?.type !== 'pointercancel') addGrams(g.cust, g.cat, stepFor(g.cust, g.cat));
-  lastLine = { cust: g.cust, cat: g.cat };
   refreshOrder(g.cust);
 }
 
@@ -523,7 +552,6 @@ function stopPinch(e) {
   clearInterval(p.timer);
   p.el.classList.remove('on');
   if (!p.flow && e?.type !== 'pointercancel') addGrams(p.cust, p.cat, -stepFor(p.cust, p.cat));
-  lastLine = { cust: p.cust, cat: p.cat };
   usePinchHint();
   refreshOrder(p.cust);
 }
@@ -566,20 +594,18 @@ function hintWanted(o) {
   return o.lines.some(l => Number(g[l.cat] || 0) >= l.grams * 1.1);
 }
 
-// 「正好」：正在动/刚松手的那一行与目标差 ≤ max(1 克, 目标 1%) 时，在**那一行**点一下（只做呈现，不改判定）。
+// 「正好」：这一行自己称到的数与目标差 ≤ max(1 克, 目标 1%) 就在**这一行**点一下（只做呈现，不改判定）。
 // 预检反馈 F5（0366bd6）：徽标原先挂在秤面总读数旁，判定的是单行落点、看起来却像整单已准（总重 125/300 也亮），
-// 与签发规格（signoff-weighing-finestep 的「当前项落点达标」）对不上；这一版把标记搬回它判的那一行，文案一字不改。
+// 与签发规格（signoff-weighing-finestep 的「当前项落点达标」）对不上；那一版把标记搬回它判的那一行，文案一字不改。
+// 修复单 P2-4：徽标跟着「当前行」走，切到下一单时先前称准那一行的徽标就没了——同一把判定现在每行各自留着自己的徽标，
+// 手移到别处不收；行内的数被改出带外，那一行的徽标随数退场。判定带与阈值一个字没动。
 function exactNow(cust, cat) {
-  const active = (grab && grab.cust === cust && grab.cat)
-    || (pinch && pinch.cust === cust && pinch.cat)
-    || (lastLine && lastLine.cust === cust && lastLine.cat) || null;
-  if (!active || active !== cat) return false;
   const target = lineTarget(cust, cat);
   const got = Number(gramsBy[cust]?.[cat] || 0);
   return got > 0 && Math.abs(got - target) <= Math.max(1, target * 0.01);
 }
 
-// 同一时刻只有一个「当前行」：手换到别人、别的单上留着的亮得跟着收掉，不然旧行会一直亮着
+// 每条已锁行各自一格徽标：称重后逐行对着带内/带外翻 hidden
 function refreshExact() {
   for (const o of orders) for (const l of o.lines) {
     const el = document.getElementById(`ex-${o.customerId}-${l.cat}`);
@@ -697,10 +723,20 @@ function buyNextTier() {
   return go('shop');
 }
 
+// 修复单 P2-1（凡扣款必有行）：固定支出与人工在收摊那一屏逐行列着，账本这张「逐日账」只有净额一列，
+// 拿它回头加一遍就差这两笔（第 1 天也在这张表上核过账）。数一格没新增——把当日扣的两笔与试吃净额写在同一格里。
+const deductCell = r => {
+  const parts = [];
+  if (r.fixedCents) parts.push(`固定支出 −${y(r.fixedCents)}`);
+  if (r.laborCents) parts.push(`人工 −${y(r.laborCents)}`);
+  if (r.tastingNetCents) parts.push(`试吃净额 ${r.tastingNetCents > 0 ? '+' : '−'}${y(Math.abs(r.tastingNetCents))}`);
+  return parts.length ? `<div class="muted">${parts.join(' · ')}</div>` : '';
+};
+
 // ── 画面 ─────────────────────────────────────────────────
 const VIEWS = {
   boot() {
-    return `<img class="scene hero" src="./img/business.webp" alt="学校小吃街的三轮车摊" />
+    return `${sceneImg('business', '学校小吃街的三轮车摊', 'hero')}
       <div class="panel accent">
       <h1>先把规矩<br>立住！</h1>
       <p class="muted">学校小吃街麻辣烫摊 · M1 样段</p>
@@ -716,7 +752,7 @@ const VIEWS = {
   morning() {
     const sc = state.today.scenario;
     return hud() + `
-      <img class="scene" src="./img/stall.webp" alt="三轮车摊位" />
+      ${sceneImg('stall', '三轮车摊位')}
       <div class="panel">
         <div class="row"><h2>今晨结转</h2><span class="tag">${sc.label}</span></div>
         <div class="grid2">
@@ -740,7 +776,7 @@ const VIEWS = {
   market() {
     const { forecast } = previewBasket(state, picksFromDraft(), state.PriceTier);
     return hud() + `
-      <img class="scene" src="./img/market.webp" alt="市场采购" />
+      ${sceneImg('market', '市场采购')}
       ${ALL_CATS.map(cat => shelfRow(cat, forecast)).join('')}
       <div id="marketDetail">${forecastBar(forecast) + buyPanel(forecast)}</div>
       <div id="marketFoot" class="stickfoot">${footStrip(forecast)}</div>`;
@@ -749,7 +785,7 @@ const VIEWS = {
   // 预检反馈 F11（signoff-f11-tabbar）：设施货架与摊位升级从市场页底部拆出来，成整屏页。
   // 任何 hub 时点都「看得见」，但买与升的操作时点一个字没动——采购窗口之外一律置灰并给一句世界内的理由。
   shop() {
-    return hud() + `<img class="scene" src="./img/stall.webp" alt="摊位的置办" />
+    return hud() + `${sceneImg('stall', '摊位的置办')}
       ${facilityRow()}`;
   },
 
@@ -768,8 +804,9 @@ const VIEWS = {
       <p class="muted">存档存在这台设备的这个浏览器里，换浏览器或清浏览器数据就带不走。规则版本 ${SAVE_VERSION}。</p>
       <div class="row" style="margin-top:10px">
         <button class="ghost" data-act="restart">重开一局</button>
-        <button class="ghost" data-act="clear">清除存档</button>
+        <button class="ghost" data-act="clear" ${clearArmed ? 'style="border-color:var(--tomato);color:var(--tomato)"' : ''}>${clearArmed ? '确认清除？' : '清除存档'}</button>
       </div>
+      ${clearArmed ? '<p class="negv">再点一次就清：这一局的账（浏览器里那份也一起）没了，回到开屏。</p>' : ''}
     </div>`;
   },
 
@@ -778,7 +815,7 @@ const VIEWS = {
     const budget = prepBudget(state);
     const over = used > budget;
     const washSkipped = prepPick[0] === '跳过';
-    return hud() + `<img class="scene" src="./img/stall.webp" alt="开卖前的备菜" />
+    return hud() + `${sceneImg('stall', '开卖前的备菜')}
       <div class="panel ${over ? 'warn' : ''}">
       <div class="row"><h2>备菜</h2><span class="tag ${over ? 'due' : 'keep'}">工时 ${used} / ${budget} 格</span></div>
       <p class="muted">认真 2 格 · 将就 1 格 · 跳过 0 格。这一天的活计按摊位档给预算，够不够你自己排。</p>
@@ -804,7 +841,7 @@ const VIEWS = {
     const mix = CLIENT_MIX[sc.calendar.id] || CLIENT_MIX.normal;
     const crowd = Object.entries(mix).sort((a, b) => b[1] - a[1])[0][0];
     const showAdditive = additiveUnlocked(state);
-    return hud() + `<img class="scene" src="./img/pricing.webp" alt="开门前定版" />
+    return hud() + `${sceneImg('pricing', '开门前定版')}
       <div class="panel">
       <h2>开门前定版</h2>
       <p class="muted">下面这几样一锁，今天全天照这一套卖，营业中不许回改。</p>
@@ -839,7 +876,7 @@ const VIEWS = {
 
   weigh() {
     if (pendingEvent) return hud() + eventOverlay();
-    return hud() + `<img class="scene hero" src="./img/weighing.webp" alt="出餐站过称" />
+    return hud() + `${sceneImg('weighing', '出餐站过称', 'hero')}
       <div class="panel accent">
       <div class="row"><h2>出餐站 · 亲手单 ${orders.length} 单</h2>
         <span class="whoimg"><img class="face" src="./img/chenshi.webp" alt="陈实" /><b>陈实 · 掌秤</b></span></div>
@@ -858,7 +895,7 @@ const VIEWS = {
     // 预检反馈 F6（0366bd6）：晚间事件弹层原先整屏换掉这张账，事件日就从「打烊」那一刻起再也看不到净额行。
     // 账目与事件各回各位：先把账排在屏上，弹层作为覆盖层追加，玩家点完分支照样落第 10–12 步。
     const overlay = pendingEvent ? eventOverlay() : '';
-    return hud() + `<img class="scene settle" src="./img/settlement.webp" alt="收摊结算" />
+    return hud() + `${sceneImg('settlement', '收摊结算', 'settle')}
       <div class="panel">
       <h2>收摊账目</h2>
       <table>
@@ -892,7 +929,7 @@ const VIEWS = {
   night() {
     const t = state.today;
     const dry = state.StockSoup <= 0 && SOLID_CATS.every(c => state.StockSolid[c] <= 0);
-    return hud() + `<img class="scene" src="./img/night.webp" alt="打烊后的今晚" />
+    return hud() + `${sceneImg('night', '打烊后的今晚')}
       ${state.Cash < 0 ? `<div class="panel accent">
         <h3 class="kind-bad">现金已经见底</h3>
         <p>现在是连负第 ${state.NegativeCashStreak}/3 天${state.NegativeCashStreak >= 3 ? '' : `——再连负 ${3 - state.NegativeCashStreak} 天就收摊（破产）。`}</p>
@@ -933,11 +970,11 @@ const VIEWS = {
       <hr /><h3>逐日账</h3>
       <table><tr><th>天</th><th class="r">流水</th><th class="r">成本</th><th class="r">报损</th><th class="r">经营净额</th><th class="r">事件账</th><th class="r">现金</th><th class="r">欠款</th></tr>
       ${p.reports.map(r => `<tr><td>${r.day}</td><td class="r num">${y(r.revenueCents)}</td><td class="r num">${y(r.cogsCents)}</td>
-        <td class="r num">${y(r.writeoffCents)}</td><td class="r num">${sign(r.netOpsCents)}</td>
+        <td class="r num">${y(r.writeoffCents)}</td><td class="r num">${sign(r.netOpsCents)}${deductCell(r)}</td>
         <td class="r num">${sign(r.eventNetCents)}</td><td class="r num">${y(r.cash)}</td><td class="r num">${y(r.debt)}</td></tr>`).join('')}</table>
       <p class="muted" style="margin-top:8px">对账：现金 ${y(p.bridge.cash)} · 账面 ${y(p.bridge.bridge)} · 差 ${y(p.bridge.diff)}
         ${p.bridge.ok ? '（平）' : '（不平，报开发）'}</p>
-      <p class="muted">经营净额这一列不只减报损：还扣了当日固定支出与人工（小豆在场才结），并把试吃的份钱减样品成本算了进去。要逐行看，每天收摊那屏都列全了。</p>
+      <p class="muted">经营净额这一列不只减报损：还扣了当日固定支出与人工（小豆在场才结），并把试吃的份钱减样品成本算了进去——这三笔就写在净额那一格的下面。要连着流水、包装一起逐行看，每天收摊那屏都列全了。</p>
     </div>${state.EndingId ? endPanel(p) : ''}`;
   },
 
@@ -1325,20 +1362,25 @@ function endPanel(p, standalone) {
   </div>`;
 }
 
-// 预检应修⑧ + 复验 #24：首屏/定版/结算/夜屏首帧的米色空框，是预取排到 load 之后、玩家先点了「开新档」。
-// 现在模块一执行就取（不等 load）：七张场景头图（HTML 侧另有 preload 链接抢在最前）+
-// 事件卡四张 + 兜底立绘与秤面 + 同屏必现的六类 SKU 图标与顾客头像表；失败不重试。
+// 预检应修⑧ + 复验 #24 + 修复单 P2-3：开局这一批预取不能再挤成一团。
+// 家底：场景头图九张 1.55 MB、SKU 拼版与头像表 0.78 MB、事件卡 0.31 MB。过去三样全在模块执行这一刻一起发出去，
+// 玩家最先要看的「备菜 / 结算」两张就排在同一批里慢慢落地——进屏先见一大块空框，图才姗姗出来。
+// 现在两件事：① 场景清单按玩家真会走到的先后排，HTML 侧那串 preload 同步改序（备菜/结算紧跟开屏图），两头不空；
+// ② 事件卡挪到首帧图落地（window load）之后再暖——晨间情报最快也在第 2 天清早、晚间事件在打烊后，几分的路赶得上；
+//    弹层与情报条的框在图没到时是同框细条纹（theme.css），不会再读成「图坏了/裁切没修」。
 // 图片响应是 no-cache（本地预览与静态托管都按 304 回），所以要留住解码结果：
-// 预热用的 Image 必须挂在模块作用域，否则被回收后 <img> 再取会重走一次网络，首帧仍空。
-const warmedImgs = (function preloadScenes() {
-  const list = ['business', 'stall', 'market', 'pricing', 'weighing', 'settlement', 'night',
+// 暖过的 Image 必须一直挂在模块作用域，否则被回收后 <img> 再取会重走一次网络，首帧仍空。
+const warmedImgs = [];
+const warm = file => { const im = new Image(); im.src = `./img/${file}`; warmedImgs.push(im); return im; };
+(function preloadScenes() {
+  const list = ['business', 'stall', 'settlement', 'market', 'pricing', 'weighing', 'night',
     'chenshi', 'scale', 'avatars', 'sku-mb', 'sku-mt', 'sku-vg', 'sku-bf', 'sku-ns', 'sku-sp'];
-  const imgs = list.map(n => { const im = new Image(); im.src = `./img/${n}.webp`; return im; });
-  // 事件卡文件名自带后缀（成品 webp 与剪影 svg 混装），清单从 EVENT_ART 直接取，免得两处对不上
-  const evNames = Object.values(EVENT_ART).concat([EVENT_NO_ART]);
-  const evImgs = evNames.map(f => { const im = new Image(); im.src = `./img/${f}`; return im; });
-  return [...imgs, ...evImgs];
+  list.forEach(n => warm(`${n}.webp`));
 })();
+// 事件卡文件名自带后缀（成品 webp 与剪影 svg 混装），清单从 EVENT_ART 直接取，免得两处对不上
+addEventListener('load', () => {
+  Object.values(EVENT_ART).concat([EVENT_NO_ART]).forEach(f => warm(f));
+}, { once: true });
 // 绑定挂在 window 上：模块级 const 若无人引用，打包后可能只剩调用、数组被丢，解码结果又被回收
 window.guijuWarm = warmedImgs;
 
