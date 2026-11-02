@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="328" viewBox="0 0 820 328" role="img" aria-label="立账上墙·剪影">
+  <rect width="820" height="328" fill="#f3e6cf"/>
+  <rect x="0" y="244" width="820" height="84" fill="#1b2a4a" opacity=".14"/>
+  <!-- 一面墙：统一价目牌 + 用料纸，牌面刻意留白 -->
+  <rect x="40" y="60" width="470" height="184" rx="4" fill="#1b2a4a" opacity=".12"/>
+  <rect x="76" y="88" width="196" height="120" rx="4" fill="#f7f1e0" stroke="#1b2a4a" stroke-width="6"/>
+  <path d="M76 116 L272 116" stroke="#1b2a4a" stroke-width="4" opacity=".35"/>
+  <rect x="300" y="104" width="176" height="104" rx="4" fill="#f7f1e0" stroke="#1b2a4a" stroke-width="5" transform="rotate(-4 388 156)"/>
+  <!-- 图钉与挂线 -->
+  <path d="M174 60 L174 88" stroke="#1b2a4a" stroke-width="4"/>
+  <circle cx="174" cy="58" r="6" fill="#e24b33"/>
+  <circle cx="388" cy="102" r="6" fill="#e24b33" opacity=".8"/>
+  <!-- 踩梯上墙的人 -->
+  <g fill="#1b2a4a" opacity=".8">
+    <circle cx="560" cy="112" r="24"/>
+    <path d="M536 244 L536 150 Q560 132 584 150 L584 244 Z"/>
+  </g>
+  <path d="M536 162 Q500 150 476 128" fill="none" stroke="#1b2a4a" stroke-width="10" stroke-linecap="round" opacity=".8"/>
+  <!-- 人字梯 -->
+  <path d="M520 244 L556 128 L592 244 M534 200 L578 200" fill="none" stroke="#1b2a4a" stroke-width="7" opacity=".45"/>
+  <!-- 旁边记一笔的人：本子留白 -->
+  <g fill="#1b2a4a" opacity=".55">
+    <circle cx="690" cy="140" r="22"/>
+    <path d="M668 244 L668 174 Q690 158 712 174 L712 244 Z"/>
+  </g>
+  <rect x="646" y="188" width="80" height="54" rx="3" fill="#f7f1e0" stroke="#1b2a4a" stroke-width="5" transform="rotate(6 686 215)"/>
+  <path d="M726 190 L748 168" stroke="#1b2a4a" stroke-width="6" stroke-linecap="round"/>
+  <!-- 灯泡 -->
+  <path d="M600 0 L600 42" stroke="#1b2a4a" stroke-width="4"/>
+  <circle cx="600" cy="56" r="13" fill="#f2b233" stroke="#1b2a4a" stroke-width="4"/>
+</svg>

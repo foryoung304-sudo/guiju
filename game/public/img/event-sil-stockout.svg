@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="328" viewBox="0 0 820 328" role="img" aria-label="粉坊断货·剪影">
+  <rect width="820" height="328" fill="#f3e6cf"/>
+  <rect x="0" y="236" width="820" height="92" fill="#1b2a4a" opacity=".14"/>
+  <!-- 粉坊机器：机身 + 飞轮 + 料斗 -->
+  <rect x="44" y="126" width="184" height="110" rx="6" fill="#1b2a4a" opacity=".22"/>
+  <circle cx="136" cy="180" r="30" fill="none" stroke="#1b2a4a" stroke-width="6" opacity=".55"/>
+  <path d="M136 150 L136 210 M106 180 L166 180" stroke="#1b2a4a" stroke-width="4" opacity=".45"/>
+  <path d="M228 148 L272 122 L272 236 L228 236 Z" fill="#1b2a4a" opacity=".22"/>
+  <!-- 停转的传动带 -->
+  <path d="M272 132 Q300 168 268 210" fill="none" stroke="#1b2a4a" stroke-width="5" opacity=".35"/>
+  <!-- 空货架三层：一格不剩 -->
+  <rect x="330" y="92" width="330" height="144" rx="4" fill="none" stroke="#1b2a4a" stroke-width="7"/>
+  <path d="M330 140 L660 140 M330 188 L660 188" stroke="#1b2a4a" stroke-width="6"/>
+  <!-- 只剩一只倒扣的空筐 -->
+  <path d="M556 188 L640 188 L626 232 L570 232 Z" fill="#1b2a4a" opacity=".3"/>
+  <path d="M566 202 L632 202 M572 216 L626 216" stroke="#f3e6cf" stroke-width="4" opacity=".6"/>
+  <!-- 手写告示：牌面刻意留白 -->
+  <rect x="694" y="118" width="98" height="118" rx="4" fill="#f7f1e0" stroke="#1b2a4a" stroke-width="5"/>
+  <path d="M694 118 L743 92 L792 118" fill="none" stroke="#1b2a4a" stroke-width="5"/>
+  <circle cx="743" cy="150" r="9" fill="#e24b33" opacity=".7"/>
+  <!-- 灯泡 -->
+  <path d="M470 0 L470 42" stroke="#1b2a4a" stroke-width="4"/>
+  <circle cx="470" cy="56" r="14" fill="#f2b233" stroke="#1b2a4a" stroke-width="4"/>
+</svg>

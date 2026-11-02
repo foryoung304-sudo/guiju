@@ -23,13 +23,22 @@ import { regularLine, REGULAR_SLOTS } from '../data/customers.js';
 // 美术资产（ui-spec §五）：24 款 SKU 图标 = 六品类各一张 2×2 拼版（档1/档2/档3/强哥特供），同品类三档必须一眼可辨
 const SKU_SHEET = { MB: 'sku-mb', MT: 'sku-mt', VG: 'sku-vg', BF: 'sku-bf', NS: 'sku-ns', SP: 'sku-sp' };
 const TIER_CELL = { 1: 'tl', 2: 'tr', 3: 'bl', 6: 'br' };
-// 事件配图（实测反馈 §二.3）：M1 四条每类一张，牌面/告示纸留白，字由 UI 排
-const EVENT_ART = { evt_d_001: 'event-zhaodama', evt_d_002: 'event-002', evt_d_011: 'event-011', evt_d_031: 'event-031' };
+// 事件配图（实测反馈 §二.3）：牌面/告示纸留白，字由 UI 排。
+// 补图批（大任务单第二段）：18 行逐行落位——王老板组五条共用他的形象图（三个取景窗 + 两张同图变体），
+// 其余九条各一张独立构图剪影。回落件从此只给未来新增的行兜底，现役行不再共用一张图。
+const EVENT_ART = {
+  evt_d_001: 'event-zhaodama.webp', evt_d_002: 'event-002.webp', evt_d_011: 'event-011.webp', evt_d_031: 'event-031.webp',
+  evt_s_pricewar: 'event-wang-pricewar.webp', evt_s_poach: 'event-wang-poach.webp', evt_s_return: 'event-wang-return.webp',
+  evt_s_copycat: 'event-wang-copycat.webp', evt_s_buyout: 'event-wang-buyout.webp',
+  evt_d_021: 'event-sil-register.svg', evt_s_insp: 'event-sil-insp.svg', evt_s_insp2: 'event-sil-insp2.svg',
+  evt_s_promo: 'event-sil-promo.svg', evt_s_flag: 'event-sil-flag.svg', evt_d_stockout: 'event-sil-stockout.svg',
+  evt_d_complaint: 'event-sil-complaint.svg', evt_d_pot: 'event-sil-pot.svg', evt_d_blogger: 'event-sil-blogger.svg'
+};
 // 预检反馈 F9（0366bd6）：没有配图的事件行原先一律回落 chenshi 立绘（一张 900×1800 的竖构图），
 // 于是「夜晚连着两单同一张图」「情报卡只见下半身」（F10）都成了它的表现。四张成品图是 5:2 横构图，
-// 卡框也是 5:2，竖图被横裁必然切头。现在无图的行走剪影件（同 5:2，不裁），补图按行等签。
+// 卡框也是 5:2，竖图被横裁必然切头。
 const EVENT_NO_ART = 'event-silhouette.svg';
-const eventArt = id => `./img/${EVENT_ART[id] ? `${EVENT_ART[id]}.webp` : EVENT_NO_ART}`;
+const eventArt = id => `./img/${EVENT_ART[id] || EVENT_NO_ART}`;
 const AVA_SHEET = './img/avatars.webp';
 const PHASE_KEY = 'guiju-m1-phase';
 const FLOW_KEY = 'guiju-m1-flow';
@@ -1323,12 +1332,12 @@ function endPanel(p, standalone) {
 // 预热用的 Image 必须挂在模块作用域，否则被回收后 <img> 再取会重走一次网络，首帧仍空。
 const warmedImgs = (function preloadScenes() {
   const list = ['business', 'stall', 'market', 'pricing', 'weighing', 'settlement', 'night',
-    'event-zhaodama', 'event-002', 'event-011', 'event-031', 'chenshi', 'scale',
-    'avatars', 'sku-mb', 'sku-mt', 'sku-vg', 'sku-bf', 'sku-ns', 'sku-sp'];
+    'chenshi', 'scale', 'avatars', 'sku-mb', 'sku-mt', 'sku-vg', 'sku-bf', 'sku-ns', 'sku-sp'];
   const imgs = list.map(n => { const im = new Image(); im.src = `./img/${n}.webp`; return im; });
-  const silhouette = new Image();   // 事件剪影是 svg，后缀与上面那批不同，单独取
-  silhouette.src = `./img/${EVENT_NO_ART}`;
-  return [...imgs, silhouette];
+  // 事件卡文件名自带后缀（成品 webp 与剪影 svg 混装），清单从 EVENT_ART 直接取，免得两处对不上
+  const evNames = Object.values(EVENT_ART).concat([EVENT_NO_ART]);
+  const evImgs = evNames.map(f => { const im = new Image(); im.src = `./img/${f}`; return im; });
+  return [...imgs, ...evImgs];
 })();
 // 绑定挂在 window 上：模块级 const 若无人引用，打包后可能只剩调用、数组被丢，解码结果又被回收
 window.guijuWarm = warmedImgs;

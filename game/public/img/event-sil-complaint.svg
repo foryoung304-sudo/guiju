@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="328" viewBox="0 0 820 328" role="img" aria-label="吃坏肚子·剪影">
+  <rect width="820" height="328" fill="#f3e6cf"/>
+  <rect x="0" y="240" width="820" height="88" fill="#1b2a4a" opacity=".16"/>
+  <!-- 摸黑的街：远处两扇门 -->
+  <rect x="40" y="112" width="104" height="128" rx="4" fill="#1b2a4a" opacity=".16"/>
+  <rect x="676" y="96" width="112" height="144" rx="4" fill="#1b2a4a" opacity=".16"/>
+  <!-- 将熄的灯 -->
+  <path d="M410 0 L410 40" stroke="#1b2a4a" stroke-width="4"/>
+  <circle cx="410" cy="54" r="13" fill="#f2b233" opacity=".55" stroke="#1b2a4a" stroke-width="4"/>
+  <path d="M410 67 L340 200 L480 200 Z" fill="#f2b233" opacity=".12"/>
+  <!-- 两个人影：弓身捂腹，往回走 -->
+  <g fill="#1b2a4a" opacity=".8">
+    <circle cx="300" cy="132" r="24"/>
+    <path d="M276 240 L276 168 Q300 150 324 168 L324 240 Z"/>
+    <path d="M324 186 Q348 200 336 224" fill="none" stroke="#1b2a4a" stroke-width="9" stroke-linecap="round"/>
+    <circle cx="470" cy="146" r="21"/>
+    <path d="M450 240 L450 178 Q470 162 490 178 L490 240 Z"/>
+    <path d="M490 196 Q510 208 500 228" fill="none" stroke="#1b2a4a" stroke-width="8" stroke-linecap="round"/>
+  </g>
+  <!-- 地上那只碗：可疑的热气 -->
+  <path d="M560 240 L560 222 Q600 214 640 222 L640 240 Z" fill="#1b2a4a"/>
+  <ellipse cx="600" cy="222" rx="42" ry="8" fill="#1b2a4a" opacity=".7"/>
+  <path d="M588 210 q-9 -16 3 -26 q12 -10 3 -24" fill="none" stroke="#1b2a4a" stroke-width="5" opacity=".35"/>
+  <path d="M618 206 q-9 -14 3 -24" fill="none" stroke="#1b2a4a" stroke-width="5" opacity=".25"/>
+  <!-- 摊沿 -->
+  <rect x="520" y="240" width="200" height="12" rx="4" fill="#1b2a4a" opacity=".3"/>
+</svg>

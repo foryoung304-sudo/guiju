@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="328" viewBox="0 0 820 328" role="img" aria-label="汤锅裂了·剪影">
+  <rect width="820" height="328" fill="#f3e6cf"/>
+  <rect x="0" y="236" width="820" height="92" fill="#1b2a4a" opacity=".14"/>
+  <!-- 夜：月与邻铺卷帘门 -->
+  <circle cx="700" cy="62" r="24" fill="#f2b233" opacity=".5"/>
+  <rect x="56" y="118" width="126" height="118" rx="4" fill="#1b2a4a" opacity=".18"/>
+  <path d="M56 150 L182 150 M56 182 L182 182 M56 214 L182 214" stroke="#f3e6cf" stroke-width="4" opacity=".5"/>
+  <!-- 灯泡与光锥 -->
+  <path d="M410 0 L410 46" stroke="#1b2a4a" stroke-width="4"/>
+  <circle cx="410" cy="60" r="15" fill="#f2b233" stroke="#1b2a4a" stroke-width="4"/>
+  <path d="M410 75 L318 210 L502 210 Z" fill="#f2b233" opacity=".18"/>
+  <!-- 汤锅：锅体 + 盖 + 双耳 -->
+  <rect x="286" y="150" width="248" height="14" rx="7" fill="#1b2a4a"/>
+  <path d="M300 236 L300 168 L520 168 L520 236 Z" fill="#1b2a4a"/>
+  <path d="M300 178 L266 158 M520 178 L554 158" stroke="#1b2a4a" stroke-width="8" stroke-linecap="round"/>
+  <!-- 锅底裂纹 -->
+  <path d="M384 234 L394 212 L381 196 L395 176" fill="none" stroke="#f3e6cf" stroke-width="5"/>
+  <!-- 洇水：一线滴水 + 两层水痕 -->
+  <path d="M388 240 L388 266" stroke="#1b2a4a" stroke-width="5" opacity=".5"/>
+  <ellipse cx="388" cy="278" rx="66" ry="10" fill="#1b2a4a" opacity=".26"/>
+  <ellipse cx="388" cy="278" rx="34" ry="6" fill="#1b2a4a" opacity=".34"/>
+  <!-- 收摊的凳 -->
+  <path d="M604 236 L604 202 L666 202 L666 236" fill="none" stroke="#1b2a4a" stroke-width="7"/>
+  <path d="M600 202 L670 202" stroke="#1b2a4a" stroke-width="8"/>
+</svg>

@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="328" viewBox="0 0 820 328" role="img" aria-label="例行检查·剪影">
+  <rect width="820" height="328" fill="#f3e6cf"/>
+  <rect x="0" y="238" width="820" height="90" fill="#1b2a4a" opacity=".14"/>
+  <!-- 街边一棵树，交代「路过」 -->
+  <path d="M92 238 L92 176" stroke="#1b2a4a" stroke-width="8" opacity=".3"/>
+  <circle cx="92" cy="150" r="42" fill="#1b2a4a" opacity=".18"/>
+  <!-- 严队长：戴帽、俯身、单手掀盖 -->
+  <g fill="#1b2a4a" opacity=".82">
+    <circle cx="330" cy="126" r="26"/>
+    <path d="M304 108 L356 108 L356 96 Q330 84 304 96 Z"/>
+    <path d="M304 238 L304 164 Q330 144 356 164 L356 238 Z"/>
+  </g>
+  <path d="M356 176 Q400 172 424 196" fill="none" stroke="#1b2a4a" stroke-width="10" stroke-linecap="round" opacity=".82"/>
+  <path d="M300 182 Q276 202 286 226" fill="none" stroke="#1b2a4a" stroke-width="9" stroke-linecap="round" opacity=".82"/>
+  <!-- 掀开的锅盖（斜立）与锅 -->
+  <ellipse cx="470" cy="184" rx="52" ry="14" fill="#1b2a4a" opacity=".45" transform="rotate(-24 470 184)"/>
+  <circle cx="470" cy="184" r="6" fill="#f3e6cf" opacity=".8"/>
+  <path d="M430 238 L430 202 Q470 192 510 202 L510 238 Z" fill="#1b2a4a"/>
+  <path d="M430 210 L398 192 M510 210 L542 192" stroke="#1b2a4a" stroke-width="7" stroke-linecap="round"/>
+  <!-- 蒸汽从敞开的锅口冒出 -->
+  <path d="M452 190 q-10 -20 4 -32 q14 -12 4 -30" fill="none" stroke="#1b2a4a" stroke-width="5" opacity=".35"/>
+  <path d="M488 186 q-10 -18 4 -30" fill="none" stroke="#1b2a4a" stroke-width="5" opacity=".25"/>
+  <!-- 另一只手递来的票据：纸面刻意留白 -->
+  <rect x="612" y="150" width="96" height="66" rx="3" fill="#f7f1e0" stroke="#1b2a4a" stroke-width="5" transform="rotate(8 660 183)"/>
+  <path d="M622 168 L698 178" stroke="#1b2a4a" stroke-width="4" opacity=".3" transform="rotate(8 660 183)"/>
+  <!-- 灯泡 -->
+  <path d="M700 0 L700 44" stroke="#1b2a4a" stroke-width="4"/>
+  <circle cx="700" cy="58" r="14" fill="#f2b233" stroke="#1b2a4a" stroke-width="4"/>
+</svg>

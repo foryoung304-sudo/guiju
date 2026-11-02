@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="328" viewBox="0 0 820 328" role="img" aria-label="卫生大检查·剪影">
+  <rect width="820" height="328" fill="#f3e6cf"/>
+  <rect x="0" y="242" width="820" height="86" fill="#1b2a4a" opacity=".16"/>
+  <!-- 三个戴帽的人影：领队居中，两人分列后半 -->
+  <g fill="#1b2a4a" opacity=".55">
+    <circle cx="212" cy="132" r="22"/>
+    <path d="M190 116 L234 116 L234 106 Q212 96 190 106 Z"/>
+    <path d="M190 242 L190 166 Q212 150 234 166 L234 242 Z"/>
+    <circle cx="596" cy="136" r="22"/>
+    <path d="M574 120 L618 120 L618 110 Q596 100 574 110 Z"/>
+    <path d="M574 242 L574 170 Q596 154 618 170 L618 242 Z"/>
+  </g>
+  <g fill="#1b2a4a" opacity=".85">
+    <circle cx="404" cy="112" r="28"/>
+    <path d="M376 92 L432 92 L432 80 Q404 68 376 80 Z"/>
+    <path d="M374 242 L374 152 Q404 130 434 152 L434 242 Z"/>
+  </g>
+  <!-- 翻开的记录本：两页全留白 -->
+  <path d="M330 190 L404 178 L478 190 L478 226 L404 214 L330 226 Z" fill="#f7f1e0" stroke="#1b2a4a" stroke-width="5"/>
+  <path d="M404 178 L404 214" stroke="#1b2a4a" stroke-width="4"/>
+  <!-- 摊位台面与三格料盘 -->
+  <rect x="640" y="196" width="164" height="46" rx="4" fill="#1b2a4a" opacity=".3"/>
+  <path d="M652 196 L652 172 L700 172 L700 196 M708 196 L708 176 L756 176 L756 196 M764 196 L764 170 L796 170 L796 196" fill="none" stroke="#1b2a4a" stroke-width="5" opacity=".5"/>
+  <!-- 敞开的冰柜门 -->
+  <path d="M640 196 L640 100 L676 100 L676 196" fill="#1b2a4a" opacity=".18"/>
+  <path d="M640 196 L640 100" stroke="#1b2a4a" stroke-width="6"/>
+  <!-- 两只探照灯：大检查的光 -->
+  <path d="M120 0 L120 46" stroke="#1b2a4a" stroke-width="4"/>
+  <circle cx="120" cy="60" r="14" fill="#f2b233" stroke="#1b2a4a" stroke-width="4"/>
+  <path d="M120 74 L40 240 L200 240 Z" fill="#f2b233" opacity=".14"/>
+  <path d="M690 0 L690 40" stroke="#1b2a4a" stroke-width="4"/>
+  <circle cx="690" cy="54" r="12" fill="#f2b233" stroke="#1b2a4a" stroke-width="4"/>
+</svg>

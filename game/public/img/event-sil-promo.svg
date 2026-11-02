@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="328" viewBox="0 0 820 328" role="img" aria-label="赵大妈宣传队·剪影">
+  <rect width="820" height="328" fill="#f3e6cf"/>
+  <rect x="0" y="244" width="820" height="84" fill="#1b2a4a" opacity=".14"/>
+  <!-- 摊沿与棚：横幅留白 -->
+  <rect x="500" y="200" width="300" height="44" rx="4" fill="#1b2a4a" opacity=".3"/>
+  <path d="M500 200 L500 96 L800 96 L800 200" fill="#e24b33" opacity=".22"/>
+  <path d="M500 96 L800 96" stroke="#1b2a4a" stroke-width="6"/>
+  <rect x="540" y="118" width="220" height="58" rx="4" fill="#f7f1e0" stroke="#1b2a4a" stroke-width="5"/>
+  <!-- 台面上的秤：宣传队说的那件事 -->
+  <path d="M612 200 L612 176" stroke="#1b2a4a" stroke-width="6"/>
+  <rect x="586" y="164" width="52" height="14" rx="4" fill="#1b2a4a"/>
+  <circle cx="612" cy="150" r="16" fill="none" stroke="#1b2a4a" stroke-width="5"/>
+  <path d="M612 150 L622 140" stroke="#1b2a4a" stroke-width="4"/>
+  <!-- 三个老街坊排队而来，领队的是赵大妈（提布袋） -->
+  <g fill="#1b2a4a" opacity=".82">
+    <circle cx="150" cy="126" r="25"/>
+    <path d="M124 244 L124 162 Q150 142 176 162 L176 244 Z"/>
+  </g>
+  <path d="M176 178 Q206 186 202 214" fill="none" stroke="#1b2a4a" stroke-width="9" stroke-linecap="round" opacity=".82"/>
+  <path d="M196 214 L214 214 L210 240 L200 240 Z" fill="#f2b233" opacity=".7" stroke="#1b2a4a" stroke-width="4"/>
+  <g fill="#1b2a4a" opacity=".5">
+    <circle cx="262" cy="140" r="21"/>
+    <path d="M240 244 L240 174 Q262 158 284 174 L284 244 Z"/>
+    <circle cx="360" cy="134" r="22"/>
+    <path d="M336 244 L336 170 Q360 154 384 170 L384 244 Z"/>
+  </g>
+  <!-- 掏钱的手与硬币 -->
+  <path d="M384 190 Q420 182 444 196" fill="none" stroke="#1b2a4a" stroke-width="9" stroke-linecap="round" opacity=".6"/>
+  <circle cx="466" cy="196" r="9" fill="#f2b233" stroke="#1b2a4a" stroke-width="4"/>
+  <circle cx="486" cy="206" r="9" fill="#f2b233" opacity=".7" stroke="#1b2a4a" stroke-width="4"/>
+  <!-- 灯泡与光锥 -->
+  <path d="M652 0 L652 40" stroke="#1b2a4a" stroke-width="4"/>
+  <circle cx="652" cy="54" r="13" fill="#f2b233" stroke="#1b2a4a" stroke-width="4"/>
+  <path d="M652 67 L580 200 L724 200 Z" fill="#f2b233" opacity=".16"/>
+</svg>
