@@ -127,10 +127,13 @@ input[type=number], input[type=text] {
 .readout .u { font-size: 12px; margin-left: 6px; opacity: .72; }
 /* 预检应修⑦：克是秤面主读数，斤换算常驻角标（买菜论斤、称重论克） */
 .readout .jin { font-size: 11px; margin-left: 10px; padding-left: 10px; border-left: 1px solid rgba(125, 255, 176, .35); opacity: .78; }
-/* 「正好」标记（signoff-weighing-finestep）：落点与目标差 ≤ max(1 克, 目标 1%) 时点一下，只做呈现 */
-.readout .exact { margin-left: 8px; padding: 0 5px; font-size: 11px; font-weight: 700; color: var(--ink); background: var(--mustard); border: 1px solid var(--ink); }
-.readout .exact[hidden] { display: none; }
-.scale.ok .readout .exact { background: var(--ink); color: var(--mustard); }
+/* 「正好」标记（signoff-weighing-finestep）：落点与目标差 ≤ max(1 克, 目标 1%) 时点一下，只做呈现。
+   预检反馈 F5（0366bd6）：标记挂在它判定的那一行（你称 X 克 右侧），不再挂在整单总读数旁——
+   挂在总读数旁会让「单项已准」看起来像「整单足称」。足称态时反色，与秤面同色语义。 */
+.gavecell { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.gavecell .exact { padding: 0 5px; font-size: 11px; font-weight: 700; color: var(--ink); background: var(--mustard); border: 1px solid var(--ink); white-space: nowrap; }
+.gavecell .exact[hidden] { display: none; }
+.scale.ok .gavecell .exact { background: var(--ink); color: var(--mustard); }
 /* 双读数条（实测反馈 #2）：顾客要的与你实际称的必须同时在场 */
 .dual { font-size: 12px; margin-bottom: 8px; letter-spacing: .02em; }
 /* 称重手感：按住抓菜 / 松手定格 / 捏出一点（滑杆已删）

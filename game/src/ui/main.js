@@ -376,7 +376,7 @@ const FINE_GAP = 20;
 const PINCH_RATE = 30;
 let grab = null;
 let pinch = null;
-let lastLine = null;     // 最近松手的行：正在动的那一行不标红，离开后仍不足才提示
+let lastLine = null;     // 最近松手的行：「正好」徽标跟着它点亮（红字不再看这一格，见 flagText 上方的 F8 注）
 
 function lineTarget(cust, cat) {
   const o = orders.find(x => x.customerId === cust);
@@ -510,23 +510,32 @@ function hintWanted(o) {
   return o.lines.some(l => Number(g[l.cat] || 0) >= l.grams * 1.1);
 }
 
-// 「正好」：正在动/刚松手的那一行与目标差 ≤ max(1 克, 目标 1%) 时，读数旁点一下（只做呈现，不改判定）
-function exactNow(cust) {
-  let cat = null;
-  if (grab && grab.cust === cust) cat = grab.cat;
-  else if (pinch && pinch.cust === cust) cat = pinch.cat;
-  else if (lastLine && lastLine.cust === cust) cat = lastLine.cat;
-  if (!cat) return false;
+// 「正好」：正在动/刚松手的那一行与目标差 ≤ max(1 克, 目标 1%) 时，在**那一行**点一下（只做呈现，不改判定）。
+// 预检反馈 F5（0366bd6）：徽标原先挂在秤面总读数旁，判定的是单行落点、看起来却像整单已准（总重 125/300 也亮），
+// 与签发规格（signoff-weighing-finestep 的「当前项落点达标」）对不上；这一版把标记搬回它判的那一行，文案一字不改。
+function exactNow(cust, cat) {
+  const active = (grab && grab.cust === cust && grab.cat)
+    || (pinch && pinch.cust === cust && pinch.cat)
+    || (lastLine && lastLine.cust === cust && lastLine.cat) || null;
+  if (!active || active !== cat) return false;
   const target = lineTarget(cust, cat);
   const got = Number(gramsBy[cust]?.[cat] || 0);
   return got > 0 && Math.abs(got - target) <= Math.max(1, target * 0.01);
 }
 
-// 短斤带（<90%）行内提示的口径：这一行进过碗、松手后仍不足、且玩家已经离开它。
-// 0 克是「还没称」不是「这一口下去了」；正在动的那一行也不提示——否则刚抓一撮就满屏红字。
+// 同一时刻只有一个「当前行」：手换到别人、别的单上留着的亮得跟着收掉，不然旧行会一直亮着
+function refreshExact() {
+  for (const o of orders) for (const l of o.lines) {
+    const el = document.getElementById(`ex-${o.customerId}-${l.cat}`);
+    if (el) el.hidden = !exactNow(o.customerId, l.cat);
+  }
+}
+
+// 短斤带（<90%）行内提示的口径：这一行进过碗、松手后仍不足。0 克是「还没称」不是「这一口下去了」，不提示。
+// 预检反馈 F8（0366bd6）：原来还额外豁免「刚松手的那一行」，于是六品类里谁能看到红字，取决于玩家最后放了哪一行——
+// 同屏两人同为 50/100 克，一个有红字一个没有。豁免撤掉后规则对六品类一致：满足条件必出。
 function flagText(cust, l, got) {
   if (!(got > 0 && got < l.grams * 0.9)) return '';
-  if (lastLine && lastLine.cust === cust && lastLine.cat === l.cat) return '';
   return `${CAT[l.cat].name}这一口下去就短了`;
 }
 
@@ -553,8 +562,6 @@ function refreshOrder(cust) {
   // 长按捏出的每一跳也会走到这里：正在捏的时候不提示「去捏」
   const hint = document.getElementById('hint-' + cust);
   if (hint) hint.hidden = !!pinch || !hintWanted(o);
-  const ex = document.getElementById('ex-' + cust);
-  if (ex) ex.hidden = !exactNow(cust);
   for (const l of o.lines) {
     const got = Number(g[l.cat] || 0);
     setText(`lv-${cust}-${l.cat}`, `你称 ${got} 克`);
@@ -564,6 +571,7 @@ function refreshOrder(cust) {
     setText(`tap-${cust}-${l.cat}`, `轻点 +${step} 克`);
     setText(`pn-${cust}-${l.cat}`, `捏出 −${step} 克`);
   }
+  refreshExact();
 }
 
 function cook() {
@@ -760,10 +768,14 @@ const VIEWS = {
   },
 
   settle() {
-    if (pendingEvent) return hud() + eventOverlay();
     const r = dailyReport(state);   // 当日报表此刻还在 today 上，DailyReports 末尾是昨天的，不能取
     const t = state.today;
-    const out = [...new Set([...t.soldOutCats.map(c => CAT[c].name), ...(t.soupSoldOut ? ['汤底'] : [])])];
+    // F7：卖断文案把当日 T 一起带出来——「买 12 份卖 11 碗还报卖断」在 T>1 的日子是对的，看不见 T 就成了玩家嘴里的 bug
+    const out = [...new Set([...t.soldOutCats.map(c => CAT[c].name),
+      ...(t.soupSoldOut ? [`汤底（每碗耗 ${t.scenario.T} 份）`] : [])])];
+    // 预检反馈 F6（0366bd6）：晚间事件弹层原先整屏换掉这张账，事件日就从「打烊」那一刻起再也看不到净额行。
+    // 账目与事件各回各位：先把账排在屏上，弹层作为覆盖层追加，玩家点完分支照样落第 10–12 步。
+    const overlay = pendingEvent ? eventOverlay() : '';
     return hud() + `<img class="scene" src="./img/settlement.webp" alt="收摊结算" />
       <div class="panel">
       <h2>收摊账目</h2>
@@ -786,12 +798,13 @@ const VIEWS = {
         <tr><td>还欠</td><td class="r num">${y(state.DebtSupplier)}</td></tr>
       </table>
       ${out.length ? `<p class="negv" style="margin-top:8px">今天这些卖断了：${out.join('、')}。</p>` : ''}
+      <p class="muted">经营净额 = 销售毛利 − 隔夜报损 − 固定支出 − 人工 + 试吃净额，与账本「逐日账」那一列同一个式子、同一个数。</p>
       ${t.tastingConvert ? `<p class="muted">试吃尝过的人里有 ${t.tastingConvert} 位明天算回头熟客。</p>` : ''}
       ${(t.handRefused || 0) > 0 ? '<p class="negv">有亲手单没接住（超出当天能出的碗数）。</p>' : ''}
       ${t.spillBowls ? `<p class="muted">外带漏洒 ${t.spillBowls} 碗。</p>` : ''}
       ${t.deferredBowls ? `<p class="muted">锅出到头了：熟客有 ${t.deferredBowls} 碗当天没排上${t.regLost ? `，走了 ${t.regLost} 位。` : '，留到明天。'}</p>` : ''}
       <button class="go" style="margin-top:12px" data-act="evening">打烊 · 过一遍今晚的事</button>
-    </div>`;
+    </div>${overlay}`;
   },
 
   night() {
@@ -833,7 +846,7 @@ const VIEWS = {
         ${byDay[d].map(r => `<tr><td>${CAT[r.cat].name}</td><td>${r.supplier}</td>
           <td class="r num">${r.qty}${r.unit}</td><td class="r num">${r.unitPrice.toFixed(2)}</td>
           <td class="r num">${y(r.cost)}</td><td class="r num">${y(r.cash)} / ${y(r.credit)}</td>
-          <td>${r.hasReceipt ? '有' : '无'}</td></tr>`).join('')}</table>`).join('')
+          ${ticketCell(r)}</tr>`).join('')}</table>`).join('')
         : '<p class="muted">还没买过东西。</p>'}
       <hr /><h3>逐日账</h3>
       <table><tr><th>天</th><th class="r">流水</th><th class="r">COGS</th><th class="r">报损</th><th class="r">经营净额</th><th class="r">事件账</th><th class="r">现金</th><th class="r">欠款</th></tr>
@@ -853,6 +866,14 @@ const VIEWS = {
 
 const ENDING_NAMES = { 1: '翻车', 2: '破产', 3: '规矩立住', 4: '烧心大王', 5: '金盆洗手', 6: '平庸收摊' };
 
+// 预检反馈 F1（0366bd6）：这一列原先只有「有 / 无」两态，把手气没抽中、本来就不给票、自制不进取数三种情况全塌成了「无」。
+// 于是外购全带票的日子，结局屏按口径算出的覆盖率是 100%（自制两边都不进），玩家拿明细自己除却得到 90%——
+// 数没错，是这一列把口径说反了。自制行从此单列「自制·不计」，与外购无票分开。
+function ticketCell(r) {
+  if (SKU_BY_ID[r.sku]?.receipt === 'excluded') return '<td class="muted">自制·不计</td>';
+  return `<td>${r.hasReceipt ? '有' : '无'}</td>`;
+}
+
 function shelfRow(cat, forecast) {
   const all = SKUS_BY_CAT[cat];
   const list = all.filter(s => skuAvailable(state, s, rng));
@@ -863,8 +884,11 @@ function shelfRow(cat, forecast) {
   // 空货架得说清为什么空、以及柜里的货照常卖
   const delist = state.today.delist === cat
     ? '<span class="muted">今天全档下架 · 柜里的照卖</span>' : '';
+  // 预检反馈 F7（0366bd6）：每碗耗汤份数 T 是与天气同级的情境参数（不是暗线），看不见就会拿 1 份/碗直算，
+  // 于是「买 12 份卖 11 碗却报卖断」看起来就是 bug。T 进市场汤底行，也算得清那碗数从哪儿被封顶。
+  const soupT = cat === 'SP' ? ` · 每碗耗 ${state.today.scenario.T} 份` : '';
   return `<div class="panel"><div class="row"><h3>${CAT[cat].name}${cat === 'SP' ? '（份）' : '（斤）'}</h3>
-      <span class="muted">柜里 ${have} · 试算今天能出 ${forecast.capped.toFixed(0)} 碗</span>${delist}</div>
+      <span class="muted">柜里 ${have}${cat === 'SP' ? ' 份' : ''}${soupT} · 试算今天能出 ${forecast.capped.toFixed(0)} 碗</span>${delist}</div>
     <div class="shelf">${list.map(s => skuCard(cat, s)).join('')}${absent ? absentCard(cat) : ''}</div></div>`;
 }
 
@@ -1144,8 +1168,7 @@ function orderCard(o) {
     <div class="scale${gave > 0 && gave / o.lines.reduce((s, l) => s + l.grams, 0) >= 0.98 ? ' ok' : ''}" id="sc-${o.customerId}" style="margin:8px 0">
       <img src="./img/scale.webp" alt="电子秤" />
       <div class="readout num"><span id="rd-${o.customerId}">${gave}</span><span class="u">克</span>
-        <span class="jin" id="rj-${o.customerId}">${(gave / GRAMS_PER_JIN).toFixed(2)} 斤</span>
-        <span class="exact" id="ex-${o.customerId}" ${exactNow(o.customerId) ? '' : 'hidden'}>正好</span></div>
+        <span class="jin" id="rj-${o.customerId}">${(gave / GRAMS_PER_JIN).toFixed(2)} 斤</span></div>
     </div>
     <div class="pinchhint" id="hint-${o.customerId}" ${hintWanted(o) ? '' : 'hidden'}>抓多了？点「捏出一点」往回捏</div>
     <div class="dual num muted" id="sum-${o.customerId}">顾客要 ${o.lines.reduce((s, l) => s + l.grams, 0)} 克 · 你称 ${gave} 克</div>
@@ -1154,7 +1177,7 @@ function orderCard(o) {
         <span class="skuimg bowlchip" id="ch-${o.customerId}-${l.cat}" data-cell="tl" style="background-image:url(./img/${SKU_SHEET[l.cat]}.webp)"></span>
         <span class="grabname">${CAT[l.cat].name}<b class="want">要 ${l.grams} 克</b><span class="step" id="tap-${o.customerId}-${l.cat}">轻点 +${stepFor(o.customerId, l.cat)} 克</span></span>
       </button>
-      <span class="num gave" id="lv-${o.customerId}-${l.cat}">你称 ${g[l.cat]} 克</span>
+      <span class="gavecell"><span class="num gave" id="lv-${o.customerId}-${l.cat}">你称 ${g[l.cat]} 克</span><span class="exact" id="ex-${o.customerId}-${l.cat}" ${exactNow(o.customerId, l.cat) ? '' : 'hidden'}>正好</span></span>
       <button class="pinch" id="pn-${o.customerId}-${l.cat}" data-pinch data-cust="${o.customerId}" data-cat="${l.cat}">捏出 −${stepFor(o.customerId, l.cat)} 克</button></div>
     <div class="muted kind-bad" id="flag-${o.customerId}-${l.cat}">${flagText(o.customerId, l, Number(g[l.cat] || 0))}</div>`).join('')}
     ${blanchBlock(o)}
