@@ -32,6 +32,9 @@ export const PRICE_TIERS = {
 // 定稿 §一 + 修订记录 R6：赊购额度两档改六档阶梯（约各档日货款 4 成，依据正本「熟人信用随生意长」）
 // 修订记录 R11（源 signoff-m3-round2-rulings-20261101 ①）：档 2 升级价 1,050 → 800 元，即时对代码生效；
 // 正文与附录 G.5 的文本按签发口径在下一次整合时改字，那段期间正本里的 1,050 是旧值、以本格为准。
+// R11 注脚（同步完成注销，2026-11-02，与定稿那条同口径）：上一行的「下一次整合时改字」已经办完——正文「摊位线」那行、
+// 附录 D–H 的 F 表 Tier 行与 G.5 四列行、定稿第一节「升级价（五档）」那行都落的是 800（v4.9.4 字面同步 + 收口批），
+// 本格与正本现在同一个价。上面两行按 append-only 留着不删，这一行不是待办，别再往上挂 TODO。
 export const TIERS_STALL = [
   { level: 1, name: '三轮车', baseSales: 90, fixedCost: 7500, capacity: 130, workGrid: 4, creditCap: 60000, upgradePrice: 80000 },
   { level: 2, name: '二手餐车', baseSales: 180, fixedCost: 13500, capacity: 260, workGrid: 4, creditCap: 150000, upgradePrice: 450000 },
