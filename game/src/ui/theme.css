@@ -465,6 +465,44 @@ td.r, th.r { text-align: right; }
 .overlay.fx-done .fxwash, .overlay.fx-done .dealprice b { animation: none !important; opacity: 1 !important; transform: none !important; }
 .overlay.fx-done .art { animation: none !important; opacity: 1 !important; transform: scale(var(--land)) !important; }
 
+/* ── 追补单三（task-event-motion-add3-20261103）：三样天天见的微动效 ──────────────────────
+   同守基单纪律：只用 transform / opacity、reduced-motion 一律降级。两处口径要写明：
+   ① 热气是单上点名的「常驻」件，infinite 是本批唯一一处（切后台钉在暂停帧）；
+   ② 金额滚动改的是数字那一层的显示文本，不写进 CSS 关键帧——终值由模板先写好，见 main.js 的 rollMount。 */
+
+/* 1 称「正好」徽标弹跳：由藏到亮那一枚弹一次，与音频单的 exact 叮声在同一次调用里。
+   .gavecell 是 flex 容器、徽标是 flex item，flex item 的 display 已被 blockify ⇒ transform 有地方落，
+   不必再补 inline-block（补了反而多一次盒模型变化）。判定式子与显隐规则一个字没动：JS 只加/换一枚 pop；
+   不写 fill，动画一停就回到自然态，不留钉住的收尾帧。峰值位移 4px、峰值放大 1.14。 */
+.gavecell .exact.pop { animation: fxBadge 360ms cubic-bezier(.3, 1.35, .45, 1) 1; }
+@keyframes fxBadge {
+  0% { transform: translate3d(0, 0, 0) scale(.86, .74); }
+  34% { transform: translate3d(0, -4px, 0) scale(1.05, 1.14); }
+  62% { transform: translate3d(0, 1px, 0) scale(.98, .95); }
+  100% { transform: none; }
+}
+
+/* 3 出摊热气：三层软白粒子自锅沿袅袅而上，常驻，只在出摊 hub 那一屏挂（main.js 的 steamScene）。
+   壳只多接一层定位、下边距从 .scene 搬到壳上（图与取景窗一格没动，读数见回报）；
+   pointer-events:none + 整层被壳裁边 ⇒ 压不到字、抢不到点击；粒子用径向渐变的软白，不上 filter:blur（低端机每帧都贵）。
+   上升 84px ≈ 画面带高的 43%，最亮那一档（16%）还在台面附近，散掉时也没爬到红棚底下。 */
+.scenewrap { display: block; position: relative; margin-bottom: 12px; }
+.scenewrap > .scene { margin-bottom: 0; }
+.steam { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.steam i { position: absolute; left: 48%; bottom: 4%; width: 26px; height: 30px; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, .8), rgba(255, 255, 255, 0));
+  opacity: 0; animation: fxSteam 2400ms linear infinite; }
+.steam i:nth-child(2) { left: 56%; width: 20px; height: 24px; animation-delay: 800ms; }
+.steam i:nth-child(3) { left: 63%; width: 15px; height: 19px; animation-delay: 1600ms; }
+@keyframes fxSteam {
+  0% { opacity: 0; transform: translate3d(0, 0, 0) scale(.55); }
+  16% { opacity: .5; }
+  62% { opacity: .34; }
+  100% { opacity: 0; transform: translate3d(-10px, -84px, 0) scale(1.5); }
+}
+/* 切后台：整层钉在暂停帧（CSS 播不播由 JS 这一枚 class 说停就停，不留计时器） */
+#app.fx-paused .steam i { animation-play-state: paused; }
+
 /* 结局屏专属一次性待遇（单上写明仅此一处允许专属）：#3 规矩立住 / #5 金盆洗手 = 金光 + 主体升入。
    其余结局（#1 #2 #4 坏消息、#6 中性）照上面模板走，不给专属；暗角不带给结局屏——结局卡片上全是数字，
    压暗一层就挡住读数，而这里没有遮罩可挂，只能落进卡片自己。 */
@@ -485,6 +523,10 @@ td.r, th.r { text-align: right; }
      连点按跳段后的那条也一起钉住，不让它从 fx-done 底下漏回来。 */
   .fx-wang-intro .art, .fx-wang-press .art { --land: 1; }
   .fxwash, .sweep, .cf, .overlay.fx-done .fxwash { animation: none !important; opacity: 0 !important; }
+  /* 追补单三两条：徽标不弹（回到自然态，显隐规则本来就没动）；热气整层关掉——单上写的是「reduced-motion 时关」，
+     不是放慢，所以直接 display:none，连节点都不占位。金额滚动那条在 JS 里同判（rollMount 一进来就返回，DOM 里本来就是终值）。 */
+  .gavecell .exact.pop { animation: none !important; transform: none !important; }
+  .steam { display: none !important; }
 }
 
 /* 场景头图：定版素材都是竖构图，横幅裁切会把人物切成半截（实测反馈 §二.1、§二.4）。

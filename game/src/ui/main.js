@@ -49,6 +49,10 @@ const AVA_SHEET = './img/avatars.webp';
 // 取图给最高优先、解码要在这帧之前完成——图没到就只见条纹占位（见 theme.css 的 .scene 底纹），到了就整幅盖住。
 const sceneImg = (file, alt, cls = '') =>
   `<img class="scene${cls ? ' ' + cls : ''}" src="./img/${file}.webp" alt="${alt}" decoding="sync" fetchpriority="high" />`;
+// 追补单三第 3 条：出摊 hub 的常驻热气。只多包一层定位壳、多三个软白粒子，图与取景窗一个字没改
+// （壳接 .scene 原本那条 12px 下边距，读数见回报 §7）。撤掉 = 删这一处调用与 theme.css 那一块，不留残钩。
+const steamScene = (file, alt) =>
+  `<span class="scenewrap">${sceneImg(file, alt)}<span class="steam" aria-hidden="true"><i></i><i></i><i></i></span></span>`;
 const PHASE_KEY = 'guiju-m1-phase';
 const FLOW_KEY = 'guiju-m1-flow';
 const app = document.getElementById('app');
@@ -79,6 +83,51 @@ let blanchRun = {};      // customerId → { t0, raf }：只在活着的那一�
 
 const y = c => centsToYuan(c).toFixed(2);
 const sign = c => (c > 0 ? `<span class="pos">+${y(c)}</span>` : c < 0 ? `<span class="negv">${y(c)}</span>` : y(c));
+// 追补单三第 2 条：结算主数字滚动。铁律「先算后演」——模板在这一刻已经把终值写进 DOM，滚动只是临时盖在显示上；
+// 落定（播完 / 点一下 / 降级 / 切后台 / 换屏）一律还原成挂载时抓到的那一串原文，
+// 终值与账面逐位相等由构造保证，动画不参与任何计算。data-c 带的就是同一个整数分，不新造数。
+const ROLL_MS = 700;
+let rollCancel = null;
+const reduceMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+// 与 sign() 同一串字，只是把数字套进可滚的那一层（正负号留在外层，滚动期间不动）
+const signRoll = c => (c > 0 ? `<span class="pos">+<span class="roll" data-c="${c}">${y(c)}</span></span>`
+  : c < 0 ? `<span class="negv"><span class="roll" data-c="${c}">${y(c)}</span></span>`
+    : `<span class="roll" data-c="0">${y(c)}</span>`);
+
+function rollMount() {
+  if (rollCancel) rollCancel();
+  const nodes = [...app.querySelectorAll('.roll')];
+  if (!nodes.length) return;
+  const finals = nodes.map(el => el.textContent);
+  // 滚动途中位数在变，右对齐那一列会左右跳：先把终值那一格的宽度钉住，只让数字在框里长；落定就撤
+  nodes.forEach(el => { el.style.minWidth = Math.ceil(el.getBoundingClientRect().width) + 'px'; });
+  if (reduceMotion() || document.hidden) return;      // 降级 / 后台：直接显终值，不演
+  const mags = nodes.map(el => Math.round(Math.abs(Number(el.dataset.c))));
+  const pres = finals.map(s => s.slice(0, Math.max(0, s.search(/\d/))));
+  const write = f => nodes.forEach((el, i) => { el.textContent = pres[i] + (mags[i] * f / 100).toFixed(2); });
+  const t0 = performance.now();
+  let raf = 0, done = false;
+  const land = () => {
+    if (done) return;
+    done = true;
+    cancelAnimationFrame(raf);
+    nodes.forEach((el, i) => { el.textContent = finals[i]; el.style.minWidth = ''; });
+    rollCancel = null;
+  };
+  rollCancel = land;
+  const step = () => {
+    const p = Math.min(1, (performance.now() - t0) / ROLL_MS);
+    write(1 - (1 - p) ** 3);
+    if (p >= 1) land(); else raf = requestAnimationFrame(step);
+  };
+  raf = requestAnimationFrame(step);
+}
+// 热气与滚动都按「看不见就不动」收：切后台把热气钉在暂停帧、把还在滚的数字就地落定
+const steamPause = () => app.classList.toggle('fx-paused', document.hidden);
+document.addEventListener('visibilitychange', () => {
+  steamPause();
+  if (document.hidden && rollCancel) rollCancel();
+});
 const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 // 换屏就收回待确认：清除的二次确认只在「我的」这一屏有效，跳走就得重新点一遍
 const go = p => { phase = p; clearArmed = false; localStorage.setItem(PHASE_KEY, p); saveFlow(); render(); };
@@ -203,6 +252,9 @@ app.addEventListener('click', e => {
   const host = e.target.closest('[data-act]');
   // ① UI 点击/翻页（音频单）：只在按到了确实可点的按钮时出声，禁用的那颗不出声也不走逻辑
   if ((tab || nav || host) && !e.target.closest('button[disabled]')) sfx('tap');
+  // 追补单三：点按即落定。落在这一屏任何一处都算，位置在换屏与选择逻辑之前；
+  // 滚动期间没有加过任何 pointer-events，所以「落定」与「按到按钮」是同一只手，不互相挡。
+  if (rollCancel) rollCancel();
   if (tab) return goTab(tab.dataset.tab);
   if (nav) {
     if (nav.dataset.nav === 'ledger') { ledgerBack = phase; return go('ledger'); }
@@ -266,6 +318,8 @@ function render() {
       refreshOrder(el.dataset.cust);
     });
   });
+  rollMount();     // 结算屏的主数字：先有终值，再盖显示（非结算屏找不到 .roll，直接返回）
+  steamPause();    // 热气按可见性起停：换屏重挂时也把「正在后台」这一态补上
 }
 
 // 预检必修⑤：输入层的落值一律按 0.1 斤规范化（1.6000000238 这类底层残留不进草稿），
@@ -656,6 +710,8 @@ function exactNow(cust, cat) {
 }
 
 // 每条已锁行各自一格徽标：称重后逐行对着带内/带外翻 hidden
+// 追补单三第 1 条：由藏到亮那一枚做一次弹跳。判定式子与显隐规则一个字没动，只多加一个 class；
+// 与 sfx('exact') 同一次调用里发生（同刻），逐行各自触发——同一轮里几行同时进带就各弹各的。
 function refreshExact() {
   let hit = false;
   for (const o of orders) for (const l of o.lines) {
@@ -663,7 +719,12 @@ function refreshExact() {
     if (!el) continue;
     const shown = !el.hidden;                       // 刷新前这一枚亮不亮
     el.hidden = !exactNow(o.customerId, l.cat);     // 判定式子一字未动（P2-4 口径）
-    if (shown !== true && !el.hidden) hit = true;   // 由藏到亮 = 正好那一下
+    if (shown !== true && !el.hidden) {
+      hit = true;                                   // 由藏到亮 = 正好那一下
+      el.classList.remove('pop');
+      void el.offsetWidth;                          // 不强制这一帧重排，第二次进带就看不到第二段弹跳
+      el.classList.add('pop');
+    }
   }
   if (hit) sfx('exact');   // ③ 称「正好」正反馈叮声
 }
@@ -812,7 +873,7 @@ const VIEWS = {
   morning() {
     const sc = state.today.scenario;
     return hud() + `
-      ${sceneImg('stall', '三轮车摊位')}
+      ${steamScene('stall', '三轮车摊位')}
       <div class="panel">
         <div class="row"><h2>今晨结转</h2><span class="tag">${weatherIcon(sc.weather.id)}${calendarIcon(sc.calendar.id)}${sc.label}</span></div>
         <div class="grid2">
@@ -969,20 +1030,20 @@ const VIEWS = {
       <h2>收摊账目</h2>
       <table>
         <tr><td>卖出</td><td class="r num">${r.bowls} 碗 / ${r.J.toFixed(2)} 斤${t.deltaJ ? `（秤上按 ${t.J_bill.toFixed(2)} 斤收的钱）` : ''}</td></tr>
-        <tr><td>流水</td><td class="r num">${y(r.revenueCents)}</td></tr>
+        <tr><td>流水</td><td class="r num"><span class="roll" data-c="${r.revenueCents}">${y(r.revenueCents)}</span></td></tr>
         <tr><td>食材成本（卖掉的才算）</td><td class="r num">−${y(t.ingredientCents)}</td></tr>
         <tr><td>${PACKING_NAMES[state.PackingTier]} · ${r.bowls} 碗 × ${PACKING[state.PackingTier].toFixed(2)} 元</td><td class="r num">−${y(t.packingCents)}</td></tr>
         ${t.additiveCents ? `<tr><td>${ADDITIVE[state.AdditiveTier].goods || '添加剂'}</td><td class="r num">−${y(t.additiveCents)}</td></tr>` : ''}
-        <tr><td>成本合计</td><td class="r num">−${y(r.cogsCents)}</td></tr>
-        <tr><td>销售毛利</td><td class="r num">${sign(r.grossCents)}</td></tr>
+        <tr><td>成本合计</td><td class="r num">−<span class="roll" data-c="${r.cogsCents}">${y(r.cogsCents)}</span></td></tr>
+        <tr><td>销售毛利</td><td class="r num">${signRoll(r.grossCents)}</td></tr>
         <tr><td>隔夜报损</td><td class="r num">${sign(-r.writeoffCents)}</td></tr>
         <tr><td>固定支出</td><td class="r num">−${y(r.fixedCents)}</td></tr>
         ${r.laborCents ? `<tr><td>人工 · 小豆日结</td><td class="r num">−${y(r.laborCents)}</td></tr>` : ''}
         ${t.tastingPortions ? `<tr><td>试吃 ${t.tastingPortions} 份 · 每份 1 元</td><td class="r num">${sign(t.tastingIncomeCents)}</td></tr>
         <tr><td>样品食材（今天从柜里出，不另掏现金）</td><td class="r num">−${y(t.tastingCostCents)}</td></tr>` : ''}
-        <tr><td><b>经营净额</b></td><td class="r num"><b>${sign(r.netOpsCents)}</b></td></tr>
+        <tr><td><b>经营净额</b></td><td class="r num"><b>${signRoll(r.netOpsCents)}</b></td></tr>
         <tr><td>今晚自动还款</td><td class="r num">${y(t.repaidCents || 0)}</td></tr>
-        <tr><td>现金</td><td class="r num ${state.Cash < 0 ? 'negv' : ''}">${y(state.Cash)}</td></tr>
+        <tr><td>现金</td><td class="r num ${state.Cash < 0 ? 'negv' : ''}"><span class="roll" data-c="${state.Cash}">${y(state.Cash)}</span></td></tr>
         <tr><td>还欠</td><td class="r num">${y(state.DebtSupplier)}</td></tr>
       </table>
       ${out.length ? `<p class="negv" style="margin-top:8px">今天这些卖断了：${out.join('、')}。</p>` : ''}
