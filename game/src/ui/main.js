@@ -16,6 +16,7 @@ import { ticketlessCostCents } from '../engine/inspection.js';
 import { competitionOn, streetBoard } from '../engine/competition.js';
 import { evalCondition } from '../engine/dsl.js';
 import { EVENTS } from '../data/events.js';
+import { armAudio, sfx, isMuted, setMuted } from './audio.js';
 import { drawHandOrders, GRAMS_PER_JIN } from '../engine/weigh.js';
 import { judgeBlanch, blanchValueAt } from '../engine/blanch.js';
 import { regularLine, REGULAR_SLOTS } from '../data/customers.js';
@@ -193,18 +194,22 @@ const tabPhase = id => (id === 'stall' ? stallHub() : id);
 // 按钮点击绑在 #app 上做一次：试算汇总条要就地刷新，刷新后不该再回头重绑一遍监听
 app.addEventListener('click', e => {
   const tab = e.target.closest('[data-tab]');
-  if (tab) return goTab(tab.dataset.tab);
   const nav = e.target.closest('[data-nav]');
+  const host = e.target.closest('[data-act]');
+  // ① UI 点击/翻页（音频单）：只在按到了确实可点的按钮时出声，禁用的那颗不出声也不走逻辑
+  if ((tab || nav || host) && !e.target.closest('button[disabled]')) sfx('tap');
+  if (tab) return goTab(tab.dataset.tab);
   if (nav) {
     if (nav.dataset.nav === 'ledger') { ledgerBack = phase; return go('ledger'); }
     return go(ledgerBack);
   }
-  const host = e.target.closest('[data-act]');
   if (host) act(host);
 });
 // 按住与抬起要各记一次：见 refreshForecast 上方的 P2-2 注（捕获阶段先于按钮自身与失焦处理）
 app.addEventListener('pointerdown', startPress, true);
 for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, endPress, true);
+// 音频单行为规矩第 1 条：BGM 必须在玩家首次交互后才起（移动端自动播放策略），armAudio 自带幂等
+document.addEventListener('pointerdown', armAudio, true);
 
 function render() {
   stopAllBlanch();   // 换屏就把还在扫的熟度条收掉：没夹出的那一单按「没下手」走，不留着后台跑
@@ -319,7 +324,8 @@ function act(host) {
     case 'cook': return cook();
     case 'bstart': return startBlanch(d.cust);
     case 'bpull': return pullBlanch(d.cust);
-    case 'evening': return afterEvening();
+    case 'evening': sfx('cash'); return afterEvening();   // ⑤ 结算屏确认 = 收银
+    case 'mute': setMuted(!isMuted()); return render();   // 音频单：一键全关（BGM+SFX），偏好存独立键
     case 'choose': return resolvePending(d.choice);
     case 'next': return newDay();
     case 'sellout': return retireShop();
@@ -432,6 +438,7 @@ function picksFromDraft() {
 function submitDraft() {
   const r = submitBasket(state, picksFromDraft(), rng);   // 第 3 步：组篮 + 支付
   if (!r.ok) return go('market');
+  sfx('buy');                 // ④ 确认采购（付得成才响）
   pricePick = state.PriceTier;
   saveGame(state);
   return go(CONFIG.prep ? 'prep' : 'lock');
@@ -458,6 +465,7 @@ function openShop() {
   // 顾客要多少仍写在滑杆标签与双读数里，抓多少由玩家自己定。
   if (!orders.length) {                                        // 断点回来不重抽（抽卡会推进随机流）
     pendingEvent = drawEvent(state, 'morning', rng);           // 第 6 步：晨间事件（先亮出来才让玩家选）
+    if (pendingEvent) sfx('tap');                              // 事件弹出复用 ①，不另加音色
     orders = drawHandOrders(state, rng);                       // 第 7 步的亲手单先亮单子
     gramsBy = Object.fromEntries(orders.map(o => [o.customerId, Object.fromEntries(o.lines.map(l => [l.cat, 0]))]));
     okRef = {};
@@ -509,7 +517,8 @@ function startGrab(e, el) {
   e.preventDefault();
   try { el.setPointerCapture?.(e.pointerId); } catch { /* 指针已失效时照常按抓菜处理 */ }
   el.classList.add('on');
-  grab = { cust: el.dataset.cust, cat: el.dataset.cat, el, t0: performance.now(), last: performance.now(), acc: 0, timer: 0 };
+  grab = { cust: el.dataset.cust, cat: el.dataset.cat, el, t0: performance.now(), last: performance.now(), acc: 0, timer: 0,
+    g0: Number((gramsBy[el.dataset.cust] || {})[el.dataset.cat] || 0) };
   // 用定时器而不是 rAF：后台/隐藏页 rAF 会停，按住的手就白按了；16 毫秒一跳，前台观感一致
   grab.timer = setInterval(tickGrab, 16);
 }
@@ -539,6 +548,8 @@ function stopGrab(e) {
   // 轻点 = 抓起一小撮，按当前档位 +5 或 +1 克；指针被系统收走（pointercancel）不算点按
   if (performance.now() - g.t0 < HOLD_DELAY && e?.type !== 'pointercancel') addGrams(g.cust, g.cat, stepFor(g.cust, g.cat));
   refreshOrder(g.cust);
+  // ② 抓菜落袋（音频单）：这一口真落了克才出声，指针被系统收走或空放不算
+  if (Number((gramsBy[g.cust] || {})[g.cat] || 0) > g.g0) sfx('grab');
 }
 
 function startPinch(e, el) {
@@ -626,10 +637,15 @@ function exactNow(cust, cat) {
 
 // 每条已锁行各自一格徽标：称重后逐行对着带内/带外翻 hidden
 function refreshExact() {
+  let hit = false;
   for (const o of orders) for (const l of o.lines) {
     const el = document.getElementById(`ex-${o.customerId}-${l.cat}`);
-    if (el) el.hidden = !exactNow(o.customerId, l.cat);
+    if (!el) continue;
+    const shown = !el.hidden;                       // 刷新前这一枚亮不亮
+    el.hidden = !exactNow(o.customerId, l.cat);     // 判定式子一字未动（P2-4 口径）
+    if (shown !== true && !el.hidden) hit = true;   // 由藏到亮 = 正好那一下
   }
+  if (hit) sfx('exact');   // ③ 称「正好」正反馈叮声
 }
 
 // 短斤带（<90%）行内提示的口径：这一行进过碗、松手后仍不足。0 克是「还没称」不是「这一口下去了」，不提示。
@@ -686,7 +702,7 @@ function cook() {
 function afterEvening() {
   if (pendingEvent) return go(phase);        // 已经抽出来了，重复点「打烊」不再二次抽卡
   pendingEvent = eveningDraw(state, rng);  // 第 10 步抽取
-  if (pendingEvent) return go(phase);       // 停在弹层等玩家选
+  if (pendingEvent) { sfx('tap'); return go(phase); }       // 停在弹层等玩家选（弹出复用 ①）
   return finishNight(null);
 }
 
@@ -714,12 +730,14 @@ function finishNight(choice, ev = pendingEvent) {
 function retireShop() {
   const e = judgeRetire(state);            // 判空即过：入口本只在 NP/达标时出现，真不达标就什么也不发生
   if (!e) return go('night');
+  sfx('level');                            // ⑥ 盘店 jingle（真成了结局才响）
   state.EndingId = e;
   saveGame(state);
   return go('end');
 }
 
 function quitShop() {
+  sfx('level');
   state.EndingId = ENDING.MEDIOCRE;        // #6 是随时出口，不设门槛（§六「玩家随时可点不干了」）
   saveGame(state);
   return go('end');
@@ -728,6 +746,7 @@ function quitShop() {
 function buyNextTier() {
   const price = TIERS_STALL[state.Tier - 1].upgradePrice;
   if (!price || state.Cash < price) return go('shop');
+  sfx('level');                            // ⑥ 升级 jingle（钱够、真升了才响）
   // 门面 → 整街双店这一笔就是正文 §六 说的"盘下对面铺子"：#3/#4 判在付钱当刻，判空即过、只升档
   if (state.Tier === 5) {
     const e = judgeBuyout(state);
@@ -829,6 +848,9 @@ const VIEWS = {
         <div><div class="muted">可赊</div><div class="num">${y(creditAvailable(state))} 元</div></div>
       </div>
       <p class="muted">存档存在这台设备的这个浏览器里，换浏览器或清浏览器数据就带不走。规则版本 ${SAVE_VERSION}。</p>
+      <div class="row" style="margin-top:10px">
+        <button class="ghost" data-act="mute">${isMuted() ? '声音：关' : '声音：开'}</button>
+      </div>
       <div class="row" style="margin-top:10px">
         <button class="ghost" data-act="restart">重开一局</button>
         <button class="ghost" data-act="clear" ${clearArmed ? 'style="border-color:var(--tomato);color:var(--tomato)"' : ''}>${clearArmed ? '确认清除？' : '清除存档'}</button>
