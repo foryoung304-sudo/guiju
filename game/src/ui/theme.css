@@ -335,7 +335,7 @@ td.r, th.r { text-align: right; }
 }
 .comment.hot { border-left-color: var(--tomato); }
 
-/* ── 事件弹层（立绘 + 对话框，不做动画）──────────────────── */
+/* ── 事件弹层（立绘 + 对话框）──────────────────── */
 .overlay {
   position: fixed; inset: 0; background: rgba(27, 42, 74, .55);
   display: flex; align-items: flex-end; justify-content: center; z-index: 20; padding: 10px;
@@ -346,6 +346,79 @@ td.r, th.r { text-align: right; }
 .event .who { background: var(--tomato); color: var(--paper); display: inline-block; padding: 2px 10px; font-size: 12px; letter-spacing: .08em; }
 .event .text { margin: 8px 0 12px; font-size: 14px; line-height: 1.75; }
 .event .acts { display: grid; gap: 8px; }
+
+/* ── 事件入场待遇四模板（施工单 task-event-motion-20261102）──────────────────────
+   纪律：只用 transform / opacity；入场 ≤600ms；一律单次（不写 iteration-count 即 1）；
+   无频闪（明暗只单向走一趟，同屏没有 3 次/秒以上的往复）。
+   标签只选模板，不参与判定：事件数据里的 motion 字段仅在呈现层拼成一个 class（main.js），
+   抽取 / 结果 / 计数代码读不到它，红线见 events.js 文件头。
+   两套宿主共用同一批关键帧：事件在 .overlay 全屏遮罩里，动的是里面那张卡片（遮罩本身不动，否则整屏跟着抖）；
+   结局屏没有遮罩，动的是 .panel 本身。 */
+.overlay > .event { position: relative; overflow: hidden; z-index: 1; animation: fxCard 240ms ease-out 1 both; }
+@keyframes fxCard { from { opacity: 0; transform: translate3d(0, 12px, 0); } to { opacity: 1; transform: none; } }
+.panel.fx-bad, .panel.fx-good, .panel.fx-person, .panel.fx-calm, .panel.fx-end { position: relative; overflow: hidden; }
+
+/* 覆盖层节点（暗角 / 金光 / 纸屑）：都吃 overflow:hidden 裁边，都不接点击，玩家照旧点卡片。 */
+.fxwash, .sweep, .cf { position: absolute; pointer-events: none; opacity: 0; }
+.fxwash { inset: 0; background: radial-gradient(120% 90% at 50% 45%, rgba(27, 42, 74, 0) 42%, rgba(12, 18, 34, .78) 100%); }
+.sweep { inset: 0; background: linear-gradient(105deg, rgba(242, 178, 51, 0) 35%, rgba(255, 224, 138, .82) 50%, rgba(242, 178, 51, 0) 65%); }
+.cf { top: -6px; left: 8%; width: 7px; height: 10px; background: var(--mustard); border-radius: var(--r-sm); }
+
+/* 1 坏消息：卡片入场并轻震一次（合计 380ms，位移峰值 6px）+ 全屏暗角渐入（420ms，只动 opacity）。
+   震与入场写成同一条关键帧：两条动画同时声明 transform 时后者整段接管（fill: both 还回填延迟期），
+   分开写会先「定住」再震，看着像卡顿。 */
+.overlay.fx-bad > .event, .panel.fx-bad { animation: fxBadIn 380ms ease-out 1 both; }
+@keyframes fxBadIn {
+  0% { opacity: 0; transform: translate3d(0, 12px, 0); }
+  31% { opacity: 1; transform: none; }
+  45% { transform: translate3d(-6px, 0, 0); }
+  63% { transform: translate3d(4px, 0, 0); }
+  80% { transform: translate3d(-2px, 0, 0); }
+  100% { opacity: 1; transform: none; }
+}
+.fx-bad .fxwash { animation: fxVignette 420ms ease-out 1 both; }
+@keyframes fxVignette { from { opacity: 0; } to { opacity: 1; } }
+
+/* 2 好事 / 横财：一道金光自左扫过（560ms）+ 四片纸屑飘落（每片 400ms、最长延迟 180ms ⇒ 收尾 580ms）。
+   数量克制：四片，不成阵。扫光与纸屑只由 JS 在这两套标记里生成节点，别处不挂。 */
+.fx-good .sweep, .fx-end .sweep { animation: fxSweep 560ms ease-in-out 1 both; }
+@keyframes fxSweep { 0% { opacity: 0; transform: translateX(-115%); } 18% { opacity: 1; } 82% { opacity: 1; } 100% { opacity: 0; transform: translateX(115%); } }
+.fx-good .cf { animation: fxFall 400ms ease-in 1 both; }
+.fx-good .cf:nth-of-type(2) { left: 22%; background: var(--tomato); animation-delay: 60ms; }
+.fx-good .cf:nth-of-type(3) { left: 52%; background: var(--teal); animation-delay: 120ms; }
+.fx-good .cf:nth-of-type(4) { left: 78%; background: var(--mustard); animation-delay: 180ms; }
+@keyframes fxFall { 0% { opacity: 0; transform: translate3d(0, -10px, 0) rotate(-8deg); } 25% { opacity: 1; } 100% { opacity: 0; transform: translate3d(6px, 92px, 0) rotate(14deg); } }
+
+/* 3 人物事件：事件图自侧滑入（320ms）+ 正文逐字蹦字（每字 8ms，六条人物行最长 54 字 ⇒ 末字延迟 53×8 + 120 = 544ms，仍 ≤600ms）。
+   点一下整屏补全：JS 只加一个 .done，补全动作交回 CSS，不留计时器。
+   .ch 用 inline-block：transform 对纯 inline 元素不生效，逐字位移就没地方落。 */
+.fx-person .art { animation: fxSlideArt 320ms ease-out 1 both; }
+@keyframes fxSlideArt { from { opacity: 0; transform: translateX(-22%); } to { opacity: 1; transform: none; } }
+.fx-person .text .ch { display: inline-block; opacity: 0; animation: fxChar 120ms linear 1 both; animation-delay: calc(var(--i) * 8ms); }
+@keyframes fxChar { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.fx-person .text.done .ch { animation: none; opacity: 1; transform: none; }
+
+/* 4 中性 / 悬念：慢淡入（480ms）+ 纸页感微移（8px 收拢，同一条动画里） */
+.overlay.fx-calm > .event, .panel.fx-calm { animation: fxPaper 480ms ease-out 1 both; }
+@keyframes fxPaper { from { opacity: 0; transform: translate3d(0, 8px, 0); } to { opacity: 1; transform: none; } }
+
+/* 结局屏专属一次性待遇（单上写明仅此一处允许专属）：#3 规矩立住 / #5 金盆洗手 = 金光 + 主体升入。
+   其余结局（#1 #2 #4 坏消息、#6 中性）照上面模板走，不给专属；暗角不带给结局屏——结局卡片上全是数字，
+   压暗一层就挡住读数，而这里没有遮罩可挂，只能落进卡片自己。 */
+.panel.fx-end { animation: fxRise 560ms cubic-bezier(.2, .7, .2, 1) 1 both; }
+@keyframes fxRise { from { opacity: 0; transform: translate3d(0, 26px, 0) scale(.985); } to { opacity: 1; transform: none; } }
+
+/* 降级：prefers-reduced-motion 时四套待遇全收敛成一次淡入——震 / 扫 / 落 / 滑 / 蹦字一律取消，
+   蹦字尤其要清掉延迟，否则读屏与低敏感用户会看到半截字。
+   压不回父选择器就逐条点名：`.overlay.fx-bad > .event` 比 `.overlay > .event` 特异度高，
+   这里靠 !important 取胜，不靠选择器写得更长。 */
+@media (prefers-reduced-motion: reduce) {
+  .overlay > .event, .panel.fx-bad, .panel.fx-good, .panel.fx-person, .panel.fx-calm, .panel.fx-end {
+    animation: fxPaper 300ms ease-out 1 both !important; animation-delay: 0ms !important;
+  }
+  .fx-person .art, .fx-person .text .ch { animation: none !important; opacity: 1 !important; transform: none !important; }
+  .fxwash, .sweep, .cf { animation: none !important; opacity: 0 !important; }
+}
 
 /* 场景头图：定版素材都是竖构图，横幅裁切会把人物切成半截（实测反馈 §二.1、§二.4）。
    这里按 4:3 / 16:9 取景保住人物完整，出图前先垫一层色块，不让玩家看见空白。 */

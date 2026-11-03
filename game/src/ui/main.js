@@ -16,7 +16,7 @@ import { ticketlessCostCents } from '../engine/inspection.js';
 import { competitionOn, streetBoard } from '../engine/competition.js';
 import { evalCondition } from '../engine/dsl.js';
 import { EVENTS } from '../data/events.js';
-import { armAudio, sfx, isMuted, setMuted } from './audio.js';
+import { armAudio, sfx, isMuted, setMuted, motionCue } from './audio.js';
 import { drawHandOrders, GRAMS_PER_JIN } from '../engine/weigh.js';
 import { judgeBlanch, blanchValueAt } from '../engine/blanch.js';
 import { regularLine, REGULAR_SLOTS } from '../data/customers.js';
@@ -58,6 +58,8 @@ let orders = [];         // 当日亲手单
 let gramsBy = {};        // customerId → { 品类: 克数 }
 let preEvent = null;     // 第 2 步晨间情报（无分支）
 let pendingEvent = null; // 等玩家选的事件（第 6 步 / 第 10 步）
+const CUE_EVENT_ID = 'evt_d_001';   // 声音标记唯一挂靠点（动画单第二条：赵大妈出场）；撤这条就是删这一行与 render() 里那三行
+let cueLast = null;                 // 上一次挂载的事件 id，用来保证「同一次出场只响一声」
 let pricePick = 'standard';
 let prepPick = ['将就', '将就', '将就'];    // 第 4 步草稿：三站档名
 let wakePick = false;                        // 早起勾选（占 1 格工时）
@@ -204,6 +206,10 @@ app.addEventListener('click', e => {
     return go(ledgerBack);
   }
   if (host) act(host);
+  // 动画单：人物事件逐字蹦字「可点击补全整段」。补全只加一个 class，交给 CSS 收尾，不留计时器；
+  // 放在 act 之后，点在按钮上的那一下仍旧照常走选择逻辑（.text 里没有按钮，两者不打架）
+  const typed = e.target.closest('.event .text');
+  if (typed) typed.classList.add('done');
 });
 // 按住与抬起要各记一次：见 refreshForecast 上方的 P2-2 注（捕获阶段先于按钮自身与失焦处理）
 app.addEventListener('pointerdown', startPress, true);
@@ -214,6 +220,12 @@ document.addEventListener('pointerdown', armAudio, true);
 function render() {
   stopAllBlanch();   // 换屏就把还在扫的熟度条收掉：没夹出的那一单按「没下手」走，不留着后台跑
   app.innerHTML = (VIEWS[phase] || VIEWS.boot)() + tabBar();
+  // 声音标记（动画单第二条）：只挂赵大妈那条人物事件的入场，一声轻咳式拟声，不带一个字。
+  // 独立开关是 audio.js 里的 MOTION_CUE；店主说要撤，删这一段 + audio.js 那一块就干净了，不留残钩。
+  // 按「本次挂载」触发：同一条事件下一晚再抽到，还会再响一次。
+  const cueNow = pendingEvent ? pendingEvent.id : null;
+  if (cueNow === CUE_EVENT_ID && cueLast !== cueNow) motionCue('grandmaCough');
+  cueLast = cueNow;
   app.classList.toggle('hasTabs', showTabs());   // 有标签才留那一条底部高度，流程屏照旧全屏
   // 实测问题 #8：数量框一边打字一边刷试算（原来 input 用 change，必须回车/失焦才动）
   app.querySelectorAll('input[data-qty]').forEach(el => {
@@ -1032,6 +1044,19 @@ const VIEWS = {
 
 const ENDING_NAMES = { 1: '翻车', 2: '破产', 3: '规矩立住', 4: '烧心大王', 5: '金盆洗手', 6: '平庸收摊' };
 
+// ── 动画单（task-event-motion-20261102）：呈现标签 → class。两张表只喂呈现层，不参与任何判定。
+// FX_CLASS 的键就是 events.js 里那枚 motion 字段；theme.css 里同名的四套待遇是唯一的消费方。
+const FX_CLASS = { bad: 'fx-bad', good: 'fx-good', person: 'fx-person', calm: 'fx-calm' };
+// 结局待遇：#3 规矩立住 / #5 金盆洗手 = 单上写明的「结局屏专属排面」（金光 + 主体升入）；
+// #1 #2 #4 走坏消息模板，#6 走中性模板，都不给专属。
+const FX_ENDING = {
+  [ENDING.RULES]: 'fx-end', [ENDING.RETIRE]: 'fx-end',
+  [ENDING.CRASH]: 'fx-bad', [ENDING.BANKRUPT]: 'fx-bad', [ENDING.HEARTBURN]: 'fx-bad',
+  [ENDING.MEDIOCRE]: 'fx-calm',
+};
+// 逐字蹦字：正文切成「一个字一个 span」，序号交给 CSS 的 --i 算延迟。字一个不改，只动呈现。
+const typedHtml = text => [...text].map((ch, i) => `<span class="ch" style="--i:${i}">${esc(ch)}</span>`).join('');
+
 // 预检反馈 F1（0366bd6）：这一列原先只有「有 / 无」两态，把手气没抽中、本来就不给票、自制不进取数三种情况全塌成了「无」。
 // 于是外购全带票的日子，结局屏按口径算出的覆盖率是 100%（自制两边都不进），玩家拿明细自己除却得到 90%——
 // 数没错，是这一列把口径说反了。自制行从此单列「自制·不计」，与外购无票分开。
@@ -1445,13 +1470,19 @@ function eventOverlay() {
     : '<button data-act="choose">知道了</button>';
   // E.6 的销毁决策要在点下去之前看得见数额：无票货按成本记多少，全从自己那张进货单的「票」列推出来
   const risk = ev.scoreCheck === 'big' ? ticketlessCostCents(state) : 0;
-  return `<div class="overlay"><div class="event">
+  // 入场待遇（动画单）：motion 标签在这里被读的唯一一次，只为拼一个 class；读不到标签就没有待遇，
+  // 走 .overlay > .event 那条基础淡入。抽取 / 结果 / 计数一律不碰这个字段（红线见 events.js 文件头）。
+  const fx = FX_CLASS[ev.motion] || '';
+  // 暗角是「全屏」节点，所以挂在遮罩上、卡片之外，卡片自带 z-index:1 压在它上面——正文该亮的还是亮的。
+  // 金光与纸屑在卡片内，靠卡片的 overflow:hidden 裁边；纸屑封顶四片。
+  return `<div class="overlay ${fx}"><div class="event">
     <img class="art" src="${eventArt(ev.id)}" alt="" />
     <div class="body"><span class="who">${esc(ev.kind)} · ${ev.timing === 'evening' ? '打烊后' : '清早'}</span>
-      <p class="text">${esc(ev.text)}</p>
+      <p class="text">${fx === 'fx-person' ? typedHtml(ev.text) : esc(ev.text)}</p>
       ${risk ? `<p class="muted">按成本记，无票的货是 ${y(risk)}——销毁不动现金，动的是柜里的货。</p>` : ''}
       <div class="acts">${acts}</div></div>
-  </div></div>`;
+    ${fx === 'fx-good' ? '<span class="sweep"></span><i class="cf"></i><i class="cf"></i><i class="cf"></i><i class="cf"></i>' : ''}
+  </div>${fx === 'fx-bad' ? '<div class="fxwash"></div>' : ''}</div>`;
 }
 
 function endPanel(p, standalone) {
@@ -1460,7 +1491,10 @@ function endPanel(p, standalone) {
   // 缺的是把这一层换算摆在卡片上。下面这行只做加法还原，不新增任何数。
   const opsSum = p.reports.reduce((s, x) => s + x.netOpsCents, 0);
   const evSum = p.reports.reduce((s, x) => s + x.eventNetCents, 0);
-  return (standalone ? hud() : '') + `<div class="panel accent">
+  // 结局待遇（动画单）：单上写的是「结局屏专属」，所以只有专门的结局屏（standalone）上待遇，
+  // 账本页里那张附带的副本不挂——否则每翻一次账本都重演一遍，就成了循环动画。
+  const fx = standalone ? (FX_ENDING[p.endingId] || '') : '';
+  return (standalone ? hud() : '') + `<div class="panel accent ${fx}">
     <h2 class="kind-bad">结局：${ENDING_NAMES[p.endingId]}</h2>
     ${p.endingId === ENDING.MEDIOCRE ? `<p class="text">${esc(quitBlurb(state))}</p>` : ''}
     <div class="grid2">
@@ -1472,6 +1506,7 @@ function endPanel(p, standalone) {
     <p class="muted">累计净赚 ${y(r.NP)} = 逐日经营净额合计 ${sign(opsSum)} + 事件账合计 ${sign(evSum)}。罚款、赔礼、涨薪这些当天就记进净赚；买摊位的钱与欠供应商的账不算在这里。</p>
     <hr /><p class="muted">这一路一共 ${p.purchases.length} 笔进货，逐笔在上面的进货单里。</p>
     <button class="go" style="margin-top:10px" data-act="restart">换个买法重开</button>
+    ${fx === 'fx-end' ? '<span class="sweep"></span>' : ''}
   </div>`;
 }
 

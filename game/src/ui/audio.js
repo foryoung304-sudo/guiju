@@ -147,5 +147,49 @@ export function sfx(name) {
 export function audioStatus() {
   return { available: !!ctx, state: ctx ? ctx.state : 'none', muted, gestured,
     bgmLoaded: !!bgmBuf, bgmPlaying: !!bgmSrc, bgmFail, master: MASTER, bgmBus: BGM_GAIN, sfxBus: SFX_GAIN,
-    bgmSeconds: bgmBuf ? +bgmBuf.duration.toFixed(3) : null };
+    cue: MOTION_CUE, bgmSeconds: bgmBuf ? +bgmBuf.duration.toFixed(3) : null };
+}
+
+// ── 声音标记（动画单 task-event-motion-20261102 第二条）：整块由下面的开关隔离 ──────────
+// 单上要求「说撤就整条干净摘除，不留残钩」：撤 = 把 MOTION_CUE 置 false（画面立刻无声，逻辑一字不动），
+// 彻底删 = 去掉这一整块 + main.js 里的 CUE_EVENT_ID / cueLast / render() 那三行与 import 里的那个名字。
+// 只做一声轻咳式拟声：程序合成，不录音、不 TTS、不带一个字；走 sfxBus，所以与 BGM/SFX 共用同一个静音开关。
+export const MOTION_CUE = true;
+const CUE_GAP = 900;   // 同一声标记的最小间隔（毫秒），防连点/重排把它重复叠响
+let cueLastAt = 0;
+
+// 两下带气声的窄带噪声 = 「咳」的形状：快速起振、短促峰、平方衰减的尾巴，频点落在人声区但不成字
+function cough(at, freq, dur, peak) {
+  const n = Math.max(1, Math.round(ctx.sampleRate * dur));
+  const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+  const d = buf.getChannelData(0);
+  let prev = 0;
+  for (let i = 0; i < n; i++) {
+    const w = Math.random() * 2 - 1;
+    const e = Math.min(1, i / (n * 0.06)) * (1 - i / n) ** 2.2;
+    d[i] = (w - prev) * e; prev = w;
+  }
+  const src = ctx.createBufferSource(); src.buffer = buf;
+  const bp = ctx.createBiquadFilter(); bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 1.4;
+  const g = ctx.createGain(); g.gain.value = peak;
+  src.connect(bp); bp.connect(g); g.connect(sfxBus);
+  src.start(ctx.currentTime + at);
+}
+
+const CUES = {
+  // 第一下稍实，第二下更轻更闷。增益是量出来的：离线渲染回读峰值 0.1057 满幅（≈ −19.5 dBFS），
+  // 与 ①「点击」的签过读数 0.1069 同一档——出场标记不该压过操作音，但也不能哑到听不到位
+  // （初版照 VOICES 的量级写 0.30，实测只剩 0.0125，因为带通把噪声能量滤掉了大半）。
+  grandmaCough: () => { cough(0, 620, 0.13, 2.4); cough(0.15, 500, 0.17, 1.5); },
+};
+
+export function motionCue(name) {
+  if (!MOTION_CUE || !CUES[name]) return;
+  if (muted || !gestured) return;      // 与 BGM 同一条规矩：玩家没动手之前不出声
+  if (!ctx) ensure();
+  if (!ctx || ctx.state === 'suspended') return;
+  const now = Date.now();
+  if (now - cueLastAt < CUE_GAP) return;
+  cueLastAt = now;
+  try { CUES[name](); } catch {}
 }

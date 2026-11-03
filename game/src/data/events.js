@@ -8,9 +8,19 @@
 // 回签审复 §一.1（20261031）：三条坏事事件全部后置到第 3 天之后——这是定稿 §四「压力后置」与本稿第 5 行
 // 出货惯例③「负面机制在第 3 天之后才解锁」的完整实现，不是新数值。菜价上涨把 condition 与 must_fire
 // 双双钉在 Day>=7（定稿只挪了 must_fire、condition 留在 Day>=3，第 3 天随机抽到即打穿开学周）。
+//
+// ── 呈现标签 `motion` 的红线（施工单 task-event-motion-20261102）────────────────────
+// 每行一枚 `motion` 只服务一件事：入场待遇选哪个模板（person 人物 / bad 坏消息 / good 好事横财 / calm 中性悬念）。
+// **只许呈现层读**——抽取（drawEvent / weightOf / must_fire）、结果结算（applyOpen / applyHidden / resolveChoice）、
+// 计数与存档里任何一处拿它做判定，即判红。选它的规则也写在人话里：具名人物到场为主 → person；否则按 kind 落
+// bad / good / calm。M1 四条（001/002/011/031）刻意一人一格，让玩家一趟流程就能把四种待遇各看一遍。
+// 本字段不参与任何 equals / 序列化 / 随机消耗，故 sweep 与 m3 必须继续对 r14 逐字节同。
+// 注：18 条全打标，但 timing='morning_pre' 的两条（011 / stockout）走晨间情报条、不经过事件弹层，
+// 入场待遇只落在其余 16 条弹层事件与 6 个结局屏上——情报条要不要也来一套，属未下达的口径，不自作。
 export const EVENTS = [
   {
     id: 'evt_d_001',
+    motion: 'person',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'daily',
     ship: 'M1',
     timing: 'evening',
@@ -30,6 +40,7 @@ export const EVENTS = [
   },
   {
     id: 'evt_d_002',
+    motion: 'bad',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'daily',
     ship: 'M1',
     timing: 'morning',
@@ -49,6 +60,7 @@ export const EVENTS = [
   },
   {
     id: 'evt_d_011',
+    motion: 'calm',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'daily',
     ship: 'M1',
     timing: 'morning_pre',
@@ -67,6 +79,7 @@ export const EVENTS = [
   },
   {
     id: 'evt_d_031',
+    motion: 'good',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'daily',
     ship: 'M1',
     timing: 'evening',
@@ -91,6 +104,7 @@ export const EVENTS = [
     // 玩家的应对只有定价与篮子 → 两个分支不写任何差异化数值（E.9 的 effect_open 原文也只有一句「写 PricewarDays = 3」），
     // 跟不跟价由玩家次日的价签自己体现。分支差异若要给钱，须店主先定数，不在代码里替正文发明。
     id: 'evt_s_pricewar',
+    motion: 'bad',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'special',
     ship: 'M2',
     timing: 'evening',
@@ -115,6 +129,7 @@ export const EVENTS = [
     // 附录 E.8 回流名场面：价格战的结果而不是剧情奖励 → weight=0，只有 evt_s_pricewar 的 shift 拉满才可能抽到。
     // 玩家不做选择，按 Rep 自动分版（resolveChoice 走 auto_branch，命中第一条即该档）。
     id: 'evt_s_return',
+    motion: 'good',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'special',
     ship: 'M2',
     timing: 'evening',
@@ -142,6 +157,7 @@ export const EVENTS = [
     // E.4 原文「两分支明账相同，暗线相同」→ 两个分支的 ops 逐字一样，差别只在玩家嘴上应一句；
     // 触发后 EventHistory 写入本 id，FACILITIES 的 unlock 'EVT?evt_d_021' 随即放行（正文 3.6 的口径）。
     id: 'evt_d_021',
+    motion: 'calm',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'daily',
     ship: 'M2',
     timing: 'evening',
@@ -165,6 +181,7 @@ export const EVENTS = [
     // （Score = 覆盖率×60 + 设施分 + 销毁比例×15 − Risk×0.3；≥55 通过 / 35–55 整改 / <35 → §六 结局 #1）。
     // 排在 evt_s_flag 之前：同一晚两条硬触发都达标时取数组里的前一条（正文只写「同日至多 1 个特殊事件」，未给两硬触发的先后，已登记回报）。
     id: 'evt_s_insp',
+    motion: 'person',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'special',
     ship: 'M2',
     timing: 'evening',
@@ -190,6 +207,7 @@ export const EVENTS = [
     // 现金不足走 D0 ×0.8 持续 2 日的兜底（同批 a 项明写「不变」）。首次触发写 seen_routine_inspection → fac_cert 上架。
     // E.9「出示票据（默认） / 支吾（无收益，只有台词）」：两分支同账，台词原文不在附录里（属文案 agent 的活，已登记回报）。
     id: 'evt_s_insp2',
+    motion: 'person',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'special',
     ship: 'M2',
     timing: 'evening',
@@ -214,6 +232,7 @@ export const EVENTS = [
     // 「签合同」分支写的是 `requires: 'HAS?fac_contract'`，而 fac_contract 的解锁条件正是 EVT?evt_s_poach ——
     // 两条互为前置，一局只触发一次的挖角永远买不到合同 → 该分支按原文照实现、死锁本身已登记回报。
     id: 'evt_s_poach',
+    motion: 'person',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'special',
     ship: 'M2',
     timing: 'evening',
@@ -239,6 +258,7 @@ export const EVENTS = [
     // 不写 RegularStory（E.10 约束第 3 条：四个槽固定给常客线 A–D，赵大妈是 c06 人物、不占槽）。
     // count(Facilities) 在 DSL 里没有函数调用，走 readVar 的只读别名 FacilityCount（附录 F.5 的 Facilities 元素个数，显多秤不计数）。
     id: 'evt_s_promo',
+    motion: 'person',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'special',
     ship: 'M2',
     timing: 'evening',
@@ -260,6 +280,7 @@ export const EVENTS = [
     // 排期归属：正文 :362 把「美食节评选与毕业季锦旗两条 L 事件」划在**首更补齐**，本批把数据行落进来但不改任何数值口径；
     // 若店主要按两刀严格切，删掉这一行即可（无引擎耦合），理由与影响写在 delta 第二十五节。
     id: 'evt_s_flag',
+    motion: 'good',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'special',
     ship: 'M2',
     timing: 'evening',
@@ -282,6 +303,7 @@ export const EVENTS = [
     // 应对仍是定价与品质 → 不写现金、不写 Rep/Risk、不碰 S 的钳位带。无竞争层时 S ≡ 1，本条无数值落点（已登记回报）。
     // 文案 agent 自撰（正本 5.3 只给了「王老板改名蹭名气」这一句事实），待店主审。
     id: 'evt_s_copycat',
+    motion: 'bad',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'special',
     ship: 'M2',
     timing: 'evening',
@@ -302,6 +324,7 @@ export const EVENTS = [
     // 不是执行前置 → 除了留言不写任何机械效果，不设分支、不设报价数值（48,000 元这个门槛是「累计净赚」的读数，不扣钱）。
     // 单按钮确认型（actions 空 → 界面只出「知道了」），文案 agent 自撰。
     id: 'evt_s_buyout',
+    motion: 'calm',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'special',
     ship: 'M2',
     timing: 'evening',
@@ -323,6 +346,7 @@ export const EVENTS = [
     // 缺口由第 7 步的 ω/Ω 拆分与 7f 单轮溢出吸收，不新造缺货系统。早起「晨采好货必到」只保菜农 / 老李正经货，
     // 不覆盖粉坊（3.12 口径本就如此，两条不冲突）。文案走 5.2 示例原句。
     id: 'evt_d_stockout',
+    motion: 'bad',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'daily',
     ship: 'M2',
     timing: 'morning_pre',
@@ -346,6 +370,7 @@ export const EVENTS = [
     // 赔礼分支的置灰按 spec 明写「照事件通则」落 gate:'afford'；硬扛分支的 Risk +8 走保护池那条清算顺序（裁定 9a959bd §二，applyHidden 已实现）。
     // 次日 D0 ×0.92 走已签的 next_day_traffic_mult 单发通道（与 evt_d_001「当场要钱」×0.85 同一格，第 7a 步读完即复位）。
     id: 'evt_d_complaint',
+    motion: 'bad',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'daily',
     ship: 'M2',
     timing: 'evening',
@@ -374,6 +399,7 @@ export const EVENTS = [
     // spec 原文是「无条件」，这里仍留 Day>=3 一格地板：定稿 §四「压力后置」+ 回签审复 §一.1 是正文级口径
     // （「负面机制在第 3 天之后才解锁」，M1 三条坏事行就是照它钉的），批内简报不覆盖它；要按字面第 1 晚就能裂锅，把本行 condition 改回 'true' 即可（已登记回报）。
     id: 'evt_d_pot',
+    motion: 'bad',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'daily',
     ship: 'M2',
     timing: 'evening',
@@ -397,6 +423,7 @@ export const EVENTS = [
     // Rep +5 属暗线 → effect_hidden；D0 乘数属明账（次日客流）→ open 里的 d0Buff（E 表前 :127 的合并规则：新值乘入、天数取最大）。
     // 出场人物用附录 H c05「小刘（测评号，口碑扩音器）」，文案从他的探店口吻写、不影射任何真实测评账号（正文 :372 红线）。
     id: 'evt_d_blogger',
+    motion: 'person',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'daily',
     ship: 'M2',
     timing: 'evening',
