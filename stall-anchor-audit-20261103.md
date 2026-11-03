@@ -85,3 +85,5 @@
 - **换入方式**：整文件覆盖、**文件名不变** ⇒ `intro.js`／`main.js` 零改动；换后从落地文件回读，sha256／md5／字节与候选**完全相同**，`ffprobe` 解出尺寸与单上一致。
 - **四道门换后重跑全绿、零漂移**：回归 `✓ ALL PASS`；build 产物哈希未变（`index-Bnc6d1vD.js` 125.97 kB／`index-KjhW03rD.css` 23.07 kB）；sweep 491 行 diff 0；m3 566 行 diff 0。
 - **⊘ 尚未生效到玩家侧**：发布连接器未通，**公网仍是旧版图**（玩家看到的还是 `936ae209…`／`698de094…`）。本节说的是仓库正本，不是线上。
+
+- **更正（同日，发布后）**：上一条 ⊘ **已解除**。§五十八 走既有站点新开 action 发布并实测线上：`/img/tier-1.webp` = `f47ca30e…73edcf` 118,442 B、`/img/business.webp` = `f2bf7809…030cda4f` 277,720 B，与换入正本逐字节相同；`/index.html` 引 `index-Bnc6d1vD.js`／`index-KjhW03rD.css`，JS 与本地 dist 同哈希。线上地址 `https://guiju-stall-m1-kh1fps4rg9t.qoder.website`。
