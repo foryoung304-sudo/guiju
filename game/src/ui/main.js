@@ -17,6 +17,9 @@ import { competitionOn, streetBoard } from '../engine/competition.js';
 import { evalCondition } from '../engine/dsl.js';
 import { EVENTS } from '../data/events.js';
 import { armAudio, sfx, isMuted, setMuted, motionCue } from './audio.js';
+// 开场动画（task-opening-cinematic-20261102）：只借两个入口——新档首播、以及「我的」页重看。
+// 整层挂 body、不 import 引擎，撤掉 = 删这一行 + act 里两处 + me() 里那颗按钮 + theme.css 那一块。
+import { introShouldPlay, showIntro } from './intro.js';
 import { drawHandOrders, GRAMS_PER_JIN } from '../engine/weigh.js';
 import { judgeBlanch, blanchValueAt } from '../engine/blanch.js';
 import { regularLine, REGULAR_SLOTS } from '../data/customers.js';
@@ -376,7 +379,14 @@ function endPress() {
 function act(host) {
   const d = host.dataset;
   switch (d.act) {
-    case 'new': return startNew(Number(document.getElementById('seedbox')?.value) || (Date.now() % 100000));
+    case 'new': {
+      startNew(Number(document.getElementById('seedbox')?.value) || (Date.now() % 100000));
+      // 开场动画（task-opening-cinematic）：新档首播一次。startNew 已经把玩家落在现行第一天那一屏，
+      // 这一层只是盖在它上面，播完/跳过都把它摘掉、露出来的还是那一屏——流程代码一个字没改。
+      // 「继续上一局」不播：那是老档，不是新档首播。
+      if (introShouldPlay()) showIntro();
+      return;
+    }
     case 'continue': return resume();
     case 'toMarket': draft = defaultDraft(); return go('market');
     case 'setqty': draft[d.qty] = round01(Number(d.value) || 0); return go('market');
@@ -400,6 +410,7 @@ function act(host) {
     case 'bpull': return pullBlanch(d.cust);
     case 'evening': sfx('cash'); return afterEvening();   // ⑤ 结算屏确认 = 收银
     case 'mute': setMuted(!isMuted()); return render();   // 音频单：一键全关（BGM+SFX），偏好存独立键
+    case 'intro': return showIntro({ replay: true });     // 开场动画：「我的」页重看，重看不改播看状态（本来就已播过）
     case 'choose': return resolvePending(d.choice);
     case 'next': return newDay();
     case 'sellout': return retireShop();
@@ -931,6 +942,7 @@ const VIEWS = {
       <p class="muted">存档存在这台设备的这个浏览器里，换浏览器或清浏览器数据就带不走。规则版本 ${SAVE_VERSION}。</p>
       <div class="row" style="margin-top:10px">
         <button class="ghost" data-act="mute">${isMuted() ? '声音：关' : '声音：开'}</button>
+        <button class="ghost" data-act="intro">重看开场</button>
       </div>
       <div class="row" style="margin-top:10px">
         <button class="ghost" data-act="restart">重开一局</button>

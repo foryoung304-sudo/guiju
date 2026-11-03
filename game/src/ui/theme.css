@@ -503,6 +503,41 @@ td.r, th.r { text-align: right; }
 /* 切后台：整层钉在暂停帧（CSS 播不播由 JS 这一枚 class 说停就停，不留计时器） */
 #app.fx-paused .steam i { animation-play-state: paused; }
 
+/* ── 开场动画（task-opening-cinematic-20261102）：六镜静图推拉 + 字幕，纯呈现层 ──────────────
+   节点挂 body（不挂 #app），render() 换屏碰不到它；关掉遮罩露出来的就是现行第一天那一屏——
+   「播完/跳过都落回第一天入口」靠的是这个层本来就在屏外，不靠任何流程代码。
+   只用 transform / opacity；推镜每镜一次（有限次），这不是常驻氛围层，裁定③那条例外只给热气。
+   图 720×1280（9:16），cover 铺满竖屏时只裁左右；横屏/宽窗会裁上下，所以取景窗压在下带（人物与摊子）。 */
+.intro { position: fixed; inset: 0; z-index: 40; background: var(--ink); overflow: hidden;
+  color: var(--cream); user-select: none; -webkit-user-select: none; touch-action: manipulation; cursor: pointer; }
+.intro .shots { position: absolute; inset: 0; }
+.intro .shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
+  object-position: center 62%; opacity: 0; transform: scale(1.04); }
+.intro .shot.on { animation: fxIntroFade 420ms ease-out 1 both, fxIntroPush var(--ms, 8000ms) linear 1 both; }
+@keyframes fxIntroFade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes fxIntroPush {
+  from { transform: scale(1.04) translate3d(0, 1.2%, 0); }
+  to   { transform: scale(1.13) translate3d(0, -1.2%, 0); }
+}
+/* 字幕带：平涂硬边（不上渐变），顶边一条番茄红压住画面，字是奶油色 16px/1.62——最长那句 43 字，
+   390 宽下三行，带高跟着长，不会盖到推镜的主体。 */
+.intro .sub { position: absolute; left: 0; right: 0; bottom: 0; background: rgba(27, 42, 74, .86);
+  border-top: 2px solid var(--tomato); padding: 14px 16px calc(16px + env(safe-area-inset-bottom)); }
+.intro .line { font-size: 16px; line-height: 1.62; letter-spacing: .02em; opacity: 0; }
+.intro .line.in { animation: fxIntroLine 320ms ease-out 1 both; }
+@keyframes fxIntroLine { from { opacity: 0; transform: translate3d(0, 8px, 0); } to { opacity: 1; transform: none; } }
+/* 跳过：开播 1 秒后 JS 才把 hidden 摘掉（不是靠动画出现，降级态也照样出现）；命中盒 40px 起 */
+.intro .skip { position: absolute; right: 12px; top: calc(12px + env(safe-area-inset-top)); z-index: 2;
+  background: rgba(251, 243, 228, .92); color: var(--ink); border: 2px solid var(--ink); border-radius: 5px;
+  padding: 9px 14px; font-size: 14px; min-width: 76px; min-height: 40px; cursor: pointer; }
+.intro .hint { position: absolute; left: 14px; top: calc(20px + env(safe-area-inset-top));
+  font-size: 12px; color: rgba(251, 243, 228, .72); }
+/* 落版：只在最后一镜出现（JS 摘 hidden），店名由 UI 排字，图上不留字——出图硬规矩那条在这儿同样有效 */
+.intro .lock { position: absolute; left: 0; right: 0; top: 16%; text-align: center; }
+.intro .lock b { display: inline-block; font-size: 26px; letter-spacing: .06em; color: var(--cream);
+  background: rgba(27, 42, 74, .62); border: 2px solid var(--tomato); padding: 8px 14px; }
+.intro .lock span { display: block; margin-top: 8px; font-size: 13px; color: var(--mustard); }
+
 /* 结局屏专属一次性待遇（单上写明仅此一处允许专属）：#3 规矩立住 / #5 金盆洗手 = 金光 + 主体升入。
    其余结局（#1 #2 #4 坏消息、#6 中性）照上面模板走，不给专属；暗角不带给结局屏——结局卡片上全是数字，
    压暗一层就挡住读数，而这里没有遮罩可挂，只能落进卡片自己。 */
@@ -527,6 +562,11 @@ td.r, th.r { text-align: right; }
      不是放慢，所以直接 display:none，连节点都不占位。金额滚动那条在 JS 里同判（rollMount 一进来就返回，DOM 里本来就是终值）。 */
   .gavecell .exact.pop { animation: none !important; transform: none !important; }
   .steam { display: none !important; }
+  /* 开场动画降级：不推镜、不淡入，静图与字幕直接在场。每镜停留与自动推进的节拍不动——
+     那是叙事节奏不是动效；跳过按钮由 JS 的 hidden 控制，与动画无关，降级态照样 1 秒后出现。
+     只点名 .shot.on：没进场的镜仍靠基础规则的 opacity:0 藏着，否则六张图叠成一坨。 */
+  .intro .shot.on { animation: none !important; opacity: 1 !important; transform: none !important; }
+  .intro .line.in { animation: none !important; opacity: 1 !important; transform: none !important; }
 }
 
 /* 场景头图：定版素材都是竖构图，横幅裁切会把人物切成半截（实测反馈 §二.1、§二.4）。

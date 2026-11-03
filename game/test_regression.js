@@ -2122,6 +2122,115 @@ for (const seed of [SEED, 7979, 36832]) {
       })());
   }
 }
+
+// ── 16. 开场动画（task/spec-opening-cinematic-20261102）：纯呈现层 ──────────────────────
+// intro.js 在 Node 里 import 不了（audio.js 模块顶层就读 localStorage），所以这一节全走静态源码断言。
+// 字幕逐字引规格正本，不在测试里重打一遍文案——spec 改字，这里就红。
+{
+  const introRaw = readFileSync(join(HERE, 'src/ui/intro.js'), 'utf8');
+  const stripCmt = s => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
+    .replace(/[ \t]+\/\/[^\n]*$/gm, ' ');   // 行尾注释也算：注释里转述「#app」「SAVE_VERSION」不算代码命中
+  const introCode = stripCmt(introRaw);
+  const mainRaw = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const mainCode = stripCmt(mainRaw);
+  const cssSrc = readFileSync(join(HERE, 'src/ui/theme.css'), 'utf8');
+  const specSrc = readFileSync(join(HERE, '..', 'spec-opening-cinematic-20261102.md'), 'utf8');
+
+  // 1) 字幕正本：规格「分镜与字幕」段那六行的「」串
+  const specLines = specSrc.split('\n').filter(l => /^\d+\.\s/.test(l) && l.includes('「'));
+  const specTexts = specLines.map(l => {
+    const q = [...l.matchAll(/「([^」]*)」/g)];
+    return q.length === 1 ? q[0][1] : `«该行 ${q.length} 处「」，取法失效»`;
+  });
+  const textOf = [...introRaw.matchAll(/text:\s*'([^']*)'/g)].map(m => m[1]);
+  const altOf = [...introRaw.matchAll(/alt:\s*'([^']*)'/g)].map(m => m[1]);
+  const msOf = [...introRaw.matchAll(/ms:\s*(\d+)/g)].map(m => Number(m[1]));
+  const artOf = [...introRaw.matchAll(/art:\s*'([^']*)'/g)].map(m => m[1]);
+  const diffAt = textOf.findIndex((t, i) => t !== specTexts[i]);
+  check('开场动画六镜字幕与规格正本逐字相等（文案正本在 spec，代码不许自改一字）',
+    specTexts.length === 6 && textOf.length === 6 && diffAt < 0,
+    diffAt < 0 ? `六串逐字同（最长 ${Math.max(...textOf.map(x => x.length))} 字）` : `第 ${diffAt + 1} 镜不一致`);
+
+  // 2) 节拍：约 45 秒、六镜、开播 1 秒后才给跳过
+  const sumMs = msOf.reduce((s, x) => s + x, 0);
+  check('开场动画节拍：六镜停留合计正好 45,000ms（规格「约 45 秒」），单镜不越 7–8 秒（一镜定住不动就没人看了）',
+    msOf.length === 6 && sumMs === 45000 && msOf.every(x => x >= 7000 && x <= 8000),
+    msOf.join('+') + ` = ${sumMs}ms`);
+  check('开场动画跳过：按钮初始藏着、SKIP_MS 到点才摘 hidden（规格「开播 1 秒后显示跳过」），不是靠动画出现',
+    /const SKIP_MS = 1000/.test(introCode) && /class="skip"[^>]*hidden/.test(introCode)
+    && /\.skip'\)\.hidden = false; \}, SKIP_MS\)/.test(introCode) && !/\.skip\s*\{[^}]*animation/.test(cssSrc),
+    `SKIP_MS=1000ms／跳过按钮无动画依赖（降级态照样出）`);
+  check('开场动画推进：点击走同一支处理器（点一下重新给满这一镜）、最后一镜点下去即收尾，自动与手动同一条路',
+    /el\.addEventListener\('click'/.test(introCode) && /advance, INTRO_SHOTS\[idx\]\.ms\)/.test(introCode)
+    && /idx \+ 1 >= INTRO_SHOTS\.length/.test(introCode)
+    && /document\.addEventListener\('visibilitychange'/.test(introCode)
+    && /function close\(\) \{ halt\(\)/.test(introCode),
+    '点击重排满时长／越界即 close／切后台 snooze-wake／关层先清闹钟');
+
+  // 3) 红线：纯呈现层——不碰引擎、不碰账、不碰存档结构与 SAVE_VERSION
+  check('开场动画零碰引擎与账：全文件只 import 音频一条，不引 engine/data/constants，代码里不叫 SAVE_VERSION/STORAGE_KEY/存档三键',
+    [...introCode.matchAll(/^import .*$/gm)].map(x => x[0].trim()).join('|') === "import { sfx } from './audio.js';"
+    && !/\.\.\/(engine|data)|sim\.js|constants\.js|SAVE_VERSION|STORAGE_KEY|guiju-m1-save|guiju-m1-phase|guiju-m1-flow/.test(introCode),
+    '唯一 import = ./audio.js');
+  check('播看状态走独立设置键 guiju-m1-intro（与音频单那条静音键同路子），不塞进已签的标量音频键、不动 SAVE_VERSION',
+    /const INTRO_KEY = 'guiju-m1-intro'/.test(introCode)
+    && /if \(opts\.replay !== true\) localStorage\.setItem\(INTRO_KEY, '1'\)/.test(introCode)
+    && /localStorage\.getItem\(INTRO_KEY\) === '1'/.test(introCode)
+    && !introCode.includes('guiju-m1-intro', introCode.indexOf('const INTRO_KEY') + 40)
+    && !mainCode.includes('guiju-m1-intro') && !mainCode.includes('PREF_KEY'),
+    '一开播即算播过（中途关页面不重播）；重看走 replay 不写键；读写只在 intro.js 一处');
+  check('遮罩挂 body 不挂 #app：render() 换 #app 内容擦不掉它，app 级点击监听也看不见它的点击——落回第一天靠层本来就在屏外',
+    introCode.includes('document.body.appendChild(el)') && !/getElementById\('app'\)|#app/.test(introCode)
+    && /el = document\.createElement\('div'\)/.test(introCode) && /if \(el\) return;/.test(introCode),
+    '挂载点 body／幂等不叠第二层');
+  check('流程代码改动面只有三处：一行 import + 新档首播 + 重看路由，「我的」页给重看按钮（撤掉 = 删这三处 + CSS 一块）',
+    [...mainCode.matchAll(/from '\.\/intro\.js'/g)].length === 1
+    && [...mainCode.matchAll(/showIntro\(/g)].length === 2
+    && [...mainCode.matchAll(/introShouldPlay\(\)/g)].length === 1
+    && mainCode.includes('data-act="intro"') && mainCode.includes('重看开场')
+    && /case 'continue': return resume\(\);/.test(mainCode),
+    'import 1／showIntro 2（首播 + 重看）／introShouldPlay 1（只在 new，继续老档不播）');
+
+  // 4) 素材：六镜图全落盘，第六镜复用现行头图（规格「不另出图」）
+  const imgDir = new Set(readdirSync(join(HERE, 'public/img')));
+  const missing = artOf.map(a => `${a}.webp`).filter(f => !imgDir.has(f));
+  const newBytes = artOf.slice(0, 5).reduce((s, a) => s + statSync(join(HERE, 'public/img', `${a}.webp`)).size, 0);
+  check('六镜图全落盘且只多五张：第 6 镜复用现行场景头图 business.webp，尺寸仍 720×1280（9:16 竖构图）',
+    artOf.length === 6 && artOf[5] === 'business' && missing.length === 0
+    && artOf.slice(0, 5).every((a, i) => a === `intro-0${i + 1}` + '-' + a.split('-')[2]),
+    `新增 5 张共 ${(newBytes / 1024).toFixed(1)} KB：` +
+    artOf.slice(0, 5).map(a => `${a}.webp ${(statSync(join(HERE, 'public/img', `${a}.webp`)).size / 1024).toFixed(1)}KB`).join('／') +
+    (missing.length ? ` 缺 ${missing.join(',')}` : ''));
+  check('图上不留字（出图硬规矩在这儿同样有效）：落版店名由 UI 排字，只有第 6 镜带 title，其余五镜无锁版',
+    (introRaw.match(/title:/g) || []).length === 1 && artOf[5] === 'business'
+    && introCode.includes('先把规矩立住！') && /lock\.hidden = !INTRO_SHOTS\[i\]\.title/.test(introCode)
+    && /class="lock" hidden/.test(introCode),
+    '锁版一处（第 6 镜）／JS 摘 hidden，非 CSS 常驻');
+
+  // 5) 口径边界：成熟版（结婚生子）已否，不许回潮；前史只到「摘牌子走」
+  const past = textOf.concat(altOf).join('');
+  check('前史口径不越定版：不出现成熟版（妻 / 成家 / 孩子）与煽情判词，父母只给背影/远景（规格 §定版口径）',
+    !/妻|老婆|媳妇|成家|孩子|儿子|女儿|结婚|离了|孤儿/.test(past)
+    && (/背影/.test(altOf[0]) || /背影/.test(altOf[2]))
+    && !/惨|苦命|可怜|泪|眼泪|心酸|鞠躬尽瘁/.test(past),
+    `六镜 alt/text 零命中；alt1「${altOf[0]}」alt3「${altOf[2]}」`);
+
+  // 6) 动效纪律（裁定③：infinite 只许常驻氛围层，现仅热气一处）——开场动画全有限次
+  const animDecls = (cssSrc.match(/animation:[^;}]*[;}]/g) || []).filter(d => !/^\s*\/\*/.test(d));
+  const infiniteDecls = animDecls.filter(d => /infinite/.test(d));
+  const introCss = (cssSrc.split('/* ── 开场动画')[1] || '').split('/*')[0];
+  check('动效纪律：CSS 里 infinite 只落在常驻氛围层（热气，恰 1 处）；开场动画这块逐条有限次，不占这条例外',
+    infiniteDecls.length === 1 && /fxSteam/.test(infiniteDecls[0])
+    && !/infinite/.test(introCss)
+    && [...introCss.matchAll(/animation: [^;}]*/g)].every(d => / 1 (both|forwards)?/.test(d[0])),
+    `infinite ${infiniteDecls.length} 处=${infiniteDecls.map(d => d.trim().slice(0, 42)).join('｜')}／开场块内 ${[...introCss.matchAll(/animation:/g)].length} 条全 iterations 1`);
+  check('降级（prefers-reduced-motion）：开场动画不推镜不淡入、静图与字幕直接在场，且只点名 .shot.on（没进场的镜仍藏着）',
+    /\.intro \.shot\.on \{ animation: none !important; opacity: 1 !important; transform: none !important; \}/.test(cssSrc)
+    && /\.intro \.line\.in \{ animation: none !important/.test(cssSrc)
+    && !/\.intro \.shot \{[^}]*animation/.test(cssSrc),
+    '基础规则 opacity:0 仍管未进场镜（六张不叠成一坨）');
+}
+
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
 // 而开学周是"全线 ×1.1 + 品类系数偏肉（MB1.3/MT1.2）"；附录 D.5 的 2.5 元/碗 锚点按固定品类占比算，不含这两项。
 function bowlMarginYuan(tier, priceTierId, weatherId, semesterDay) {
