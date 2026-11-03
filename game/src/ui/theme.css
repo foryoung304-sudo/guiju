@@ -402,6 +402,69 @@ td.r, th.r { text-align: right; }
 .overlay.fx-calm > .event, .panel.fx-calm { animation: fxPaper 480ms ease-out 1 both; }
 @keyframes fxPaper { from { opacity: 0; transform: translate3d(0, 8px, 0); } to { opacity: 1; transform: none; } }
 
+/* ── 王老板线四套专属（追补单二 task-event-motion-add-wang-20261103）────────────────────
+   五行（EVENT_ART 里 event-wang-*.webp 那五条）从模板中摘出、逐条专属：初见 / 山寨 / 收购 / 其余两条同一压场语法。
+   纪律同基单：只用 transform / opacity、一律单次、点按可跳（JS 只往遮罩加一枚 fx-done，不留计时器）。
+   单条总长：压场 720ms < 山寨 740ms < 收购 800ms < 初见 1040ms，全部 ≤ 单上的 1.2s。
+   专属只在这四套里长出来的部分是「构图」，关键帧仍是基单那批件（fxCard / fxVignette / 震的三档位移）。 */
+
+/* 压场件：形象图慢推近 720ms。只动图不动卡——卡一动整屏跟着抖，读起来是「界面坏了」，不是「他压过来」。
+   推到位的那一帧用 --land 记账，跳段与降级都按同一枚变量收尾，不会出现「跳过看到的那一帧和播完的不是同一帧」。 */
+.fx-wang .art { --land: 1; transform-origin: 50% 45%; }
+.fx-wang-intro .art, .fx-wang-press .art { --land: 1.08; animation: fxPushIn 720ms cubic-bezier(.22, .62, .3, 1) 1 both; }
+@keyframes fxPushIn { from { opacity: 0; transform: scale(1); } to { opacity: 1; transform: scale(var(--land)); } }
+
+/* 初见：卡片与暗角先落（沿用 fxCard 240ms + fxVignette 420ms 这两件），推近到位后才出正文（720 + 320 = 1040ms）。
+   只延正文、不延按钮——两颗按钮从头到尾看得见点得着，玩家随时能走。 */
+.fx-wang-intro .fxwash, .fx-wang-press .fxwash { animation: fxVignette 420ms ease-out 1 both; }
+.fx-wang-intro .text { animation: fxTextIn 320ms ease-out 1 both; animation-delay: 720ms; }
+@keyframes fxTextIn { from { opacity: 0; transform: translate3d(0, 6px, 0); } to { opacity: 1; transform: none; } }
+
+/* 山寨：自家摊（左）与山寨摊（右）从两侧对开进场（360ms），落位后卡片跟着震一次。
+   震就是坏消息那条件的三档位移（−6 / +4 / −2px），只是挪到对开之后，所以整段合成一条关键帧：
+   拆成「入场 + 延迟震」两条并写，fill: both 会把后者的 0% 帧回填进延迟期，卡片会先空 360ms 再抖。 */
+.event .dual { display: flex; }
+.event .dual .art { width: 50%; aspect-ratio: 5 / 4; }   /* 每格 5:4 ⇒ 并起来正好还是 5:2，卡框高度一格没动 */
+.event .dual .art + .art { border-left: 2px solid var(--ink); }
+.overlay.fx-wang-copy > .event { animation: fxCopyIn 740ms ease-out 1 both; }
+@keyframes fxCopyIn {
+  0% { opacity: 0; transform: translate3d(0, 12px, 0); }
+  27% { opacity: 1; transform: none; }
+  49% { transform: none; }
+  56% { transform: translate3d(-6px, 0, 0); }
+  68% { transform: translate3d(4px, 0, 0); }
+  82% { transform: translate3d(-2px, 0, 0); }
+  100% { opacity: 1; transform: none; }
+}
+.fx-wang-copy .dual .art:first-child { animation: fxOpenL 360ms ease-out 1 both; }
+.fx-wang-copy .dual .art:last-child { animation: fxOpenR 360ms ease-out 1 both; }
+@keyframes fxOpenL { 0% { opacity: 0; transform: translate3d(-20%, 0, 0); } 30% { opacity: 1; } 100% { opacity: 1; transform: none; } }
+@keyframes fxOpenR { 0% { opacity: 0; transform: translate3d(20%, 0, 0); } 30% { opacity: 1; } 100% { opacity: 1; transform: none; } }
+
+/* 收购：全组最重的一下。合同纸面自上方落桌（460ms，带一点斜角，落地回正），随后盘店价读数放大落定
+   （延迟 460 + 320 = 780ms），按钮 560ms 才出现（单上上限 600ms）。
+   读数取已签的 BUYOUT_PRICE_CENTS（附录 G.4 盘店价 60,000 / 换算表第 16 行），与置办页「盘下对面铺子」那一笔同源同值——
+   这条只是把它搬到卡上放大，不在此处新造一个价。落定前按钮不接点击，头一下一定花在跳过整段上。 */
+.overlay.fx-wang-deal > .event { animation: fxSlam 460ms cubic-bezier(.2, .78, .25, 1) 1 both; }
+@keyframes fxSlam {
+  0% { opacity: 0; transform: translate3d(0, -22px, 0) rotate(-1.2deg); }
+  58% { opacity: 1; transform: translate3d(0, 3px, 0) rotate(.3deg); }
+  100% { opacity: 1; transform: none; }
+}
+.dealprice { display: flex; align-items: baseline; gap: 8px; margin: 0 0 10px; }
+.dealprice b { font-size: 30px; line-height: 1.1; transform-origin: left center; }
+.fx-wang-deal .dealprice b { animation: fxPrice 320ms cubic-bezier(.2, .9, .25, 1) 1 both; animation-delay: 460ms; }
+@keyframes fxPrice { 0% { opacity: 0; transform: scale(.72); } 70% { opacity: 1; transform: scale(1.06); } 100% { opacity: 1; transform: scale(1); } }
+.fx-wang-deal .acts { animation: fxActs 240ms ease-out 1 both; animation-delay: 560ms; }
+@keyframes fxActs { from { opacity: 0; transform: translate3d(0, 6px, 0); } to { opacity: 1; transform: none; } }
+.overlay.fx-wang-deal:not(.fx-done) .acts { pointer-events: none; }
+
+/* 点按可跳：fx-done 挂上遮罩，这一屏每个子件钉到自己的落定帧（值与播完那一帧同）。
+   .art 单列一条：它落在 --land 的推近态，不是回原点；其余子件落定态都是 transform: none。 */
+.overlay.fx-done > .event, .overlay.fx-done .text, .overlay.fx-done .acts,
+.overlay.fx-done .fxwash, .overlay.fx-done .dealprice b { animation: none !important; opacity: 1 !important; transform: none !important; }
+.overlay.fx-done .art { animation: none !important; opacity: 1 !important; transform: scale(var(--land)) !important; }
+
 /* 结局屏专属一次性待遇（单上写明仅此一处允许专属）：#3 规矩立住 / #5 金盆洗手 = 金光 + 主体升入。
    其余结局（#1 #2 #4 坏消息、#6 中性）照上面模板走，不给专属；暗角不带给结局屏——结局卡片上全是数字，
    压暗一层就挡住读数，而这里没有遮罩可挂，只能落进卡片自己。 */
@@ -413,11 +476,15 @@ td.r, th.r { text-align: right; }
    压不回父选择器就逐条点名：`.overlay.fx-bad > .event` 比 `.overlay > .event` 特异度高，
    这里靠 !important 取胜，不靠选择器写得更长。 */
 @media (prefers-reduced-motion: reduce) {
-  .overlay > .event, .panel.fx-bad, .panel.fx-good, .panel.fx-person, .panel.fx-calm, .panel.fx-end {
+  .overlay > .event, .overlay.fx-wang > .event, .panel.fx-bad, .panel.fx-good, .panel.fx-person, .panel.fx-calm, .panel.fx-end {
     animation: fxPaper 300ms ease-out 1 both !important; animation-delay: 0ms !important;
   }
-  .fx-person .art, .fx-person .text .ch { animation: none !important; opacity: 1 !important; transform: none !important; }
-  .fxwash, .sweep, .cf { animation: none !important; opacity: 0 !important; }
+  .fx-person .art, .fx-person .text .ch,
+  .fx-wang .art, .fx-wang .text, .fx-wang .acts, .fx-wang .dealprice b { animation: none !important; opacity: 1 !important; transform: none !important; }
+  /* 推近也不留（--land 归 1，跳过那一支的 scale 跟着落回原样）；暗角按「压暗也算待遇」一并归零，
+     连点按跳段后的那条也一起钉住，不让它从 fx-done 底下漏回来。 */
+  .fx-wang-intro .art, .fx-wang-press .art { --land: 1; }
+  .fxwash, .sweep, .cf, .overlay.fx-done .fxwash { animation: none !important; opacity: 0 !important; }
 }
 
 /* 场景头图：定版素材都是竖构图，横幅裁切会把人物切成半截（实测反馈 §二.1、§二.4）。

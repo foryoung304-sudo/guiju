@@ -9,11 +9,13 @@
 // 出货惯例③「负面机制在第 3 天之后才解锁」的完整实现，不是新数值。菜价上涨把 condition 与 must_fire
 // 双双钉在 Day>=7（定稿只挪了 must_fire、condition 留在 Day>=3，第 3 天随机抽到即打穿开学周）。
 //
-// ── 呈现标签 `motion` 的红线（施工单 task-event-motion-20261102）────────────────────
-// 每行一枚 `motion` 只服务一件事：入场待遇选哪个模板（person 人物 / bad 坏消息 / good 好事横财 / calm 中性悬念）。
+// ── 呈现标签 `motion` 的红线（施工单 task-event-motion-20261102 + 追补单二 task-event-motion-add-wang-20261103）──
+// 每行一枚 `motion` 只服务一件事：入场待遇选哪个模板（person 人物 / bad 坏消息 / good 好事横财 / calm 中性悬念），
+// 或选哪一套王老板线专属（wang_intro 初见 / wang_copy 山寨 / wang_deal 收购 / wang_press 压场）。
 // **只许呈现层读**——抽取（drawEvent / weightOf / must_fire）、结果结算（applyOpen / applyHidden / resolveChoice）、
 // 计数与存档里任何一处拿它做判定，即判红。选它的规则也写在人话里：具名人物到场为主 → person；否则按 kind 落
-// bad / good / calm。M1 四条（001/002/011/031）刻意一人一格，让玩家一趟流程就能把四种待遇各看一遍。
+// bad / good / calm；王老板组五图所映射的五行（EVENT_ART 里 event-wang-*.webp 那五条）一律摘出模板、逐条专属。
+// M1 四条（001/002/011/031）刻意一人一格，让玩家一趟流程就能把四种待遇各看一遍。
 // 本字段不参与任何 equals / 序列化 / 随机消耗，故 sweep 与 m3 必须继续对 r14 逐字节同。
 // 注：18 条全打标，但 timing='morning_pre' 的两条（011 / stockout）走晨间情报条、不经过事件弹层，
 // 入场待遇只落在其余 16 条弹层事件与 6 个结局屏上——情报条要不要也来一套，属未下达的口径，不自作。
@@ -104,7 +106,7 @@ export const EVENTS = [
     // 玩家的应对只有定价与篮子 → 两个分支不写任何差异化数值（E.9 的 effect_open 原文也只有一句「写 PricewarDays = 3」），
     // 跟不跟价由玩家次日的价签自己体现。分支差异若要给钱，须店主先定数，不在代码里替正文发明。
     id: 'evt_s_pricewar',
-    motion: 'bad',   // 呈现标签：只许呈现层读（红线见文件头）
+    motion: 'wang_intro',   // 专属（追补单二）：王老板线初见 = 全场微暗 + 形象图慢推近，落定后才出正文
     pool: 'special',
     ship: 'M2',
     timing: 'evening',
@@ -129,7 +131,7 @@ export const EVENTS = [
     // 附录 E.8 回流名场面：价格战的结果而不是剧情奖励 → weight=0，只有 evt_s_pricewar 的 shift 拉满才可能抽到。
     // 玩家不做选择，按 Rep 自动分版（resolveChoice 走 auto_branch，命中第一条即该档）。
     id: 'evt_s_return',
-    motion: 'good',   // 呈现标签：只许呈现层读（红线见文件头）
+    motion: 'wang_press',   // 专属（追补单二）：王老板线压场语法 = 微暗 + 慢推近（不再走 good 模板）
     pool: 'special',
     ship: 'M2',
     timing: 'evening',
@@ -232,7 +234,7 @@ export const EVENTS = [
     // 「签合同」分支写的是 `requires: 'HAS?fac_contract'`，而 fac_contract 的解锁条件正是 EVT?evt_s_poach ——
     // 两条互为前置，一局只触发一次的挖角永远买不到合同 → 该分支按原文照实现、死锁本身已登记回报。
     id: 'evt_s_poach',
-    motion: 'person',   // 呈现标签：只许呈现层读（红线见文件头）
+    motion: 'wang_press',   // 专属（追补单二）：王老板线压场语法 = 微暗 + 慢推近（原 person 蹦字待遇从这条撤走）
     pool: 'special',
     ship: 'M2',
     timing: 'evening',
@@ -303,7 +305,7 @@ export const EVENTS = [
     // 应对仍是定价与品质 → 不写现金、不写 Rep/Risk、不碰 S 的钳位带。无竞争层时 S ≡ 1，本条无数值落点（已登记回报）。
     // 文案 agent 自撰（正本 5.3 只给了「王老板改名蹭名气」这一句事实），待店主审。
     id: 'evt_s_copycat',
-    motion: 'bad',   // 呈现标签：只许呈现层读（红线见文件头）
+    motion: 'wang_copy',   // 专属（追补单二）：山寨 = 自家摊与山寨摊双图左右对开 + 一次轻震（震法复用坏消息件）
     pool: 'special',
     ship: 'M2',
     timing: 'evening',
@@ -324,7 +326,7 @@ export const EVENTS = [
     // 不是执行前置 → 除了留言不写任何机械效果，不设分支、不设报价数值（48,000 元这个门槛是「累计净赚」的读数，不扣钱）。
     // 单按钮确认型（actions 空 → 界面只出「知道了」），文案 agent 自撰。
     id: 'evt_s_buyout',
-    motion: 'calm',   // 呈现标签：只许呈现层读（红线见文件头）
+    motion: 'wang_deal',   // 专属（追补单二）：收购 = 合同纸面落桌式入场 + 盘店价读数放大 + 按钮延后可跳
     pool: 'special',
     ship: 'M2',
     timing: 'evening',

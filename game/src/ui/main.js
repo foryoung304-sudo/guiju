@@ -2,7 +2,7 @@
 // 红线照正本 3.1 / 3.4 / 九：不许出现品质数字、不许出现道德标签、不许有一句劝善或劝坏的话。
 import { CAT, SOLID_CATS, ALL_CATS, PRICE_TIERS, FACILITIES, ENDING, CONFIG, TIERS_STALL, START_CASH_CENTS, START_CREDIT_CAP_CENTS,
   PACKING, PACKING_NAMES, PREP_STATIONS, PREP_LEVELS, ADDITIVE, FLAVOR_DIMS, FLAVOR_DIM_NAMES, CLIENT_MIX,
-  TASTING, TOOLS, SCALE_AUTO_MUL, BLANCH, RETIRE_NP_CENTS, SAVE_VERSION } from '../data/constants.js';
+  TASTING, TOOLS, SCALE_AUTO_MUL, BLANCH, RETIRE_NP_CENTS, BUYOUT_PRICE_CENTS, SAVE_VERSION } from '../data/constants.js';
 import { SKUS_BY_CAT, SKU_BY_ID } from '../data/skus.js';
 import { newGame, loadGame, saveGame, clearSave, makeRng, roundJin, centsToYuan } from '../index.js';
 import {
@@ -41,6 +41,9 @@ const EVENT_ART = {
 // 卡框也是 5:2，竖图被横裁必然切头。
 const EVENT_NO_ART = 'event-silhouette.svg';
 const eventArt = id => `./img/${EVENT_ART[id] || EVENT_NO_ART}`;
+// 追补单二（山寨专属）：双图对开的左半 = 自家摊。复用预热清单里已有的场景头图 stall.webp，
+// 不新增素材、不进一批新的取图请求（右半用这条自己的 event-wang-copycat.webp）。
+const OWN_STALL_ART = './img/stall.webp';
 const AVA_SHEET = './img/avatars.webp';
 // 修复单 P2-3：场景头图刚进屏时先亮一块米色底，玩家读成「图坏了/裁切没修」。这几张的名字与预热清单同名，
 // 取图给最高优先、解码要在这帧之前完成——图没到就只见条纹占位（见 theme.css 的 .scene 底纹），到了就整幅盖住。
@@ -210,6 +213,11 @@ app.addEventListener('click', e => {
   // 放在 act 之后，点在按钮上的那一下仍旧照常走选择逻辑（.text 里没有按钮，两者不打架）
   const typed = e.target.closest('.event .text');
   if (typed) typed.classList.add('done');
+  // 追补单二：王老板线四套专属都「点按可跳过整段」——遮罩上再加一个 fx-done，CSS 把这一屏的子件全钉到落定态，
+  // 同样不留计时器。延后出现的按钮在落定前不接点击（theme.css 的 pointer-events），所以头一下必定是跳过，
+  // 不会被一颗还看不见、但按下去就会扣钱的按钮吃掉。
+  const skip = e.target.closest('.overlay.fx-wang');
+  if (skip) skip.classList.add('fx-done');
 });
 // 按住与抬起要各记一次：见 refreshForecast 上方的 P2-2 注（捕获阶段先于按钮自身与失焦处理）
 app.addEventListener('pointerdown', startPress, true);
@@ -1044,9 +1052,16 @@ const VIEWS = {
 
 const ENDING_NAMES = { 1: '翻车', 2: '破产', 3: '规矩立住', 4: '烧心大王', 5: '金盆洗手', 6: '平庸收摊' };
 
-// ── 动画单（task-event-motion-20261102）：呈现标签 → class。两张表只喂呈现层，不参与任何判定。
-// FX_CLASS 的键就是 events.js 里那枚 motion 字段；theme.css 里同名的四套待遇是唯一的消费方。
-const FX_CLASS = { bad: 'fx-bad', good: 'fx-good', person: 'fx-person', calm: 'fx-calm' };
+// ── 动画单（task-event-motion-20261102）+ 追补单二（task-event-motion-add-wang-20261103）：呈现标签 → class。
+// 两张表只喂呈现层，不参与任何判定。FX_CLASS 的键就是 events.js 里那枚 motion 字段；theme.css 里同名的待遇是唯一的消费方。
+// 前四键 = 通用四模板；后四键 = 王老板线专属（fx-wang 是所有专属行共用的跳段标记，第二枚才选待遇）。
+const FX_CLASS = {
+  bad: 'fx-bad', good: 'fx-good', person: 'fx-person', calm: 'fx-calm',
+  wang_intro: 'fx-wang fx-wang-intro',   // 初见：全场微暗 + 形象图慢推近，落定后才出正文
+  wang_copy: 'fx-wang fx-wang-copy',     // 山寨：自家摊与山寨摊双图左右对开 + 一次轻震
+  wang_deal: 'fx-wang fx-wang-deal',     // 收购：合同纸面落桌 + 盘店价读数放大 + 按钮延后
+  wang_press: 'fx-wang fx-wang-press',   // 其余王老板线：同一压场语法（微暗 + 慢推近）
+};
 // 结局待遇：#3 规矩立住 / #5 金盆洗手 = 单上写明的「结局屏专属排面」（金光 + 主体升入）；
 // #1 #2 #4 走坏消息模板，#6 走中性模板，都不给专属。
 const FX_ENDING = {
@@ -1473,16 +1488,23 @@ function eventOverlay() {
   // 入场待遇（动画单）：motion 标签在这里被读的唯一一次，只为拼一个 class；读不到标签就没有待遇，
   // 走 .overlay > .event 那条基础淡入。抽取 / 结果 / 计数一律不碰这个字段（红线见 events.js 文件头）。
   const fx = FX_CLASS[ev.motion] || '';
-  // 暗角是「全屏」节点，所以挂在遮罩上、卡片之外，卡片自带 z-index:1 压在它上面——正文该亮的还是亮的。
+  // 追补单二：王老板线四套专属的三个开关。暗角是「全屏」节点，只给压场那两套（初见 / 其余）——
+  // 山寨与收购各有自己的语法（对开双图 / 落桌纸面），单上没写暗角就不加。
+  const wash = fx.includes('fx-bad') || fx.includes('fx-wang-intro') || fx.includes('fx-wang-press');
+  const dual = fx.includes('fx-wang-copy');
+  const deal = fx.includes('fx-wang-deal');
+  // 暗角挂在遮罩上、卡片之外，卡片自带 z-index:1 压在它上面——正文该亮的还是亮的。
   // 金光与纸屑在卡片内，靠卡片的 overflow:hidden 裁边；纸屑封顶四片。
   return `<div class="overlay ${fx}"><div class="event">
-    <img class="art" src="${eventArt(ev.id)}" alt="" />
+    ${dual ? `<div class="dual"><img class="art" src="${OWN_STALL_ART}" alt="" /><img class="art" src="${eventArt(ev.id)}" alt="" /></div>`
+      : `<img class="art" src="${eventArt(ev.id)}" alt="" />`}
     <div class="body"><span class="who">${esc(ev.kind)} · ${ev.timing === 'evening' ? '打烊后' : '清早'}</span>
       <p class="text">${fx === 'fx-person' ? typedHtml(ev.text) : esc(ev.text)}</p>
+      ${deal ? `<p class="dealprice"><span class="muted">盘下对面铺子</span><b class="num">${y(BUYOUT_PRICE_CENTS)} 元</b></p>` : ''}
       ${risk ? `<p class="muted">按成本记，无票的货是 ${y(risk)}——销毁不动现金，动的是柜里的货。</p>` : ''}
       <div class="acts">${acts}</div></div>
     ${fx === 'fx-good' ? '<span class="sweep"></span><i class="cf"></i><i class="cf"></i><i class="cf"></i><i class="cf"></i>' : ''}
-  </div>${fx === 'fx-bad' ? '<div class="fxwash"></div>' : ''}</div>`;
+  </div>${wash ? '<div class="fxwash"></div>' : ''}</div>`;
 }
 
 function endPanel(p, standalone) {
