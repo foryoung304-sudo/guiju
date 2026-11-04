@@ -71,11 +71,11 @@
 | 13 | `sfx-bell.ogg` | ⑥ 升级档位／盘店／不干了（三处入口共用） | 1.597846 s | 12,550 B | OpenGameArt「Correct Bell」by Fupi ／ `bell.wav` | CC0 | 44.1k mono｜−2.1 dB｜`33529a612c4b…` |
 | 14 | `sfx-pop.ogg` | 事件／消息弹出（晨间与夜间两处；原先这两处借的是①点按声，本批起用独立边） | 0.186190 s | 5,032 B | Kenney Interface Sounds ／ `drop_002.ogg` | CC0 | 44.1k mono｜−1.3 dB｜`16343e7176c3…` |
 | 15 | `sfx-error.ogg` | **失败／被拒边（原包只有成功边，单上点名新补的缺口）**：采购整篮驳回（坏值那一格 + 付不齐/超柜量那一格） | 0.450091 s | 5,606 B | kmilo93sd 音频库原创合成，CC0 释出 ／ `error-buzz-soft.wav` | CC0 | 44.1k mono｜**−5.9 dB（全包最轻的一件，与随包台账「−5.9…0 dB」的下界对上）**｜`09ce72c4b5a2…` |
-| 16 | `sfx-coin.ogg` | 单笔收款／广告奖励到账——**挂载与文件成对在场，M1 没有可挂的时刻**（M1 构建无广告 SDK，逐笔收款也不是独立交互）⇒ 报 ⊘，不造假时刻 | 0.542653 s | 8,925 B | OpenGameArt「Coin Drop」by Vinrax ／ `coin_drop.wav` | CC0 | 44.1k mono｜−1.0 dB｜`c8d2fd50b320…` |
+| 16 | `sfx-coin.ogg` | 单笔收款／广告奖励到账——**挂载与文件成对在场，M1 没有可挂的时刻**（M1 构建无广告 SDK，逐笔收款也不是独立交互）⇒ 报 ⊘，不造假时刻。**去向已由裁定 d619ed6 定死**：「等广告 SDK 落地，挂『广告奖励到账』那一刻，不许挪作他用」——这一件从此只等那一格，谁也不许为凑响声把它挂到别的时刻上 | 0.542653 s | 8,925 B | OpenGameArt「Coin Drop」by Vinrax ／ `coin_drop.wav` | CC0 | 44.1k mono｜−1.0 dB｜`c8d2fd50b320…` |
 | 17 | `sfx-paper.ogg` | 王老板递信封／翻账本（`motion` 为 `wang_*` 的事件入场，与赵大妈那声咳嗽共用「同一次挂载只响一声」的触发纪律） | 0.485442 s | 8,685 B | OpenGameArt「Various Paper Sound Effects」by Luckius ／ `Paper Sound - 1.wav` | CC0 | 44.1k mono｜−1.8 dB｜`86061d869a34…` |
 | 18 | `sfx-stamp.ogg` | 定版价落定（六开关一次性锁下那一格；`!state.today.locked` 之内，断点回来不重响） | 0.304014 s | 6,375 B | Kenney RPG Audio（bookPlace1）＋Impact Sounds 合成，CC0 释出 ／ `stamp-thud.wav` | CC0 | 44.1k mono｜−1.7 dB｜`8fefd2e0f378…` |
-| 19 | `sfx-chop.ogg` | 备菜（每次落一格，chop／knife **随机二选一**） | 0.240250 s | 9,370 B | Kenney RPG Audio ／ `chop.ogg` | CC0 | **48 kHz 立体声**（与随包台账「统一 44.1kHz」那句不符，见下面「如实报」第 1 条）｜峰值 **0.0 dB = 全包最响**｜`d00c2b3c9fff…` |
-| 20 | `sfx-knife.ogg` | 备菜（同上，另一枚） | 0.599542 s | 15,532 B | Kenney RPG Audio ／ `knife_slice.ogg` | CC0 | **48 kHz 立体声**（同不符）｜−1.3 dB｜`4cd96dc630be…` |
+| 19 | `sfx-chop.ogg` | 备菜（每次落一格，chop／knife **随机二选一**） | 0.240250 s | 9,370 B | Kenney RPG Audio ／ `chop.ogg` | CC0 | **48 kHz 立体声**（Kenney 原档直用；「统一 44.1kHz」那句是 Orange 随包台账笔误，裁定 d619ed6 第 1 条已更正，见下面「如实报」第 1 条）｜峰值 **0.0 dB = 全包最响**｜`d00c2b3c9fff…` |
+| 20 | `sfx-knife.ogg` | 备菜（同上，另一枚） | 0.599542 s | 15,532 B | Kenney RPG Audio ／ `knife_slice.ogg` | CC0 | **48 kHz 立体声**（同 19，Kenney 原档直用）｜−1.3 dB｜`4cd96dc630be…` |
 | 21 | `sfx-boil-loop.ogg` | 下锅／营业锅声：**循环**、独立推子、只挂营业那一屏（`setBoil(phase === 'weigh')`），换屏即收 | 7.100000 s（309,138 样本） | 98,581 B | Wikimedia Commons「Boiling lentils」by hugh（截 7 秒做无缝循环＋响度归一） | **Public Domain** | 44.1k mono｜−1.3 dB｜积分 −18.9 LUFS｜`0858c952af0f…` |
 
 署名要求：**无**（12 件全 CC0 或公有领域，可商用免署名）。出处链在上表随包台账列，平台或任何人问起按此答。
@@ -94,6 +94,8 @@
 
 ## 音效包带出来的三条如实报（都不自裁）
 
-1. **随包台账「统一转 Ogg Vorbis 44.1kHz」这句与两个文件不符**：`sfx-chop.ogg` 与 `sfx-knife.ogg` 实测是 **48 kHz 立体声**，其余 10 件是 44.1 kHz 单声道。浏览器与 WebAudio 会自动重采样，功能上不出问题（12 件全部解码通过），代价是这两件多占约 60% 的体积、且与其它件的声道数不同。**本批不重编码**：单上写「Orange 已验、冲突时以本包为准」，我改一件就是改她验过的成品。要归一（44.1k 单声道重导这两件）请 Orange 或店主点一句，Yellow 不自作。
+1. **随包台账那句「统一 44.1kHz」是 Orange 写错，此处按裁定 d619ed6 更正**：本包 12 件里 **除 `sfx-chop.ogg`／`sfx-knife.ogg` 两件为 Kenney 48 kHz 立体声原档直用外，其余 10 件是 44.1 kHz 单声道**。浏览器与 WebAudio 会自动重采样，功能上不出问题（12 件全部解码通过），代价只是这两件多占约 60% 的体积、且与其它件的声道数不同。**改台账不改文件**：Orange 裁的是「你不动那两个文件一字节」，所以本批不重编码、两件 sha 与 §22 那根逐件针一字未改（`d00c2b3c9fff…`／`4cd96dc630be…` 原样）。
 2. **「响度归一（−16 LUFS 档）」在成品里不是同一档位**：能测积分响度的 8 件读回 −13.3（confirm）… −22.0（paper），**极差 8.7 LU**；另 4 件太短（chop 0.24 s／pop 0.19 s／stamp 0.30 s／tap 0.04 s），R128 的门限窗口不足，`ebur128` 回 −70.0 = 测不出而不是没声。峰值确实收在 −5.9…0 dB（与台账那句对上），所以**随包做的是峰值归一、不是响度归一**。这一批我用一支共用 `FILE_TRIM` 接进总线，包内的相对轻重照成品原样（不做逐件均衡）。若店主真机听着某几声明显轻／响，均衡的正确做法有两条：改 Orange 的包（逐件 loudnorm 到同 I），或在本仓加逐件增益表（新数，得她点头）。**我不预先造那张表。**
+   **裁定 d619ed6 第 2 条**：先不动、不建逐件均衡表；响度手感归店主真机耳朵，她点名哪件突兀再逐件调增益。本节因此维持原样，等点名，不预备那张表。
 3. **一声点按与一声事件声会叠**：全站按钮那一声 `tap` 与本批新边同刻响（点「开门营业」= stamp + 若当日抽到晨间事件再叠 pop；点备菜格 = tap + chop；点「打烊」= tap + cha-ching）。**这形状不是本批造的**——签过的音频单里「事件弹层复用①」「结算 tap+cash」本来就是这个叠法，本批只是把借用的那两处换成独立声、并把 stamp／prep 加进来。真机若嫌挤，正确的修法是让全局那一声在"这一格已有自己的声"时让位（一处改动，`main.js:259` 那个分支），**这属改行为不属接素材，等一句授权**。
+   **裁定 d619ed6 第 3 条已授权并已落地（2026-11-04，登记 §六十九）**：`main.js:259` 那句改走 `audio.js` 的 `tapEdge()`——同一次交互里若单上点名的八条专属边（`exact`／`pop`／`error`／`stamp`／`level`／`paper`／`cash`／`coin`）真发了声，这一次的通用点按让位；其余点按照旧。名单照单八条不自扩，所以**名单外的三条（`grab` 抓菜、`buy` 采购、`prep` 备菜 chop/knife）仍与点按同响**，这一条原样留着等裁。判据是「发了声」不是「被叫到」：被 `RATE` 挡下的那次不占用，坏文件时那五条无兜底合成的边一声不出也不许把点按压没（假 WebAudio 逐档实测见 §六十九）。听感终判仍归店主复听。

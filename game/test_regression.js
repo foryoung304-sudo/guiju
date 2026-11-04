@@ -2761,6 +2761,81 @@ for (const seed of [SEED, 7979, 36832]) {
     `最响 0.203／最轻 ${(0.507 * 0.265 * 0.85 * 0.9).toFixed(3)}（签过带 0.097–0.203）`);
 }
 
+// ── §23 查账单 task-steam-missing-20261104（Orange `aabb032`）+ 裁定 d619ed6 第三条 ──────────
+// 她两次公网实测「四屏双帧像素一致、页面结构里找不到蒸汽类元素」，验收口径改死：双帧必须有可见差异，
+// 并补一根针断言这一层在 DOM 在场、动画在跑（§22 钉音频那种钉法：钉的是代码与挂载，画面归眼睛，读数在 §六十八）。
+// 同一批还有 tap 叠响的窄修：单上点名八条专属边，它们发了声就让位这一次的通用点按，其余点按照旧。
+{
+  const nf = s => s.replace(/\r\n/g, '\n');   // 本块要看的是跨行句式，先把三种源文归成 LF
+  const mainRaw = nf(readFileSync(join(HERE, 'src/ui/main.js'), 'utf8'));
+  const audioRaw = nf(readFileSync(join(HERE, 'src/ui/audio.js'), 'utf8'));
+  const cssRaw = nf(readFileSync(join(HERE, 'src/ui/theme.css'), 'utf8'));
+  const morningBody = (mainRaw.split('\n  morning() {')[1] || '').split('\n  market() {')[0];
+  const renderBody = (mainRaw.split('\nfunction render() {')[1] || '').split('\n}\n')[0];
+
+  // 1) DOM 在场：壳与三颗粒子由 steamScene 一处产出，挂载点只有出摊 hub 那一屏
+  check('热气层 DOM 在场：steamScene 产出 class="steam" 的壳与恰好三颗 <i>，全仓唯一挂载点在 VIEWS.morning 里',
+    /<span class="steam" aria-hidden="true"><i><\/i><i><\/i><i><\/i><\/span>/.test(mainRaw)
+    && (mainRaw.match(/steamScene\('/g) || []).length === 1 && /steamScene\('stall'/.test(morningBody)
+    && (mainRaw.match(/class="steam"/g) || []).length === 1,
+    `挂载 1 处（morning 屏）｜壳内 <i> 3 颗｜aria-hidden 在场（压不到读屏）`);
+
+  // 2) 动画在跑：infinite 的那条就是这一层，关键帧峰值不是 0，三颗各带自己的相位
+  const steamRule = (cssRaw.match(/\.steam i \{[^}]*\}/) || [''])[0];
+  const kf = (cssRaw.match(/@keyframes fxSteam \{[\s\S]*?\n\}/) || [''])[0];
+  const peaks = [...kf.matchAll(/opacity: ([\d.]+)/g)].map(m => +m[1]);
+  check('热气层动画在跑：.steam i 挂 fxSteam 2400ms linear infinite，关键帧峰值 .62（不是被谁归零的那一档），三颗 delay 0/800/1600 各自错开',
+    /animation: fxSteam 2400ms linear infinite/.test(steamRule)
+    && /16% \{ opacity: \.62; \}/.test(kf) && Math.max(...peaks) === 0.62
+    && /\.steam i:nth-child\(2\) \{[^}]*animation-delay: 800ms/.test(cssRaw)
+    && /\.steam i:nth-child\(3\) \{[^}]*animation-delay: 1600ms/.test(cssRaw),
+    `关键帧 opacity 档 ${peaks.join('/')}｜峰值 ${Math.max(...peaks)}`);
+
+  // 3) 落点在锅上：三列照实测带挪到 70/77/84%（中心 73/80/86%，起势在碗口），奶白高光那三列不许回潮
+  const lefts = [...cssRaw.matchAll(/\.steam i(?::nth-child\(\d\))? \{[^}]*?left: (\d+)%/g)].map(m => +m[1]);
+  check('热气落点在锅口那一列：三列 left 70/77/84%（430 宽实测带 391×220、锅口 x 78–90%、沿口离带底 7.5%），旧落点 48/56/63% 零命中',
+    lefts.join(',') === '70,77,84' && !/\.steam i[^{]*\{[^}]*left: (48|56|63)%/.test(cssRaw),
+    `三列 left ${lefts.join('/')}%｜粒子 26×30、22×26、17×21`);
+
+  // 4) 挡死条件只剩两条签过的：切后台暂停、reduced-motion 整层关；render 每趟报一次可见性
+  check('能把这层挡死的只有已签那两条：fx-paused（document.hidden 驱动，切后台与 render 换屏各补一次）与 prefers-reduced-motion 的 display:none，此外无第三道闸',
+    /#app\.fx-paused \.steam i \{ animation-play-state: paused; \}/.test(cssRaw)
+    && /\.steam \{ display: none !important; \}/.test(cssRaw)
+    && /const steamPause = \(\) => app\.classList\.toggle\('fx-paused', document\.hidden\);/.test(mainRaw)
+    && (mainRaw.match(/steamPause\(\);/g) || []).length === 2
+    && /steamPause\(\);/.test(renderBody)
+    && /visibilitychange[\s\S]{0,40}\n  steamPause\(\);/.test(mainRaw),
+    `暂停位 ${(mainRaw.match(/steamPause\(\);/g) || []).length} 处（visibilitychange + render）｜降级位 1 处（reduce 块内）`);
+
+  // 5) tap 窄修：名单照单八条，只在「真发了声」那一格登记，点按改走本帧末尾的微任务（不留计时器）
+  const yieldList = (audioRaw.match(/const GENERIC_YIELD = new Set\(\[([^\]]*)\]\)/) || [, ''])[1];
+  const yieldNames = yieldList.split(',').map(s => s.trim().replace(/^'|'$/g, '')).filter(Boolean);
+  check('tap 叠响窄修照单落地：专属边名单恰是点名的八条（exact/pop/error/stamp/level/paper/cash/coin），多一条少一条都不算',
+    yieldNames.join(',') === 'exact,pop,error,stamp,level,paper,cash,coin',
+    `${yieldNames.length} 条＝${yieldNames.join('/')}`);
+  check('让位的判据是「发了声」不是「被叫到」：登记排在发声那一行之后，且要缓冲在或这条边有兜底合成；点按走 queueMicrotask，本函数零计时器',
+    /if \(GENERIC_YIELD\.has\(name\) && \(fileBufs\[SFX_FILES\[name\]\] \|\| voiced\)\) edgePass = pass;/.test(audioRaw)
+    && audioRaw.split('function sfx(name) {')[1].split('\n}')[0].indexOf('edgePass = pass')
+       > audioRaw.split('function sfx(name) {')[1].split('\n}')[0].indexOf('else if (!playFile')
+    && /export function tapEdge\(\) \{\n  const id = \+\+pass;\n  queueMicrotask\(\(\) => \{ if \(edgePass !== id\) sfx\('tap'\); \}\);/.test(audioRaw)
+    && !/setTimeout\(|setInterval\(/.test(audioRaw.split('export function tapEdge')[1] || ''),
+    '微任务在同一帧末尾｜tapEdge 内零计时器');
+  check('窄修不许制造哑点击：stamp/pop/error/paper/coin 这五条在 VOICES 里没有兜底键，坏文件时它们一声不出，登记条件里的 fileBufs||voiced 因此不放行，点按照旧',
+    ['stamp', 'pop', 'error', 'paper', 'coin'].every(n => !new RegExp(`^  ${n}: \\(\\) =>`, 'm').test(audioRaw))
+    && (audioRaw.match(/^\s{2}(tap|grab|exact|buy|cash|level): \(\) =>/gm) || []).length === 6,
+    '兜底合成只有 tap/grab/exact/buy/cash/level 六键｜五条无兜底边逐条点名零命中');
+  const tapCalls = (mainRaw.match(/sfx\('tap'\)/g) || []).length;
+  check('通用点按只剩一个入口且条件一字未动：原来那句 sfx(\'tap\') 换成 tapEdge()，「按到可点的按钮才出声」那个判据原样保留',
+    tapCalls === 0 && (mainRaw.match(/tapEdge\(\)/g) || []).length === 1
+    && /if \(\(tab \|\| nav \|\| host\) && !e\.target\.closest\('button\[disabled\]'\)\) tapEdge\(\);/.test(mainRaw),
+    `sfx('tap') 剩 ${tapCalls} 处｜tapEdge 1 处`);
+  check('窄修没越界：兜底回落句式与合成六键一字未动（§22 那两根针仍成立），名单外的 grab/buy/prep 照旧与点按同响',
+    /else if \(!playFile\(SFX_FILES\[name\]\) && VOICES\[name\]\) VOICES\[name\]\(\);/.test(audioRaw)
+    && (audioRaw.match(/^\s{2}(tap|grab|exact|buy|cash|level): \(\) =>/gm) || []).length === 6
+    && !/GENERIC_YIELD\.has\('grab'|'buy', 'prep'/.test(audioRaw),
+    '回落句式在场｜VOICES 六键齐｜名单外三条不改行为');
+}
+
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
 // 而开学周是"全线 ×1.1 + 品类系数偏肉（MB1.3/MT1.2）"；附录 D.5 的 2.5 元/碗 锚点按固定品类占比算，不含这两项。
 function bowlMarginYuan(tier, priceTierId, weatherId, semesterDay) {

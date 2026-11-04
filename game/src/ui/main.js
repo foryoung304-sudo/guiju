@@ -16,7 +16,7 @@ import { ticketlessCostCents } from '../engine/inspection.js';
 import { competitionOn, streetBoard } from '../engine/competition.js';
 import { evalCondition } from '../engine/dsl.js';
 import { EVENTS } from '../data/events.js';
-import { armAudio, sfx, isMuted, setMuted, motionCue, setBoil } from './audio.js';
+import { armAudio, sfx, tapEdge, isMuted, setMuted, motionCue, setBoil } from './audio.js';
 // 开场动画（task-opening-cinematic-20261102）：只借两个入口——新档首播、以及「我的」页重看。
 // 整层挂 body、不 import 引擎，撤掉 = 删这一行 + act 里两处 + me() 里那颗按钮 + theme.css 那一块。
 import { introShouldPlay, showIntro } from './intro.js';
@@ -256,7 +256,8 @@ app.addEventListener('click', e => {
   const nav = e.target.closest('[data-nav]');
   const host = e.target.closest('[data-act]');
   // ① UI 点击/翻页（音频单）：只在按到了确实可点的按钮时出声，禁用的那颗不出声也不走逻辑
-  if ((tab || nav || host) && !e.target.closest('button[disabled]')) sfx('tap');
+  // 裁定 d619ed6 第三条：改走 tapEdge——这一趟里若八条专属边发了声，这一次点按让位；条件一字没动
+  if ((tab || nav || host) && !e.target.closest('button[disabled]')) tapEdge();
   // 追补单三：点按即落定。落在这一屏任何一处都算，位置在换屏与选择逻辑之前；
   // 滚动期间没有加过任何 pointer-events，所以「落定」与「按到按钮」是同一只手，不互相挡。
   if (rollCancel) rollCancel();

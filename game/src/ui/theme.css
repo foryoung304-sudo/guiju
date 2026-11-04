@@ -490,19 +490,27 @@ td.r, th.r { text-align: right; }
 /* 3 出摊热气：三层软白粒子自锅沿袅袅而上，常驻，只在出摊 hub 那一屏挂（main.js 的 steamScene）。
    壳只多接一层定位、下边距从 .scene 搬到壳上（图与取景窗一格没动，读数见回报）；
    pointer-events:none + 整层被壳裁边 ⇒ 压不到字、抢不到点击；粒子用径向渐变的软白，不上 filter:blur（低端机每帧都贵）。
-   上升 84px ≈ 画面带高的 43%，最亮那一档（16%）还在台面附近，散掉时也没爬到红棚底下。 */
+   上升 84px ≈ 画面带高的 43%，最亮那一档（16%）还在台面附近，散掉时也没爬到红棚底下。
+   落点（热气单 task-steam-missing-20261104 返修）：三列原先在 48/56/63%，正压在玻璃柜罩那片奶白高光上——
+   软白叠奶白，肉眼就是「若有若无」。照 business.webp 实测带（430 宽下 .scenewrap 为 391×220）量出来的锅口
+   在 x 78–90%、沿口离带底 7.5%（摊主舀汤那口碗），图上画师自己点的几缕热气也在 74–86%——
+   现在三列中心落在 73/80/86%，起势就在碗口，一路上爬压的是围裙与上衣那片深色，白叠深才看得见。
+   强度（同单返修第二条）：峰 .5→.62、中档 .34→.44，径向渐变由「两点软边」改「实心 30% + 64% 半档 + 收边」，
+   粒子各放大 2px。同一把尺（间隔 3 秒的双帧、三通道差 >24 算一格）：改前 388 格 / 峰值差 226 → 改后 1317 格 / 峰值差 333；
+   验收那一对（间隔 2.5 秒）859 格、>60 的 401 格、>120 的 140 格，变化范围整块落在锅口那一列
+   （页面 x 294–365、y 198–287），带外一格没动——读数与图见 §六十八。 */
 .scenewrap { display: block; position: relative; margin-bottom: 12px; }
 .scenewrap > .scene { margin-bottom: 0; }
 .steam { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
-.steam i { position: absolute; left: 48%; bottom: 4%; width: 26px; height: 30px; border-radius: 50%;
-  background: radial-gradient(closest-side, rgba(255, 255, 255, .8), rgba(255, 255, 255, 0));
+.steam i { position: absolute; left: 70%; bottom: 4%; width: 26px; height: 30px; border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, .95) 0 30%, rgba(255, 255, 255, .48) 64%, rgba(255, 255, 255, 0));
   opacity: 0; animation: fxSteam 2400ms linear infinite; }
-.steam i:nth-child(2) { left: 56%; width: 20px; height: 24px; animation-delay: 800ms; }
-.steam i:nth-child(3) { left: 63%; width: 15px; height: 19px; animation-delay: 1600ms; }
+.steam i:nth-child(2) { left: 77%; width: 22px; height: 26px; animation-delay: 800ms; }
+.steam i:nth-child(3) { left: 84%; width: 17px; height: 21px; animation-delay: 1600ms; }
 @keyframes fxSteam {
   0% { opacity: 0; transform: translate3d(0, 0, 0) scale(.55); }
-  16% { opacity: .5; }
-  62% { opacity: .34; }
+  16% { opacity: .62; }
+  62% { opacity: .44; }
   100% { opacity: 0; transform: translate3d(-10px, -84px, 0) scale(1.5); }
 }
 /* 切后台：整层钉在暂停帧（CSS 播不播由 JS 这一枚 class 说停就停，不留计时器） */

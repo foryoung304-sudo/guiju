@@ -211,6 +211,10 @@ const VOICES = {
 
 // 首次动手之前不出声（移动端自动播放策略）；上下文由这一句自己补建，不再依赖调用方先跑过 armAudio
 const FILE_EDGES = new Set([...Object.keys(SFX_FILES), 'prep']);
+// 裁定 d619ed6 第三条（tap 叠响窄修）：这八条是单上点名的专属边，同一次交互里它们发了声，这一次的通用点按就让位。
+// 逐条照单，不自扩——备菜 chop/knife 与采购/抓菜那几条不在名单里，照旧与点按同响（外溢那条已原样报回，等裁）。
+const GENERIC_YIELD = new Set(['exact', 'pop', 'error', 'stamp', 'level', 'paper', 'cash', 'coin']);
+let pass = 0, edgePass = -1;   // pass = 这一次交互的编号；edgePass = 最近一次「专属边真的发了声」属于哪一次
 export function sfx(name) {
   if (muted || (!VOICES[name] && !FILE_EDGES.has(name))) return;
   if (!ctx && !gestured) return;
@@ -219,12 +223,24 @@ export function sfx(name) {
   const now = Date.now();
   if (last[name] && now - last[name] < RATE[name]) return;
   last[name] = now;
+  const voiced = !!VOICES[name];   // 这一条边有没有兜底的合成声（六件之外没有）
   try {
     // 备菜 = chop/knife 随机二选一（用 Math.random，绝不碰引擎的 rng 流）；
     // 其余先放录音，缓冲没到就回落到程序合成——同一条边绝不响两声，也绝不哑
     if (name === 'prep') playFile(PREP_FILES[Math.random() < 0.5 ? 0 : 1]);
     else if (!playFile(SFX_FILES[name]) && VOICES[name]) VOICES[name]();
+    // 真会发出声才登记：文件缓冲在、或这条边有兜底合成。两头都空的那几条（stamp/pop/error/paper/coin 碰上坏文件）
+    // 一声没出，就不许把这一次的通用点按也一起压没——窄修只压「已经有自己的声」那一次，绝不制造哑的点击
+    if (GENERIC_YIELD.has(name) && (fileBufs[SFX_FILES[name]] || voiced)) edgePass = pass;
   } catch {}
+}
+
+// 全局点按的唯一入口（main.js 那一处）：这一趟同步调用走完再决定响不响。
+// 专属边全在同一次点击的同步链里发声（act → 引擎 → go → render），microtask 就落在同一帧末尾——
+// 不加计时器、不延后任何流程、不进引擎与随机流，两轨基线因此一字不动。
+export function tapEdge() {
+  const id = ++pass;
+  queueMicrotask(() => { if (edgePass !== id) sfx('tap'); });
 }
 
 // 回报与自检用的实时读数（不写进任何画面）
