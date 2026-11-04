@@ -1,5 +1,5 @@
 import { SKU_BY_ID } from '../data/skus.js';
-import { SOLID_CATS, FACILITIES, TIERS_STALL, TOOLS } from '../data/constants.js';
+import { CONFIG, CHEAP_UNLOCK_CUE, SOLID_CATS, FACILITIES, TIERS_STALL, TOOLS } from '../data/constants.js';
 import { toCents, roundJin, addToCostPool } from './state.js';
 import { evalCondition } from './dsl.js';
 
@@ -23,11 +23,17 @@ function modMatches(mod, sku) {
 }
 
 // 附录 D.1 第 2 条：第六档的唯一购买门 = Day >= 8 & C >= 3；上架品类由 supply 子流抽 2–4 个
+// （机制单 `c152b37` 之后这一格另有低价档的亏损闸门，见下方 tier 3 那一行）
 export function skuAvailable(state, sku, rng) {
   // spec-event-pool-6 §二.3「明天没粉」：市场层落点，下架品类四档一起不收（今日第 2 步的晨间情报就是为这一格留的囤货窗口）。
   // 排在第六档抽取之前且不掷随机 → 断货日与非断货日走同一条 supply 流，已签带的随机轨不漂。
   // 只挡买、不挡卖：柜里已有的照常在第 7 步出菜。
   if (state.today.delist && sku.cat === state.today.delist) return false;
+  // 机制单 `c152b37`（Orange 定口径）：低价（清仓摊 tier 3）从「开局可选」改「绝境解锁」。
+  // 与第六档同一条先例——`skuAvailable` 的唯一消费者是市场页，第 3 步 `submitBasket` 不复核，所以这道闸挡的是「看得见、点得着」，
+  // 不挡跑表；跑表按单的例外条款保持原样（低价渠道本就在数值模型内，只是玩家可达时机后移）。
+  // 不掷随机：放在 supply 抽取之前，已签带的随机轨一字不动。
+  if (sku.tier === 3 && !state.cheapUnlocked) return false;
   if (sku.tier !== 6) return true;
   if (!evalCondition('Day>=8 & C>=3', state)) return false;
   if (!state.today.qianggeCats) {
@@ -38,6 +44,18 @@ export function skuAvailable(state, sku, rng) {
     state.today.qianggeCats = picked;
   }
   return state.today.qianggeCats.includes(sku.cat);
+}
+
+// 机制单 `c152b37`：闸门判定 + 「不许静默上架」的递话。放在第 8 步落账之后调用（`day.js` 的 `nightSettle`），
+// 撞线当晚由第 12 步 `buildComments` 把 `CHEAP_UNLOCK_CUE` 带进夜讯，次日市场低价卡才出现。
+// 只读累计经营净额，不看现金余额：升档/买设施走投资账、事件净走第 11 步的 NP，都不进这一格 ⇒「升档花钱不算亏，不许误触」。
+// 一次解锁、永久保留：翻过牌之后不再判定，本函数全年最多递话一次；不掷随机，数值轨不漂。
+export function cheapUnlockCheck(state) {
+  if (state.cheapUnlocked) return false;
+  if ((state.NetOpsCents || 0) > CONFIG.cheapUnlockNetOpsCents) return false;
+  state.cheapUnlocked = true;
+  state.today.forcedComments.push(CHEAP_UNLOCK_CUE);
+  return true;
 }
 
 export function lineCostCents(state, sku, qty) {

@@ -57,6 +57,9 @@ export function newGame(seed) {
     CommentLog: [], PurchaseLedger: [], DailyReports: [],
 
     NP: 0, NetInvestSpent: 0, AdBonusTotal: 0,
+    // 机制单 `c152b37`：累计经营净额（Σ 每日 netOpsCents，第 8 步落账那一格累加）与低价档的永久解锁位。
+    // NP 是「经营净额 + 事件账净额」两笔的和（附录 B），不是这一格——单上点名要的是账本现成的经营净额口径。
+    NetOpsCents: 0, cheapUnlocked: false,
     Tier: 1, tierName: TIERS_STALL[0].name, RampDays: 3, EndingId: 0,
     BaseSales: TIERS_STALL[0].baseSales, FixedCost: TIERS_STALL[0].fixedCost, LaborCost: 0,
 
@@ -187,6 +190,14 @@ export function loadGame() {
   if (!Array.isArray(parsed.Recent3)) parsed.Recent3 = [];
   if (typeof parsed.today?.copycatActive !== 'boolean')
     parsed.today = { ...(parsed.today || {}), copycatActive: false, delist: null, soupHalf: false };
+  // 机制单 `c152b37`（低价档亏损解锁）新带的两个字段。`NetOpsCents` 这一格**能 exact 重建**——每日账本行里就存着
+  // `netOpsCents`（§二 压力测试那条「NP = Σ(经营净额 + 事件账净额)」的针证得过它逐日可加），所以旧档按已发生过的账补齐，
+  // 不像 RiskShort 那样只能「不溯及既往补 0」。`cheapUnlocked` 一律补 false：**不在这里替玩家把门打开**，
+  // 因为单上红线是「不许静默上架」——旧档就算已经亏过 180，也要等下一晚第 8 步那道判定自然撞线，递话那条留言才会在场。
+  if (typeof parsed.NetOpsCents !== 'number' || !Number.isFinite(parsed.NetOpsCents))
+    parsed.NetOpsCents = Array.isArray(parsed.DailyReports)
+      ? parsed.DailyReports.reduce((s, r) => s + (r?.netOpsCents || 0), 0) : 0;
+  if (typeof parsed.cheapUnlocked !== 'boolean') parsed.cheapUnlocked = false;
   parsed.saveVersion = SAVE_VERSION;
   return parsed;
 }

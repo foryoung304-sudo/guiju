@@ -40,6 +40,10 @@ export function settleDay(state) {
     tastingNetCents: tasting.netCents, netOpsCents,
   });
 
+  // 机制单 `c152b37` 的闸门口径：累计经营净额 = Σ 每日 netOpsCents。升档/买设施/盘店走投资账，
+  // 事件净走第 11 步的 NP，两笔都不进这一格——单上「升档花钱不算亏，不许误触」在代码里就是这一行只加 netOpsCents。
+  state.NetOpsCents = (state.NetOpsCents || 0) + netOpsCents;
+
   // 现金滚动（采购现金已在第 3 步扣，此处不重复扣）。附录 B 现金流清单：+ 流水 + 试吃份钱收入
   // − 包装 − 添加剂 − 固定支出 − 人工 − 自动还款；样品成本是库存消耗，不走现金，桥靠库存资产项自动平衡
   state.Cash += t.revenueCents + tasting.incomeCents - t.packingCents - additiveCents

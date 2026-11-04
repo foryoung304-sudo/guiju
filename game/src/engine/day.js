@@ -1,7 +1,7 @@
 import { CONFIG, PRICE_TIERS, ENDING, SOLID_CATS, PACKING, ADDITIVE, TASTING, BUYOUT_PRICE_CENTS, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN, QUIT_VARIANT_NP_CENTS, QUIT_VARIANT_REP } from '../data/constants.js';
 import { blankToday, roundJin } from './state.js';
 import { makeRng } from './rng.js';
-import { buildBasket, commitPurchase, planPayment, ownsTool } from './market.js';
+import { buildBasket, commitPurchase, planPayment, ownsTool, cheapUnlockCheck } from './market.js';
 import { forecastBasket, settleDay, bridgeCheck } from './ledger.js';
 import { runBusiness, priceCoefFor } from './ops.js';
 import { applyShadow } from './shadow.js';
@@ -182,6 +182,8 @@ function defaultGrams(order) {
 // 第 8–9 步：收摊账目 + 预订兑现 + 暗线（界面先展示这一段，再弹晚间事件）
 export function nightSettle(state, rng) {
   settleDay(state);
+  // 机制单 `c152b37`：账一落就判绝境闸。撞线当晚翻牌 + 递话（第 12 步 `buildComments` 同夜带出），次日市场低价卡才出现。
+  cheapUnlockCheck(state);
   state.today.reserveResult = resolvePendingReserve(state);
   applyShadow(state, {
     shortOrders: state.today.shortWeighCount,

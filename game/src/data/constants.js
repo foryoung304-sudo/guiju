@@ -22,6 +22,13 @@ export const ALL_CATS = ['MB', 'MT', 'VG', 'BF', 'NS', 'SP'];
 export const TIER = { 1: '正经', 2: '平价', 3: '特价', 6: '特供' };
 export const QUALITY_BY_TIER = { 1: 95, 2: 68, 3: 35, 6: 22 };
 
+// 机制单 `c152b37` 的两条出场文案。**都不进 COMMENT_POOLS**——池长就是随机流消耗量，加一条等于动数值（§六十一 那条口径）。
+// ① 递话：撞线当晚那条「① 类强制留言」（events.js 同款通道，不掷随机、第 12 步排在概率类信号之前）。单上要求「不许静默上架」，
+//    所以门开的那一晚必须有这一句话在场；后半句留刺归它自己。
+// ② 卡面警告：解锁之后每一张清仓摊卡都带这一行（规矩味，不摆暗线数值：品质分与风险都是看不见的那面）。
+export const CHEAP_UNLOCK_CUE = '老陈探头扫了一眼我这几天的账：「城东有摊清仓货，去晚了只剩泡沫箱。」说完就走，十米外回头补一句——「别说是我讲的。」';
+export const CHEAP_TIER_WARNING = '这条路是账逼出来的：省下的每一分，都会在票上、秤上或检查里找回来。';
+
 // 定稿 §二：价格梯度上移，只动三个价，客流系数与口碑减半规则原样保留
 export const PRICE_TIERS = {
   qinmin: { id: 'qinmin', name: '亲民价', perJin: 19.2, coef: 1.15 },
@@ -214,6 +221,10 @@ export const CONFIG = {
   // 是**时间闸**，不是逐日排片：D3 起各条按自己既有的条件、概率门与权重入池竞争，D3 之前整池不触发；
   // 不点名钉死某条事件或某个人物（旧稿的 D1 赵大妈必达／D2 常客首单／D3 王老板保底三条作废）。
   specialFirstDay: 3,
+  // 机制单 task-cheap-unlock-20261104（`c152b37`，店主点子、口径由 Orange 定）：低价（清仓摊 tier 3）从「开局可选」改「绝境解锁」。
+  // 闸门 = **累计经营净额**（每日 `netOpsCents` 累加，账本现成口径，见 ledger.js 第 8 步）≤ −180 元；一次解锁、永久保留。
+  // 单上原话「用累计经营净额不用现金余额：升档花钱不算亏，不许误触」⇒ 这一格只读经营净额，投资/升档/事件账都不进这个和。
+  cheapUnlockNetOpsCents: -18000,
   capacityTruncation: true,
   packingTier: 'normal',
   additiveTier: 'none',

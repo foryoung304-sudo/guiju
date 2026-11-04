@@ -7,11 +7,12 @@ import { fileURLToPath } from 'node:url';
 import { simulate, STRATEGIES, REF_STRATEGIES } from './src/sim.js';
 import { bridgeCheck, settleDay, settleWriteoff, settleTasting } from './src/engine/ledger.js';
 import { newGame, roundJin, loadGame, STORAGE_KEY, toCents } from './src/engine/state.js';
-import { effectivePrice, buildBasket, planPayment, recomputeStock, buyTool, sellBackTool, ownsTool, upgradeStall, isFacilityUnlocked, skuAvailable } from './src/engine/market.js';
+import { effectivePrice, buildBasket, planPayment, recomputeStock, buyTool, sellBackTool, ownsTool, upgradeStall, isFacilityUnlocked, skuAvailable, cheapUnlockCheck } from './src/engine/market.js';
 import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, PACKING_SPILL, CONFIG, SAVE_VERSION,
   ADDITIVE, PREP_LEVELS, LABOR, TASTING, TOOLS, SCALE_DELTA_J_SHARE, SCALE_C_PER_JIN, SCALE_RISK_PER_JIN,
   COMPETITION, INSPECTION, FACILITIES, ENDING, BLANCH, TIERS_STALL, SUBSTREAMS,
-  BUYOUT_PRICE_CENTS, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN, QUIT_VARIANT_NP_CENTS, QUIT_VARIANT_REP } from './src/data/constants.js';
+  BUYOUT_PRICE_CENTS, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN, QUIT_VARIANT_NP_CENTS, QUIT_VARIANT_REP,
+  QUALITY_BY_TIER, CHEAP_UNLOCK_CUE, CHEAP_TIER_WARNING } from './src/data/constants.js';
 import { SKU_BY_ID } from './src/data/skus.js';
 import { scenarioOf, WEATHER } from './src/data/scenario.js';
 import { evalCondition } from './src/engine/dsl.js';
@@ -1877,6 +1878,9 @@ for (const seed of [SEED, 7979, 36832]) {
     check('下架只次日：第 1 步结转成真、用完即清', d1 === 'NS' && pending1 === null && d2 === null,
       `D+1 ${d1 || '无'}｜D+2 ${d2 || '无'}`);
     const q = newGame(SEED); beginDay(q); q.today.delist = 'NS'; q.C = 5; q.Day = 20;
+    // 前超（机制单 `c152b37`）：VG3 是清仓摊（tier 3），现在归「绝境解锁」闸管。这一根针测的是断货日四档一起不收，
+    // 不是低价闸（低价闸另有一组针，见 §21），所以这里把闸门显式打开——否则这一格会把新闸当成断货判定失败来报。
+    q.cheapUnlocked = true;
     const counters = JSON.stringify(q.streamCounter);
     const nsOut = ['NS1', 'NS2', 'NS3', 'NS6'].map(k => skuAvailable(q, SKU_BY_ID[k], makeRng(q)));
     check('「全档下架」= 粉面四档一起不收（正经 / 批发 / 清仓 / 强哥全 false），别的品类不受影响',
@@ -2498,6 +2502,151 @@ for (const seed of [SEED, 7979, 36832]) {
     meBody.includes(CREDIT) && meBody.lastIndexOf(CREDIT) > meBody.indexOf('clearArmed ?')
     && /\.credit \{[^}]*font-size: 11px/.test(cssSrc),
     `credit ${meBody.includes(CREDIT) ? '原文在场' : '缺失'}｜.credit 11px ${/\.credit \{[^}]*font-size: 11px/.test(cssSrc) ? '有' : '无'}`);
+}
+
+// ── §21 机制单 task-cheap-unlock-20261104（`c152b37`，店主点子、Orange 定口径）：低价档改「绝境解锁」──
+// 单上只允许动四件：闸门（累计经营净额 ≤ −180 元）、撞线当晚递话、次日卡出场、卡面一句规矩味警告。
+// 价格 / 品质 / 带票 / 赊购 / 隔夜这些既有代价一字不动；闸门与递话都不掷随机（池长＝随机流消耗量，动它＝动数值）。
+{
+  const cheap = Object.values(SKU_BY_ID).filter(s => s.tier === 3);
+  const d1 = newGame(SEED); beginDay(d1);
+  const lockedAll = cheap.every(s => skuAvailable(d1, s, makeRng(d1)) === false);
+  check('开局不给低价：六样清仓货（tier 3）整档不可买，正经 / 批发照旧在场（本单只把清仓摊这一档关进闸门）',
+    lockedAll && cheap.length === 6
+    && skuAvailable(d1, SKU_BY_ID['MB1'], makeRng(d1)) === true
+    && skuAvailable(d1, SKU_BY_ID['MB2'], makeRng(d1)) === true,
+    `tier 3 共 ${cheap.length} 样${lockedAll ? '全 false' : '有漏'}｜MB1 正经 / MB2 批发 true`);
+
+  // 闸门只读状态、不掷随机：锁着问一遍、开着再问一遍，supply 子流的计数一格没动
+  const q0 = newGame(SEED); beginDay(q0); q0.Day = 20; q0.C = 5;
+  const streamBefore = JSON.stringify(q0.streamCounter);
+  const probeRng = makeRng(q0);
+  const lockedRes = cheap.map(s => skuAvailable(q0, s, probeRng));
+  q0.cheapUnlocked = true;
+  const openRes = cheap.map(s => skuAvailable(q0, s, probeRng));
+  check('绝境闸与第六档同一条纪律：判定不吃随机（已签带的 supply 子流一字不漂，断货日那种「排在抽取之前」的落点照抄）',
+    JSON.stringify(q0.streamCounter) === streamBefore
+    && lockedRes.every(v => v === false) && openRes.every(v => v === true),
+    `锁 ${lockedRes.join('/')} → 开 ${openRes.join('/')}｜streamCounter ${streamBefore === JSON.stringify(q0.streamCounter) ? '未动' : '漂了'}`);
+
+  // 撞线夜 = 递话夜：逐日跑真实账（什么都不买 → 每日只亏固定 75 + 人工 60），第一晚过线那一晚必须翻牌并留话
+  const s = newGame(SEED);
+  const trail = [];
+  let tripDay = null, prevSum = 0;
+  for (let i = 0; i < 5 && !s.EndingId; i++) {
+    const r = beginDay(s);
+    morningPreEvent(s, r);
+    lockTradingDay(s, { priceTier: 'qinmin' });
+    morningEvent(s, r, () => null);
+    runDay(s, [], () => ({}), r);
+    prevSum = s.NetOpsCents;
+    nightSettle(s, r);
+    const crossed = prevSum > CONFIG.cheapUnlockNetOpsCents && s.NetOpsCents <= CONFIG.cheapUnlockNetOpsCents;
+    const ev = eveningDraw(s, r);
+    nightClose(s, r, ev, null);
+    const said = (s.CommentLog[s.CommentLog.length - 1]?.comments || []).filter(c => c === CHEAP_UNLOCK_CUE).length;
+    if (crossed && tripDay === null) tripDay = { day: s.Day, said, sum: s.NetOpsCents };
+    trail.push(`D${s.Day} 当日 ${(s.today.netOpsCents / 100).toFixed(0)} 累计 ${(s.NetOpsCents / 100).toFixed(0)}${said ? ' 递话' : ''}`);
+  }
+  const cueTotal = s.CommentLog.reduce((n, d) => n + d.comments.filter(c => c === CHEAP_UNLOCK_CUE).length, 0);
+  check('撞线当晚翻牌 + 递话（单上「不许静默上架」）：第 8 步落账当刻判闸，同夜第 12 步那句熟人递话进「今晚的留言」',
+    tripDay !== null && tripDay.said === 1 && s.cheapUnlocked === true,
+    trail.join(' ｜ ') + `｜过线夜第 ${tripDay?.day} 天留言 ${tripDay?.said} 条`);
+  check('一次解锁、永久保留：跑满 5 天那句递话全场只出现一次，翻过牌之后不再判、也不回头收（门路知道就忘不掉）',
+    cueTotal === 1 && cheapUnlockCheck(s) === false && s.cheapUnlocked === true,
+    `累计出现 ${cueTotal} 次｜再判返回 false｜位仍 true`);
+
+  // 「升档花钱不算亏，不许误触」：投资账从现金走，一格都不进累计经营净额
+  const inv = newGame(SEED); beginDay(inv);
+  inv.Cash = 90000;
+  const spent = upgradeStall(inv);
+  const cashAfterSpend = inv.Cash;
+  const gateAfterSpend = cheapUnlockCheck(inv);
+  lockTradingDay(inv, { priceTier: 'qinmin' });
+  morningEvent(inv, makeRng(inv), () => null);
+  runDay(inv, [], () => ({}), makeRng(inv));
+  nightSettle(inv, makeRng(inv));
+  check('升档那一笔不算亏：三轮车 → 二手餐车掏掉 800 元、现金当场只剩 100 元，闸门不开；当晚落账后进这一格的只有固定 + 人工，投资那 800 元一分没进',
+    spent === true && cashAfterSpend === 10000 && inv.NetInvestSpent === 80000 && gateAfterSpend === false
+    && inv.NetOpsCents === inv.today.netOpsCents
+    && inv.today.netOpsCents === -(inv.FixedCost + inv.LaborCost),
+    `掏完剩 ${(cashAfterSpend / 100).toFixed(0)} 元（若读现金早过 −180 那种口径）｜投资账 ${(inv.NetInvestSpent / 100).toFixed(0)} 元`
+    + `｜累计经营净额 ${(inv.NetOpsCents / 100).toFixed(0)} 元（= 固定 ${(inv.FixedCost / 100).toFixed(0)} + 人工 ${(inv.LaborCost / 100).toFixed(0)}）`);
+  // 顺带钉住一条口径外溢：升档把 FixedCost 从 75 抬到 135，这一格是真的，所以「先升档再卖不动」的玩家会因此撞线——
+  // 单上排除的是那 800 元本金，不是抬上去的日常固定支出。这条写进 §六十四 回报，不改口径。
+  check('升档抬高的固定支出算经营亏损（不算投资本金）：tier 2 的 FixedCost 135 元逐日进这一格',
+    inv.FixedCost === TIERS_STALL[1].fixedCost && inv.NetOpsCents <= -13500,
+    `FixedCost ${(inv.FixedCost / 100).toFixed(0)} 元｜单晚落账后 ${(inv.NetOpsCents / 100).toFixed(0)} 元`);
+
+  // 口径只有一处：全仓写 state.NetOpsCents 的地方只有第 8 步那一格与存档迁移
+  const srcRoot = join(HERE, 'src');
+  const srcFiles = [];
+  (function walk(dir) {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p); else if (e.name.endsWith('.js')) srcFiles.push(p);
+    }
+  })(srcRoot);
+  const writers = srcFiles
+    .filter(f => /\.NetOpsCents\s*(\+=|=[^=])/.test(readFileSync(f, 'utf8')))
+    .map(f => f.slice(srcRoot.length + 1).replace(/\\/g, '/')).sort();
+  check('累计经营净额只有一个入口：全仓写这一格的只有 ledger.js（第 8 步累加）与 state.js（老档重建），投资与事件账碰不到它',
+    writers.join(' ') === 'engine/ledger.js engine/state.js', `写入处 ${writers.join(' / ') || '无'}`);
+
+  // 存档迁移：新字段不作废老档；净额可 exact 重建，解锁位不许静默补 true
+  {
+    const store = new Map();
+    globalThis.localStorage = {
+      getItem: k => (store.has(k) ? store.get(k) : null),
+      setItem: (k, v) => store.set(k, String(v)),
+      removeItem: k => store.delete(k),
+    };
+    const mig = newGame(SEED);
+    const rm = beginDay(mig);
+    morningPreEvent(mig, rm);
+    lockTradingDay(mig, { priceTier: 'qinmin' });
+    morningEvent(mig, rm, () => null);
+    runDay(mig, [], () => ({}), rm);
+    nightSettle(mig, rm);
+    const evm = eveningDraw(mig, rm);
+    nightClose(mig, rm, evm, null);
+    const sum = mig.DailyReports.reduce((n, rr) => n + rr.netOpsCents, 0);
+    mig.saveVersion = 'v4.9.2-cal.1';
+    delete mig.NetOpsCents; delete mig.cheapUnlocked;
+    store.set(STORAGE_KEY, JSON.stringify(mig));
+    const m = loadGame();
+    check('迁移：cal.1 老档没有这两个字段——净额按每日账本 exact 重建，解锁位补 false（宁可让老档下一晚自然撞线，也不静默上架）',
+      !!m && m.NetOpsCents === sum && m.cheapUnlocked === false && m.saveVersion === SAVE_VERSION,
+      `重建 ${sum} 分 = Σ 逐日 netOpsCents｜位 ${m?.cheapUnlocked}｜版本 ${m?.saveVersion}`);
+    const again = JSON.stringify(mig);
+    store.set(STORAGE_KEY, again);
+    const m2 = loadGame();
+    check('迁移可重复：同一份老档读两次结果逐字相同（不是一次性补丁）',
+      !!m2 && m2.NetOpsCents === sum && m2.cheapUnlocked === false, `第二次 ${m2?.NetOpsCents}`);
+    delete globalThis.localStorage;
+  }
+
+  // 卡面警告与既有代价：警告只挂在 tier 3 分支、文案只有一处定义；六样的价与档一字未动
+  const uiSrc = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const warnMount = uiSrc.split('\n').find(l => l.includes('cheapWarn') && l.includes('CHEAP_TIER_WARNING'));
+  const warnHome = srcFiles.filter(f => readFileSync(f, 'utf8').includes('CHEAP_TIER_WARNING'))
+    .map(f => f.slice(srcRoot.length + 1).replace(/\\/g, '/')).sort().join(' ');
+  const literalHome = srcFiles.filter(f => readFileSync(f, 'utf8').includes(CHEAP_TIER_WARNING))
+    .map(f => f.slice(srcRoot.length + 1).replace(/\\/g, '/')).sort().join(' ');
+  check('卡面警告接在 skuCard 的 tier 3 分支、只挂一次（F8：同屏不留第二口径；句子只在 constants.js 定义，界面引用不复制）',
+    warnMount !== undefined && warnMount.includes('s.tier === 3') && warnMount.includes('negv')
+    && uiSrc.split('\n').filter(l => l.includes('${cheapWarn}')).length === 1
+    && warnHome === 'data/constants.js ui/main.js' && literalHome === 'data/constants.js',
+    `挂载行「${(warnMount || '').trim().slice(0, 30)}…」｜引用处 ${warnHome}｜原句只在 ${literalHome}`);
+  check('单上「不动价格与品质参数」：六样清仓货的价、档、票、赊、隔夜逐字未动（q35 / 无票 / 只收现金 / 当天清）',
+    ['MB3', 'MT3', 'VG3', 'BF3', 'NS3', 'SP3'].map(k => SKU_BY_ID[k].price).join('/') === '10.5/9.5/3/4.5/2.5/0.4'
+    && cheap.every(sk => sk.q === QUALITY_BY_TIER[3] && sk.receipt === 'none' && sk.credit === false && sk.keep === false),
+    `价 ${['MB3', 'MT3', 'VG3', 'BF3', 'NS3', 'SP3'].map(k => SKU_BY_ID[k].price).join('/')}｜q 全 ${QUALITY_BY_TIER[3]}`);
+  check('两句新文案一条都没塞进留言池：COMMENT_POOLS 仍是 11 池 32 条（塞一条等于动随机流＝动数值）',
+    Object.keys(COMMENT_POOLS).length === 11
+    && Object.values(COMMENT_POOLS).reduce((n, a) => n + a.length, 0) === 32
+    && !Object.values(COMMENT_POOLS).some(arr => arr.some(t => t === CHEAP_UNLOCK_CUE || t === CHEAP_TIER_WARNING)),
+    `${Object.keys(COMMENT_POOLS).length} 池 ${Object.values(COMMENT_POOLS).reduce((n, a) => n + a.length, 0)} 条`);
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，

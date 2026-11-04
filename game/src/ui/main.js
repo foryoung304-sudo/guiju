@@ -2,7 +2,7 @@
 // 红线照正本 3.1 / 3.4 / 九：不许出现品质数字、不许出现道德标签、不许有一句劝善或劝坏的话。
 import { CAT, SOLID_CATS, ALL_CATS, PRICE_TIERS, FACILITIES, ENDING, CONFIG, TIERS_STALL, START_CASH_CENTS, START_CREDIT_CAP_CENTS,
   PACKING, PACKING_NAMES, PREP_STATIONS, PREP_LEVELS, ADDITIVE, FLAVOR_DIMS, FLAVOR_DIM_NAMES, CLIENT_MIX,
-  TASTING, TOOLS, SCALE_AUTO_MUL, BLANCH, RETIRE_NP_CENTS, BUYOUT_PRICE_CENTS, SAVE_VERSION } from '../data/constants.js';
+  TASTING, TOOLS, SCALE_AUTO_MUL, BLANCH, RETIRE_NP_CENTS, BUYOUT_PRICE_CENTS, SAVE_VERSION, CHEAP_TIER_WARNING } from '../data/constants.js';
 import { SKUS_BY_CAT, SKU_BY_ID } from '../data/skus.js';
 import { newGame, loadGame, saveGame, clearSave, makeRng, roundJin, centsToYuan } from '../index.js';
 import {
@@ -1261,13 +1261,16 @@ function skuCard(cat, s, forecast) {
     : s.receipt === 'excluded' ? ''
       : s.receipt === 'none' ? '<span class="tag nodoc">无票</span>' : '<span class="tag nodoc">票看手气</span>';
   const step = cat === 'SP' ? 1 : 0.5;
+  // 机制单 `c152b37`：低价（清仓摊）卡面固定带一句规矩味警告——解锁是账逼出来的，不是奖励。
+  // 本单只改闸门与出场，价格/品质/带票/赊购这些既有代价一字不动。
+  const cheapWarn = s.tier === 3 ? `<div class="desc negv">${esc(CHEAP_TIER_WARNING)}</div>` : '';
   return `<div class="sku ${q > 0 ? 'on' : ''}${qtyBad.has(s.sku) ? ' bad' : ''}">
     <div class="skumain">
       <div class="skuimg" data-cell="${TIER_CELL[s.tier]}" style="background-image:url(./img/${SKU_SHEET[cat]}.webp)" role="img" aria-label="${CAT[cat].name} · ${s.supplier}"></div>
       <div class="skubody">
         <div class="src">${s.supplier}</div>
         <div class="price num">${price.toFixed(2)}<span class="muted">/${s.unit}</span></div>
-        <div class="desc">${esc(s.desc)}</div>
+        <div class="desc">${esc(s.desc)}</div>${cheapWarn}
         <div>${s.credit ? '<span class="tag credit">可赊</span>' : '<span class="tag cash">只收现金</span>'} ${ticket}
           ${cat === 'SP' ? '<span class="tag due">隔夜全损</span>' : s.keep ? '<span class="tag keep">能留明天</span>' : '<span class="tag due">当天清</span>'}</div>
       </div>
