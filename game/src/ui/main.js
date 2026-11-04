@@ -16,7 +16,7 @@ import { ticketlessCostCents } from '../engine/inspection.js';
 import { competitionOn, streetBoard } from '../engine/competition.js';
 import { evalCondition } from '../engine/dsl.js';
 import { EVENTS } from '../data/events.js';
-import { armAudio, sfx, isMuted, setMuted, motionCue } from './audio.js';
+import { armAudio, sfx, isMuted, setMuted, motionCue, setBoil } from './audio.js';
 // 开场动画（task-opening-cinematic-20261102）：只借两个入口——新档首播、以及「我的」页重看。
 // 整层挂 body、不 import 引擎，撤掉 = 删这一行 + act 里两处 + me() 里那颗按钮 + theme.css 那一块。
 import { introShouldPlay, showIntro } from './intro.js';
@@ -71,6 +71,7 @@ let preEvent = null;     // 第 2 步晨间情报（无分支）
 let pendingEvent = null; // 等玩家选的事件（第 6 步 / 第 10 步）
 const CUE_EVENT_ID = 'evt_d_001';   // 声音标记唯一挂靠点（动画单第二条：赵大妈出场）；撤这条就是删这一行与 render() 里那三行
 let cueLast = null;                 // 上一次挂载的事件 id，用来保证「同一次出场只响一声」
+let paperLast = null;               // 同一套「只响一次」给王老板线那一声纸张（接入单 594b908）
 let pricePick = 'standard';
 let prepPick = ['将就', '将就', '将就'];    // 第 4 步草稿：三站档名
 let wakePick = false;                        // 早起勾选（占 1 格工时）
@@ -290,6 +291,13 @@ function render() {
   const cueNow = pendingEvent ? pendingEvent.id : null;
   if (cueNow === CUE_EVENT_ID && cueLast !== cueNow) motionCue('grandmaCough');
   cueLast = cueNow;
+  // 接入单 594b908 两条新边（都只碰呈现，不进任何判定与随机流）：
+  // ① 锅声循环只在营业那一屏垫底（下锅与过称都在这一屏），换屏即收；响度位见 audio.js 的 BOIL_TRIM 注。
+  setBoil(phase === 'weigh');
+  // ② 王老板线入场 = 递信封/翻账本那一下（sfx-paper）；与赵大妈那声咳嗽共用「同一次挂载只响一声」的触发纪律。
+  const wangNow = pendingEvent && String(pendingEvent.motion || '').startsWith('wang') ? pendingEvent.id : null;
+  if (wangNow && paperLast !== wangNow) sfx('paper');
+  paperLast = wangNow;
   app.classList.toggle('hasTabs', showTabs());   // 有标签才留那一条底部高度，流程屏照旧全屏
   // 实测问题 #8：数量框一边打字一边刷试算（原来 input 用 change，必须回车/失焦才动）
   app.querySelectorAll('input[data-qty]').forEach(el => {
@@ -422,7 +430,7 @@ function act(host) {
     case 'pack': packingPick = d.pack; return go('lock');
     case 'flavor': flavorPick[d.dim] = Math.max(0, Math.min(5, flavorPick[d.dim] + Number(d.delta))); return go('lock');
     case 'additive': additivePick = d.add; return go('lock');
-    case 'prepLevel': prepPick[Number(d.station)] = d.level; return go('prep');
+    case 'prepLevel': prepPick[Number(d.station)] = d.level; sfx('prep'); return go('prep');   // 备菜一格 = chop/knife 随机二选一
     case 'wake': wakePick = !wakePick; return go('prep');
     case 'prepDone': return commitPrepDraft();
     case 'open': return openShop();
@@ -544,9 +552,9 @@ function picksFromDraft() {
 function submitDraft() {
   // 真机修复单 f39f692：点结算这一枪先把屏上每一格重读一遍，篮子由「此刻格子里的数」决定。
   // 有一格认不出来就原地驳回（不走 go：整屏重绘会把那行字洗成 0，玩家看不见自己错在哪一格）
-  if (syncDraftFromInputs()) return refreshForecast();
+  if (syncDraftFromInputs()) { sfx('error'); return refreshForecast(); }   // 接入单 594b908：失败/被拒边（单上「原包只有成功边」那个缺口）
   const r = submitBasket(state, picksFromDraft(), rng);   // 第 3 步：组篮 + 支付
-  if (!r.ok) return go('market');
+  if (!r.ok) { sfx('error'); return go('market'); }       // 付不齐、超柜量同样是被拒
   qtyBad.clear();               // 成交了：上一轮的读不出的登记不带进下一屏
   sfx('buy');                 // ④ 确认采购（付得成才响）
   pricePick = state.PriceTier;
@@ -570,12 +578,13 @@ function openShop() {
       flavor: flavorPick, additiveTier: additivePick,
       tastingCount: tastingPick, scaleShowOn: scalePick,
     });
+    sfx('stamp');                              // 接入单 594b908：定版价落定（六开关一锁、全天照这一套卖，就这一下）
   }
   // 预检必修③：滑杆开局一律空碗（0 克）。原来预填成顾客的要量，核心操作被架空；
   // 顾客要多少仍写在滑杆标签与双读数里，抓多少由玩家自己定。
   if (!orders.length) {                                        // 断点回来不重抽（抽卡会推进随机流）
     pendingEvent = drawEvent(state, 'morning', rng);           // 第 6 步：晨间事件（先亮出来才让玩家选）
-    if (pendingEvent) sfx('tap');                              // 事件弹出复用 ①，不另加音色
+    if (pendingEvent) sfx('pop');                              // 接入单 594b908：事件/消息弹出用独立的 pop，不再借点按那一声
     orders = drawHandOrders(state, rng);                       // 第 7 步的亲手单先亮单子
     gramsBy = Object.fromEntries(orders.map(o => [o.customerId, Object.fromEntries(o.lines.map(l => [l.cat, 0]))]));
     okRef = {};
@@ -842,7 +851,7 @@ function cook() {
 function afterEvening() {
   if (pendingEvent) return go(phase);        // 已经抽出来了，重复点「打烊」不再二次抽卡
   pendingEvent = eveningDraw(state, rng);  // 第 10 步抽取
-  if (pendingEvent) { sfx('tap'); return go(phase); }       // 停在弹层等玩家选（弹出复用 ①）
+  if (pendingEvent) { sfx('pop'); return go(phase); }        // 停在弹层等玩家选（接入单 594b908：弹出走独立的 pop）
   return finishNight(null);
 }
 

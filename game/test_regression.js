@@ -2340,8 +2340,8 @@ for (const seed of [SEED, 7979, 36832]) {
     && (mainCode.match(/validity\?\.badInput/g) || []).length === 1
     && /classList\.toggle\('bad', bad\)/.test(mainCode)
     && /function setQty\(el, normalize\) \{\s*const bad = commitOneQty\(el\);/.test(mainCode)
-    && /if \(syncDraftFromInputs\(\)\) return refreshForecast\(\);/.test(mainCode),
-    '驳回走原地重绘、不走 go（重绘会把那行字洗成 0，玩家看不见错在哪一格）；setQty 里不再自己另写一次草稿');
+    && /if \(syncDraftFromInputs\(\)\) \{ sfx\('error'\); return refreshForecast\(\); \}/.test(mainCode),
+    '驳回走原地重绘、不走 go（重绘会把那行字洗成 0，玩家看不见错在哪一格）；setQty 里不再自己另写一次草稿；接入单 594b908 在这一格补了被拒声，驳回路径本身一字未动');
   check('认不出数的那一屏只有一个口径：试算与吸底条整块换成驳回话，不摆「少算那一格的合计」；首挂与实时刷新共用同两支',
     /const marketDetailHtml = f => \(qtyBad\.size \? badBasketPanel\(\) : forecastBar\(f\) \+ buyPanel\(f\)\)/.test(mainCode)
     && /const marketFootHtml = f => \(qtyBad\.size \? badBasketStrip\(\) : footStrip\(f\)\)/.test(mainCode)
@@ -2490,9 +2490,9 @@ for (const seed of [SEED, 7979, 36832]) {
     `键 guiju-m1-audio｜SAVE_VERSION ${SAVE_VERSION}`);
 
   const voiceKeys = (audioSrc.match(/^\s{2}(tap|grab|exact|buy|cash|level): \(\) =>/gm) || []).length;
-  check('六件合成 SFX 一条没删（VOICES 六键齐全），锅声/失败边那 12 件仍等店主的包',
-    voiceKeys === 6 && !/sfx-(cha-ching|error|boil-loop)/.test(audioSrc),
-    `VOICES 六键在场｜外部 SFX 引用 0 条（包未到，不接空路径）`);
+  check('六件合成 SFX 一条没删（VOICES 六键齐全）；包到了，外部录音引用从 0 条变成 12 件（引用与文件成对，见 §22）',
+    voiceKeys === 6 && /sfx-cha-ching/.test(audioSrc) && /sfx-error/.test(audioSrc) && /sfx-boil-loop/.test(audioSrc),
+    `VOICES 六键在场｜cha-ching / error / boil-loop 三串都在引用侧`);
 
   const mainSrc = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
   const cssSrc = readFileSync(join(HERE, 'src/ui/theme.css'), 'utf8');
@@ -2658,6 +2658,107 @@ for (const seed of [SEED, 7979, 36832]) {
   check('裁定一：跑表与界面共用「未解锁的清仓摊不在场」这一条读法，两处都只读 state.cheapUnlocked、都不掷随机',
     !!mirrorLine && !!gateLine && !!fixtureLine,
     `界面闸「${(gateLine || '').trim().slice(0, 34)}…」｜跑表镜像「${(mirrorLine || '').trim().slice(0, 30)}…」｜夹具 ${fixtureLine ? '在场' : '缺失'}`);
+}
+
+// ── §22 接入单 task-sfx-pack-20261104（Orange `594b908`）：12 件真实录音的挂载正确性 ──
+// 当年那次「WAV 头写坏 → Chrome 拒解 → 真机全程哑而运行时一声不响」的教训在这一批最吃劲：
+// 引用与文件必须成对钉住，十二件逐件核字节与 sha；单上的挂载表逐条核对应；合成六件是兜底位，一条不许删。
+{
+  const audioRaw = readFileSync(join(HERE, 'src/ui/audio.js'), 'utf8');
+  // 注释里会出现「SAVE_VERSION」这种字（文件头那条纪律本身就是这么写的），所以纪律类断言一律对剥掉注释的源码做
+  const audioSrc = audioRaw
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ').replace(/[ \t]+\/\/[^\n]*$/gm, ' ');
+  const mainRaw = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const ledger = readFileSync(join(HERE, '..', 'AUDIO-LICENSES.md'), 'utf8');
+  // 单上挂载表：边（界面时刻）→ 成品文件名。逐条钉，不许谁把哪一件接错了地方
+  const MOUNT = {
+    tap: 'sfx-tap', exact: 'sfx-confirm', cash: 'sfx-cha-ching', level: 'sfx-bell',
+    pop: 'sfx-pop', error: 'sfx-error', coin: 'sfx-coin', paper: 'sfx-paper', stamp: 'sfx-stamp',
+  };
+  const ALL12 = [...Object.values(MOUNT), 'sfx-chop', 'sfx-knife', 'sfx-boil-loop'];
+  const SHA = {
+    'sfx-tap': '7f22c5fa9ff88ed3bb68329da15307b9d2450c88ea9b3166249206dbe854e457',
+    'sfx-confirm': '33b17a9a9a2397c62b285c52c33a907fdffb476909c99e42dde603f6a7a8b12c',
+    'sfx-cha-ching': 'ff516a515fb06bf50a2b38e4a242d9210a1d2346e04a4e569f984db01ca318cf',
+    'sfx-bell': '33529a612c4bdbeece47a4919aa6759658772788d5d4f65c4dc32fa48de5234e',
+    'sfx-pop': '16343e7176c3af65cc65f4f5fd96e6f5e8dcb8ab4a4351bdc39edd11d60030de',
+    'sfx-error': '09ce72c4b5a2d33e657d3df4155564adfc48c807e16ddc95473559b8b7defe4c',
+    'sfx-coin': 'c8d2fd50b3207d83eb0d2b9dcb4f82b595cd3ff23be2836f300279ea5cd4213e',
+    'sfx-paper': '86061d869a3499ac12f5cf05f931f679ea159a916553aaf1c8a8528c1a4d806d',
+    'sfx-stamp': '8fefd2e0f37847ea676ca23c16d3f5cbc1e8d9ecfb66a25fcece357d9068afd5',
+    'sfx-chop': 'd00c2b3c9fff07e376145c8c8c45c90e5084ec192f6ce0387db233f7b86f1486',
+    'sfx-knife': '4cd96dc630bed9840c15f1dd2306da2cc56a4da26a5d3f1a03c5a7265ac5e54f',
+    'sfx-boil-loop': '0858c952af0fadd652979de3193aee50c7cf029f1f1068ec278ac5cb4a28626a',
+  };
+
+  const missing = ALL12.filter(n => !statSync(join(HERE, 'public/audio', `${n}.ogg`), { throwIfNoEntry: false }));
+  const badHash = ALL12.filter(n => {
+    const p = join(HERE, 'public/audio', `${n}.ogg`);
+    return !SHA[n] || createHash('sha256').update(readFileSync(p)).digest('hex') !== SHA[n];
+  });
+  check('十二件成品全在仓里且逐件 sha 对上台账（引用与文件不许再劈一次；音频单当年那次坏文件就是这么抓住的）',
+    missing.length === 0 && badHash.length === 0 && ALL12.length === 12,
+    `12/12 在场｜sha 对不上 ${badHash.length ? badHash.join(',') : '无'}`);
+
+  const unLedgered = ALL12.filter(n => !ledger.includes(n));
+  const refedButAbsent = (audioSrc.match(/sfx-[a-z-]+/g) || []).filter(n => !ALL12.includes(n));
+  check('挂载表逐条对上：九条命名边 + 备菜两件 + 锅声一件，代码里出现的每一个 sfx-* 名字都在台账与仓内',
+    Object.entries(MOUNT).every(([edge, f]) => new RegExp(`${edge}: '${f}'`).test(audioRaw))
+    && /PREP_FILES = \['sfx-chop', 'sfx-knife'\]/.test(audioRaw) && /BOIL_FILE = 'sfx-boil-loop'/.test(audioRaw)
+    && unLedgered.length === 0 && refedButAbsent.length === 0,
+    `台账缺 ${unLedgered.length ? unLedgered.join(',') : '无'}｜代码引了但表里没有 ${refedButAbsent.length ? refedButAbsent.join(',') : '无'}`);
+
+  check('合成六件是兜底位不是被替换：文件命中就放文件、没命中回落 VOICES，同一条边绝不响两声（单上「现有合成 6 件不删」）',
+    /else if \(!playFile\(SFX_FILES\[name\]\) && VOICES\[name\]\) VOICES\[name\]\(\);/.test(audioRaw)
+    && (audioRaw.match(/^\s{2}(tap|grab|exact|buy|cash|level): \(\) =>/gm) || []).length === 6,
+    '回落式在场（先文件后合成）｜VOICES 六键齐全');
+
+  check('随机纪律：备菜二选一只用 Math.random，audio.js 的代码不碰引擎的 rng / makeRng（两轨基线因此逐字节不动）',
+    (audioSrc.match(/Math\.random/g) || []).length === 3
+    && !/\brng\b|makeRng|streamCounter/.test(audioSrc),
+    `Math.random 代码里 ${(audioSrc.match(/Math\.random/g) || []).length} 处（合成噪声两处 + 备菜二选一一处）｜引擎随机流零引用`);
+
+  check('静音键统管这一层：不另起 AudioContext、不进存档键，setMuted 里锅声与 BGM 一起收（SAVE_VERSION 由 §20 那根针守）',
+    (audioSrc.match(/new AC\(|new (window\.)?AudioContext/g) || []).length === 1
+    && !/SAVE_VERSION|STORAGE_KEY|guiju-m1-save|guiju-m1-flow|guiju-m1-phase/.test(audioSrc)
+    && /stopBgm\(\); stopBoil\(\); boilWanted = false;/.test(audioSrc),
+    '上下文只建一格｜无存档键引用｜静音时 BGM 与锅声同收');
+
+  const boilMounts = (mainRaw.match(/setBoil\(/g) || []).length;
+  check('锅声是循环、独立推子、只挂营业那一屏（单上「只垫底，别盖 BGM」）：全界面一个挂载点，换屏即收',
+    /boilSrc\.buffer = buf; boilSrc\.loop = true;/.test(audioRaw)
+    && /const g = ctx\.createGain\(\); g\.gain\.value = BOIL_TRIM;/.test(audioRaw)
+    && boilMounts === 1 && /setBoil\(phase === 'weigh'\)/.test(mainRaw),
+    `loop=true + BOIL_TRIM 独立增益｜挂载点 ${boilMounts} 处（营业称重屏）`);
+
+  const errMounts = (mainRaw.match(/sfx\('error'\)/g) || []).length;
+  check('失败/被拒边挂在真按得到的驳回处：读不出的那一格与付不齐/超柜量各一条（置办按钮钱不够是 disabled，不挂死路）',
+    errMounts === 2 && /if \(syncDraftFromInputs\(\)\) \{ sfx\('error'\); return refreshForecast\(\); \}/.test(mainRaw)
+    && /if \(!r\.ok\) \{ sfx\('error'\); return go\('market'\); \}/.test(mainRaw)
+    && /state\.Cash < f\.price \|\| closed \? 'disabled'/.test(mainRaw),
+    `驳回挂载 ${errMounts} 处｜置办那一面走 disabled 不出声`);
+
+  const popMounts = (mainRaw.match(/sfx\('pop'\)/g) || []).length;
+  const tapReused = (mainRaw.match(/sfx\('tap'\);\s*\/\/\s*事件弹出复用/g) || []).length;
+  check('事件/消息弹出改用独立的 pop（晨间与夜间两处），原先「借点按那一声」的写法一条不剩',
+    popMounts === 2 && tapReused === 0, `pop ${popMounts} 处｜借 tap 的旧写法剩 ${tapReused} 处`);
+
+  const stampOnce = (mainRaw.match(/sfx\('stamp'\)/g) || []).length;
+  const paperOnce = (mainRaw.match(/sfx\('paper'\)/g) || []).length;
+  check('定版与王老板各只挂一处：stamp 落在六开关锁下那一格（断点回来不重响），paper 走「同一次挂载只响一声」的老纪律',
+    stampOnce === 1 && paperOnce === 1
+    && /if \(!state\.today\.locked\) \{/.test(mainRaw) && /wangNow && paperLast !== wangNow/.test(mainRaw),
+    `stamp ${stampOnce} 处｜paper ${paperOnce} 处（共用 cueLast 那套触发）`);
+
+  check('sfx-coin 挂载在场但 M1 没有挂点：引用与文件都在、界面一次都不叫（单笔收款与广告奖励到账都不在 M1 构建里，不许为凑响声造假时刻）',
+    MOUNT.coin === 'sfx-coin' && new RegExp(`coin: 'sfx-coin'`).test(audioRaw)
+    && !/sfx\('coin'\)/.test(mainRaw),
+    '引用 sfx-coin｜sfx(\'coin\') 调用 0 处 → 归 ⊘，等 M2 的广告与单笔收款');
+
+  check('两支推子的算术钉住：0.265 让包内最响的一件落在签过的 0.203 满幅、最轻的落 0.103；锅声 0.184 比 BGM 出链低 4 个 LU',
+    /const FILE_TRIM = 0\.265;/.test(audioRaw) && /const BOIL_TRIM = 0\.184;/.test(audioRaw)
+    && +(1.0 * 0.265 * 0.85 * 0.9).toFixed(3) === 0.203 && +(0.507 * 0.265 * 0.85 * 0.9).toFixed(3) === 0.103,
+    `最响 0.203／最轻 ${(0.507 * 0.265 * 0.85 * 0.9).toFixed(3)}（签过带 0.097–0.203）`);
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，

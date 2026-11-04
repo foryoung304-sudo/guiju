@@ -1,4 +1,4 @@
-// 上线版最小音频包（施工单 task-audio-min-20261102）：1 条 BGM 文件 + 6 条 SFX 程序合成。
+// 上线版最小音频包（施工单 task-audio-min-20261102）：1 条 BGM 文件 + 6 条 SFX 程序合成 + 12 件真实录音（接入单 594b908）。
 // 全部走 WebAudio，不进引擎、不进随机流、不进任何时序：sweep / m3 必须逐字节同（单上红线）。
 // 静音偏好存独立键，绝不动 SAVE_VERSION 与存档结构（店主测试档不能废）。
 const PREF_KEY = 'guiju-m1-audio';
@@ -10,10 +10,34 @@ const BGM_GAIN = 0.5;      // BGM 做底噪位。换曲单后新文件实测 −
                            //   （补齐的扳柄就是这一格：要退回旧的读数取 0.26）。听感终判归店主真机，见 AUDIO-LICENSES 换曲批一节。
 const SFX_GAIN = 0.85;
 // 同一种音效的最小间隔（毫秒）：抓菜连点时不让同一声糊成一片
-const RATE = { tap: 60, grab: 90, exact: 120, buy: 200, cash: 300, level: 400 };
+const RATE = { tap: 60, grab: 90, exact: 120, buy: 200, cash: 300, level: 400,
+  pop: 150, error: 200, paper: 400, stamp: 300, coin: 150, prep: 90 };
+
+// ── 真实录音音效包（接入单 task-sfx-pack-20261104，Orange `594b908`；逐文件许可与实测在 AUDIO-LICENSES.md 音效包一节）──
+// 单上挂载表：结算到账→cha-ching｜单笔收款→coin｜称重正好→confirm｜点按→tap｜事件弹出→pop｜失败被拒→error（新补）｜
+// 备菜→chop/knife 随机二选一｜营业锅声→boil-loop（循环垫底）｜王老板递信封翻账本→paper｜定版落定→stamp｜升档盘店→bell。
+// 三条纪律：合成 6 件一条不删（文件没取到、没解出来就回落合成，绝不让游戏哑）；静音键统管这一层也一样；
+// 「随机二选一」只用 Math.random，绝不碰引擎的 rng 流——两轨基线因此逐字节不动。
+const SFX_FILES = {
+  tap: 'sfx-tap', exact: 'sfx-confirm', cash: 'sfx-cha-ching', level: 'sfx-bell',
+  pop: 'sfx-pop', error: 'sfx-error', coin: 'sfx-coin', paper: 'sfx-paper', stamp: 'sfx-stamp',
+};
+const PREP_FILES = ['sfx-chop', 'sfx-knife'];   // 备菜：每次现抽一枚，两声都要在场
+const BOIL_FILE = 'sfx-boil-loop';
+// 一次性文件共用一支推子 0.265，两个锚点都是仓里已签的读数，不另造标准：
+// 包内最响的一件（sfx-chop 峰值 0 dBFS）过完 FILE×SFX×MASTER 得 0.203 满幅 = 六件合成里最响的抓菜那个数；
+// 最轻的一件（sfx-error −5.9 dBFS）得 0.103 ≈ 签过的点按 0.1069。十二件因此全落在已签的 0.097–0.203 这一带里，
+// 包内部的相对轻重照 Orange 归一过的成品，我不动。
+const FILE_TRIM = 0.265;
+// 锅声是循环，不能吃一次性那支推子（连着一整屏响，等响度比单发高出一截就盖住 BGM）。
+// BOIL_TRIM 0.184 = 出链综合 −35.9 LUFS，比 BGM 出链（成品实测 −16.0 LUFS 过 0.5×0.9 总线 = −31.9）低 4 个 LU：垫底、不遮曲。
+// 扳柄就这一格：真机嫌听不见往 0.28 抬，嫌盖过 BGM 往 0.12 压，终判归店主耳朵。
+const BOIL_TRIM = 0.184;
 
 let ctx = null, master = null, bgmBus = null, sfxBus = null, bgmSrc = null, bgmBuf = null, bgmRaw = null, bgmWanted = false;
 let bgmFail = null;   // 解码失败的原因只留给自检读数，不上画面（坏文件不能又一次哑着过验收）
+let fileBufs = {}, fileFail = {}, fileWanted = new Set();   // 12 件真实录音：解好的缓冲 / 失败原因 / 已发起的取件
+let boilSrc = null, boilWanted = false;                     // 锅声循环的开关位与当前那一条源
 let muted = localStorage.getItem(PREF_KEY) === '1';
 let gestured = false, last = {};
 
@@ -24,6 +48,54 @@ function decodeBgm() {
   if (!ctx || !bgmRaw || bgmBuf) return;
   ctx.decodeAudioData(bgmRaw.slice(0)).then(buf => { bgmBuf = buf; playBgm(); }).catch(e => { bgmFail = String(e && e.message || e); });
   bgmRaw = null;
+}
+
+// 12 件录音一共约 200 KB，都在首次动手之后与 BGM 同一批取（同一批并发、每件一次，不按需拖慢第一次出声）；
+// 每件的成功/失败各自记账：坏文件不许像当年那次 WAV 头一样「哑着过验收」，读数进 audioStatus
+const ALL_FILES = [...Object.values(SFX_FILES), ...PREP_FILES, BOIL_FILE];
+function loadFiles() {
+  if (!ctx) return;
+  for (const name of ALL_FILES) {
+    if (fileBufs[name] || fileWanted.has(name)) continue;
+    fileWanted.add(name);
+    fetch(`./audio/${name}.ogg`)
+      .then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(b => ctx.decodeAudioData(b))
+      .then(buf => {
+        fileBufs[name] = buf;
+        if (name === BOIL_FILE && boilWanted) startBoil();   // 缓冲比开关晚到：到了就补起
+      })
+      .catch(e => { fileFail[name] = String(e && e.message || e); });
+  }
+}
+
+// 单发一件：命中缓冲就放，没命中返回 false，由调用方回落到程序合成（同一条边绝不响两声）
+function playFile(name) {
+  const buf = fileBufs[name];
+  if (!buf) return false;
+  const src = ctx.createBufferSource(); src.buffer = buf;
+  const g = ctx.createGain(); g.gain.value = FILE_TRIM;
+  src.connect(g); g.connect(sfxBus); src.start();
+  return true;
+}
+
+// 锅声循环：只在营业那几屏（称重）响，别的屏一律收掉；与 BGM 一样受静音键与切后台管
+function startBoil() {
+  const buf = fileBufs[BOIL_FILE];
+  if (!boilWanted || boilSrc || !buf || !ready() || ctx.state === 'suspended') return;
+  boilSrc = ctx.createBufferSource();
+  boilSrc.buffer = buf; boilSrc.loop = true;
+  const g = ctx.createGain(); g.gain.value = BOIL_TRIM;
+  boilSrc.connect(g); g.connect(sfxBus); boilSrc.start();
+}
+function stopBoil() {
+  if (!boilSrc) return;
+  try { boilSrc.stop(); } catch {}
+  boilSrc.disconnect(); boilSrc = null;
+}
+export function setBoil(on) {
+  boilWanted = !!on && !muted;
+  if (boilWanted) startBoil(); else stopBoil();
 }
 
 function ensure() {
@@ -40,25 +112,26 @@ function ensure() {
   return ctx;
 }
 
-// 移动端自动播放策略：BGM 与上下文都只在玩家第一次动手之后建（单上行为规矩第 1 条）；
+// 移动端自动播放策略：BGM、录音 SFX 与上下文都只在玩家第一次动手之后建（单上行为规矩第 1 条）；
 // 静音态下连文件都不取，省一截流量
+function openAll() { loadBgm(); loadFiles(); }
 export function armAudio() {
   if (gestured) return;
   gestured = true;
   if (muted) return;
   if (!ensure()) return;
-  if (ctx.state === 'suspended') ctx.resume().then(loadBgm, () => {});
-  else loadBgm();
+  if (ctx.state === 'suspended') ctx.resume().then(openAll, () => {});
+  else openAll();
 }
 
 export const isMuted = () => muted;
 export function setMuted(v) {
   muted = !!v;
   localStorage.setItem(PREF_KEY, muted ? '1' : '0');
-  if (muted) { stopBgm(); if (ctx) ctx.suspend(); }
+  if (muted) { stopBgm(); stopBoil(); boilWanted = false; if (ctx) ctx.suspend(); }
   else if (ensure()) {
-    if (ctx.state === 'suspended') ctx.resume().then(loadBgm, () => {});
-    else loadBgm();
+    if (ctx.state === 'suspended') ctx.resume().then(openAll, () => {});
+    else openAll();
   }
 }
 
@@ -66,7 +139,7 @@ export function setMuted(v) {
 document.addEventListener('visibilitychange', () => {
   if (!ctx) return;
   if (document.hidden) { if (!muted) ctx.suspend(); }
-  else if (!muted && gestured) ctx.resume().then(playBgm, () => {});
+  else if (!muted && gestured) ctx.resume().then(() => { playBgm(); startBoil(); }, () => {});
 });
 
 function loadBgm() {
@@ -86,7 +159,9 @@ function playBgm() {
 }
 function stopBgm() { if (bgmSrc) { try { bgmSrc.stop(); } catch {} bgmSrc.disconnect(); bgmSrc = null; } }
 
-// ── SFX：全部程序合成，零第三方素材（AUDIO-LICENSES.md 里逐条注明）──
+// ── 程序合成 6 件（音频单 task-audio-min-20261102）：接入单 594b908 之后它们是兜底位——
+// 对应边有录音就先放录音，取不到/解不开才回落这一层；单上没给文件的抓菜与采购两声照旧只用合成。
+// （AUDIO-LICENSES.md 里自制与第三方逐件分列注明）──
 function tone(freq, at, dur, peak, { type = 'sine', glide = 0, harmonics = [] } = {}) {
   const t0 = ctx.currentTime + at, t1 = t0 + dur;
   const g = ctx.createGain();
@@ -135,22 +210,33 @@ const VOICES = {
 };
 
 // 首次动手之前不出声（移动端自动播放策略）；上下文由这一句自己补建，不再依赖调用方先跑过 armAudio
+const FILE_EDGES = new Set([...Object.keys(SFX_FILES), 'prep']);
 export function sfx(name) {
-  if (muted || !VOICES[name]) return;
+  if (muted || (!VOICES[name] && !FILE_EDGES.has(name))) return;
   if (!ctx && !gestured) return;
   if (!ctx) ensure();
   if (!ctx || ctx.state === 'suspended') return;
   const now = Date.now();
   if (last[name] && now - last[name] < RATE[name]) return;
   last[name] = now;
-  try { VOICES[name](); } catch {}
+  try {
+    // 备菜 = chop/knife 随机二选一（用 Math.random，绝不碰引擎的 rng 流）；
+    // 其余先放录音，缓冲没到就回落到程序合成——同一条边绝不响两声，也绝不哑
+    if (name === 'prep') playFile(PREP_FILES[Math.random() < 0.5 ? 0 : 1]);
+    else if (!playFile(SFX_FILES[name]) && VOICES[name]) VOICES[name]();
+  } catch {}
 }
 
 // 回报与自检用的实时读数（不写进任何画面）
 export function audioStatus() {
   return { available: !!ctx, state: ctx ? ctx.state : 'none', muted, gestured,
     bgmLoaded: !!bgmBuf, bgmPlaying: !!bgmSrc, bgmFail, master: MASTER, bgmBus: BGM_GAIN, sfxBus: SFX_GAIN,
-    cue: MOTION_CUE, bgmSeconds: bgmBuf ? +bgmBuf.duration.toFixed(3) : null };
+    cue: MOTION_CUE, bgmSeconds: bgmBuf ? +bgmBuf.duration.toFixed(3) : null,
+    // 录音包 12 件：取到几件、哪几件解不开、锅声在不在跑（当年那次「坏文件全程哑」的教训：必须有读数）
+    sfxFilesReady: Object.keys(fileBufs).length, sfxFilesTotal: ALL_FILES.length,
+    sfxFileFail: Object.keys(fileFail).length ? fileFail : null,
+    boilPlaying: !!boilSrc, boilWanted, fileTrim: FILE_TRIM, boilTrim: BOIL_TRIM,
+    boilSeconds: fileBufs[BOIL_FILE] ? +fileBufs[BOIL_FILE].duration.toFixed(3) : null };
 }
 
 // ── 声音标记（动画单 task-event-motion-20261102 第二条）：整块由下面的开关隔离 ──────────
