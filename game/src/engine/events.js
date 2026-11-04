@@ -1,4 +1,5 @@
 import { EVENTS, DRAW_GATE } from '../data/events.js';
+import { CONFIG } from '../data/constants.js';
 import { evalCondition } from './dsl.js';
 import { toCents } from './state.js';
 import { destroyTicketless, judgeBigInspection, judgeRoutineInspection } from './inspection.js';
@@ -17,9 +18,18 @@ function inScope(state, ev) {
   return state.eventScope !== 'm1' || ev.ship === 'M1';
 }
 
+// 改判单 task-frontload-d3-20261104：特殊池整池按日闸放行（D3 起才参与抽取），闸只挡「日子」这一件事——
+// 各条的条件、权重、概率门、硬触发与 must_fire 窗口一个字不动，也不点名任何一条事件。
+// 闸放在 eligible 里而不是 drawEvent 开头：must_fire（附录 A 第 14 字段）走的是同一支 eligible，
+// 两处分开写就会出现「软触发已封顶 D3、保底那条还在 D1 抢跑」这种同池两个口径。
+function dayGate(state, ev) {
+  return ev.pool !== 'special' || state.Day >= CONFIG.specialFirstDay;
+}
+
 function eligible(state, ev, timing) {
   return ev.timing === timing
     && inScope(state, ev)
+    && dayGate(state, ev)
     && evalCondition(ev.condition, state)
     && !inCooldown(state, ev);
 }

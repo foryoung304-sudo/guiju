@@ -14,7 +14,7 @@ import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, PACKING_SPILL, CONFIG,
 import { SKU_BY_ID } from './src/data/skus.js';
 import { scenarioOf, WEATHER } from './src/data/scenario.js';
 import { evalCondition } from './src/engine/dsl.js';
-import { EVENTS, EVENT_BY_ID } from './src/data/events.js';
+import { EVENTS, EVENT_BY_ID, DRAW_GATE } from './src/data/events.js';
 import { windowOf, pushRecent, todaySignal } from './src/engine/recent.js';
 import { beginDay, morningPreEvent, submitBasket, previewBasket, commitPrep, lockTradingDay, morningEvent, runDay, nightSettle, eveningDraw, nightClose, checkEndings,
   judgeBuyout, judgeRetire, quitVariant, quitBlurb, closeShop } from './src/engine/day.js';
@@ -1088,6 +1088,8 @@ for (const seed of [SEED, 7979, 36832]) {
   {
     const s = newGame(SEED);
     s.Risk = 80;                                   // 大检查的硬触发条件成立
+    // 改判单 task-frontload-d3-20261104：特殊池有 D3 时间闸，这一对旧口径要在闸内比（§18 另有闸外的针）
+    s.Day = CONFIG.specialFirstDay;
     s.eventScope = 'm1';
     const off = drawEvent(s, 'evening', makeRng(s));
     s.eventScope = 'full';
@@ -1302,6 +1304,9 @@ for (const seed of [SEED, 7979, 36832]) {
       && p.today.forcedComments.length === 1 && p.Rep === 63 && p.R === 10 && p.L === 1 && r.action === null,
       `buff ${p.d0_buff_mult.toFixed(4)}/${p.d0_buff_days} 日｜Rep ${p.Rep} R ${p.R} L ${p.L}`);
     const f = newGame(SEED);
+    // 改判单 task-frontload-d3-20261104：特殊池有 D3 时间闸，这两条比的是「学期日窗口在不在」，
+    // 所以都把日子放到闸内再抽——闸外的针在 §18，不在这儿重复占口径。
+    f.Day = CONFIG.specialFirstDay;
     f.SemesterDay = 25; f.Rep = 60; f.Risk = 0;
     const picked = drawEvent(f, 'evening', makeRng(f));
     resolveChoice(f, picked, null);
@@ -1309,6 +1314,7 @@ for (const seed of [SEED, 7979, 36832]) {
       picked.id === 'evt_s_flag' && f.L === 1 && f.Rep === 65 && f.today.forcedComments.length === 1,
       `第 ${f.SemesterDay} 学期日 → ${picked.id}｜L ${f.L}｜留言 ${f.today.forcedComments.join('/')}`);
     const out = newGame(SEED);
+    out.Day = CONFIG.specialFirstDay;
     out.SemesterDay = 29; out.Rep = 90;
     // 抽 20 次而不是抽两次：drawEvent 会推进 evening 子流的计数，「第一次没抽到」不等于「这条不入池」。
     // 第八批把日常池从 6 行扩到 12 行后，同一张状态的两次抽取能一次中、一次空，旧写法就在自己不该管的格子里翻了车。
@@ -2345,6 +2351,74 @@ for (const seed of [SEED, 7979, 36832]) {
     && [...weighRaw.matchAll(/^import .*$/gm)].map(x => x[0].trim()).join('|')
       === "import { CUSTOMERS, handOrderWeight } from '../data/customers.js';|import { SOLID_CATS, CONFIG } from '../data/constants.js';|import { roundJin } from './state.js';",
     'weigh.js 的 import 表逐字未动');
+}
+
+// ── 18. 改判单 task-frontload-d3-20261104（Orange 20261104）：特殊事件池的 D3 时间闸 ────
+// 裁定是**时间闸**：D3 起特殊事件按各自既有条件与概率门正常触发，D3 之前整池不触发；
+// 不点名钉死某条事件或某个人物（旧稿的 D1 赵大妈必达／D2 常客首单／D3 王老板保底三条作废）。
+// 闸只挡「日子」：概率门、每条的条件与权重、硬触发与 must_fire 窗口一个字不许动。
+{
+  const specials = EVENTS.filter(e => e.pool === 'special');
+  const dailyMustFire = EVENTS.filter(e => e.must_fire && e.pool === 'daily');
+  check('闸值是裁定原值：CONFIG.specialFirstDay = 3，且 DRAW_GATE 两条概率门逐字未动（special 0.35 / daily 0.55）',
+    CONFIG.specialFirstDay === 3 && DRAW_GATE.special === 0.35 && DRAW_GATE.daily === 0.55,
+    `闸 ${CONFIG.specialFirstDay}｜门 ${JSON.stringify(DRAW_GATE)}`);
+  check('日子只管一次：九条特殊行的 condition 里没有任何一条被掺进 Day 条件（闸在 engine 一处，不撒进数据表）',
+    specials.length === 9 && specials.every(e => !/\bDay\b/.test(e.condition || '')),
+    `${specials.length} 条特殊行，条件里零个 Day 项`);
+
+  // 硬触发（Risk>=70 走不了概率门）也要过闸：D1/D2 挡在门外，D3 起当场放行
+  const probe = day => {
+    const s = newGame(SEED);
+    s.Risk = 80; s.eventScope = 'full'; s.Day = day;
+    const e = drawEvent(s, 'evening', makeRng(s));
+    return e ? { id: e.id, pool: e.pool } : null;
+  };
+  const d1 = probe(1), d2 = probe(2), d3 = probe(3);
+  check('D1、D2 特殊池整池不触发：Risk 80（大检查硬触发条件成立）也只出日常行或空',
+    (d1 === null || d1.pool !== 'special') && (d2 === null || d2.pool !== 'special'),
+    `D1 → ${d1 ? `${d1.id}(${d1.pool})` : '无'}｜D2 → ${d2 ? `${d2.id}(${d2.pool})` : '无'}`);
+  check('D3 起照常：同一枚种子、同一个 Risk 80，硬触发的 evt_s_insp 当场入池（闸一过，既有条件与不走概率门的口径原样生效）',
+    d3 && d3.id === 'evt_s_insp' && d3.pool === 'special',
+    `D3 → ${d3 ? `${d3.id}(${d3.pool})` : '无'}`);
+
+  // 闸只管 special：daily 池与它的 must_fire 窗口（D4–6 / D7–9）不许被连带挡住
+  check('闸不碰日常池：两条 daily 的 must_fire 窗口（第 4–6 天 / 第 7–9 天）原样在场，没有被 D3 闸误伤',
+    dailyMustFire.length === 2 && dailyMustFire.every(e => e.pool === 'daily' && e.must_fire.from >= 4),
+    `${dailyMustFire.map(e => `${e.id} ${e.must_fire.from}–${e.must_fire.to}`).join('｜')}`);
+  {
+    // 把闸临时抬到第 9 天（只活在本进程，与 m3_reference 的覆盖同一路子）：special 整池消失、daily 照出
+    // ⇒ 证明这一刀是按「池」切的，不是把整扇事件门关上。第 3 天 Risk 80 时硬触发本来每次都中，正好做对照。
+    const s = newGame(SEED);
+    s.eventScope = 'full'; s.Day = CONFIG.specialFirstDay; s.Risk = 80;
+    const drawAll = () => {
+      const ids = [];
+      for (let i = 0; i < 20; i++) { const e = drawEvent(s, 'evening', makeRng(s)); if (e) ids.push(e.id); }
+      return ids;
+    };
+    const inGate = drawAll();
+    const keep = CONFIG.specialFirstDay;
+    CONFIG.specialFirstDay = 9;
+    let outGate;
+    try { outGate = drawAll(); } finally { CONFIG.specialFirstDay = keep; }
+    const specialIds = new Set(specials.map(e => e.id));
+    check('抬闸到第 9 天做对照：同一枚状态里 special 20 抽 0 次、daily 照出（闸按池切，不关整扇门）；放回 3 天硬触发每次即中',
+      inGate.every(id => id === 'evt_s_insp')
+      && outGate.length > 0 && outGate.every(id => !specialIds.has(id)) && CONFIG.specialFirstDay === 3,
+      `闸 3 → ${inGate[0]}×${inGate.length}｜闸 9 → ${outGate.length ? `${[...new Set(outGate)].join('/')} 共 ${outGate.length} 次` : '全空'}｜闸值已归位 ${CONFIG.specialFirstDay}`);
+  }
+
+  // 闸的落点：写在 eligible 里，软抽与 must_fire 强制选中共用同一次判定（两处分开就会出现「保底那条还在 D1 抢跑」）
+  const evSrc = readFileSync(join(HERE, 'src/engine/events.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ').replace(/[ \t]+\/\/[^\n]*$/gm, ' ');
+  const eligibleBody = evSrc.slice(evSrc.indexOf('function eligible('), evSrc.indexOf('export function weightOf'));
+  const drawBody = evSrc.slice(evSrc.indexOf('export function drawEvent'), evSrc.indexOf('export function applyOps'));
+  check('闸挂在 eligible 一处：drawEvent 与 forcedEvent（must_fire）都只经 eligible 拿到日子判定，池子过滤里没有第二份 Day 闸',
+    (evSrc.match(/dayGate\(state, ev\)/g) || []).length === 2   // 定义一处 + eligible 里唯一一次调用
+    && /function dayGate\(state, ev\) \{\s*return ev\.pool !== 'special' \|\| state\.Day >= CONFIG\.specialFirstDay;/.test(evSrc)
+    && /&& dayGate\(state, ev\)/.test(eligibleBody)
+    && !/\bDay\b/.test(drawBody) && !/specialFirstDay/.test(drawBody),
+    `dayGate 定义+调用共 2 处｜drawEvent 体内零 Day／零闸值引用（软抽与保底共用同一次判定）`);
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，

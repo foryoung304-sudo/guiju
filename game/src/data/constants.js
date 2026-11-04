@@ -210,6 +210,10 @@ export const CONFIG = {
   // 所以复现已签发的 M1 带时必须只放行 M1 的那四条日常行（与 labor:false / competition:false 同一条理由）。
   // 'm1' = 只认 data/events.js 里 ship='M1' 的行；'full' = 全池（M2 构建的默认）。
   eventScope: 'full',
+  // 改判单 task-frontload-d3-20261104（Orange 2026-11-04，店主亲口澄清）：特殊事件池的触发起始日 = D3。
+  // 是**时间闸**，不是逐日排片：D3 起各条按自己既有的条件、概率门与权重入池竞争，D3 之前整池不触发；
+  // 不点名钉死某条事件或某个人物（旧稿的 D1 赵大妈必达／D2 常客首单／D3 王老板保底三条作废）。
+  specialFirstDay: 3,
   capacityTruncation: true,
   packingTier: 'normal',
   additiveTier: 'none',
