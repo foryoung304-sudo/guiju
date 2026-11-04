@@ -238,6 +238,8 @@ button.up { background: var(--tomato); color: var(--paper); white-space: nowrap;
   width: 100%; aspect-ratio: 3 / 2; object-fit: cover; object-position: center;
   align-self: center; border: 2px solid var(--ink); background: var(--cream-2);
 }
+/* 换曲单 task-bgm-swap-20261104：署名条是许可要求的正文，一字不改，只做小字排位（不许裁切换行丢字） */
+.credit { font-size: 11px; line-height: 1.4; margin-top: 12px; overflow-wrap: anywhere; }
 
 /* ── 批 D：账本（进货行缩略图 + 净额色块）── */
 .thumb {

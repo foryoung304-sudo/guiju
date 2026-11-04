@@ -997,6 +997,7 @@ const VIEWS = {
         <button class="ghost" data-act="clear" ${clearArmed ? 'style="border-color:var(--tomato);color:var(--tomato)"' : ''}>${clearArmed ? '确认清除？' : '清除存档'}</button>
       </div>
       ${clearArmed ? '<p class="negv">再点一次就清：这一局的账（浏览器里那份也一起）没了，回到开屏。</p>' : ''}
+      <p class="muted credit">Music: “Rubber Nod” by ziniyeons (niftyshelf.com/music/rubber-nod)</p>
     </div>`;
   },
 

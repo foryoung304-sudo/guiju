@@ -2,9 +2,12 @@
 // 全部走 WebAudio，不进引擎、不进随机流、不进任何时序：sweep / m3 必须逐字节同（单上红线）。
 // 静音偏好存独立键，绝不动 SAVE_VERSION 与存档结构（店主测试档不能废）。
 const PREF_KEY = 'guiju-m1-audio';
-const BGM_URL = './audio/bgm-shijing.wav';
+const BGM_URL = './audio/bgm-rubber-nod.ogg';
 const MASTER = 0.9;        // 统一增益上限：所有声音最后都过这一格
-const BGM_GAIN = 0.5;      // BGM 做底噪位（文件本身已归一到峰值 0.30，合成后约 0.15 满幅）
+const BGM_GAIN = 0.5;      // BGM 做底噪位。换曲单后新文件实测 −16.0 LUFS / 峰值 −4.80 dBFS（0.576 满幅），
+                           // 过完 0.5×0.9 两条总线 = 峰值 0.259、综合 −22.9 LUFS；旧 shijing 那档实测是 0.135 / −32.1。
+                           // ⇒ 这一换让 BGM 比旧档响约 9 个 LU，是换曲单写死的 −16 LUFS 目标带来的，本批没动这个增益去补齐
+                           //   （补齐的扳柄就是这一格：要退回旧的读数取 0.26）。听感终判归店主真机，见 AUDIO-LICENSES 换曲批一节。
 const SFX_GAIN = 0.85;
 // 同一种音效的最小间隔（毫秒）：抓菜连点时不让同一声糊成一片
 const RATE = { tap: 60, grab: 90, exact: 120, buy: 200, cash: 300, level: 400 };
@@ -77,7 +80,7 @@ function loadBgm() {
 function playBgm() {
   if (ready() && bgmBuf && !bgmSrc) {
     bgmSrc = ctx.createBufferSource();
-    bgmSrc.buffer = bgmBuf; bgmSrc.loop = true;   // 16.000s 整数采样循环点，无缝
+    bgmSrc.buffer = bgmBuf; bgmSrc.loop = true;   // 换曲单后 = 124.5335s / 5,491,928 样本，尾首 2.2s 交叉淡化预叠成环（接缝实测见台账）
     bgmSrc.connect(bgmBus); bgmSrc.start();
   }
 }

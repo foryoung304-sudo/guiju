@@ -1,6 +1,7 @@
 // M1 回归回路（红/绿命令）：node test_regression.js [种子]
 // 断言 = 三条极端玩法压力测试 + 逐日账目可核 + 同种子复现 + 事件覆盖 + 红线静态扫描
 import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { simulate, STRATEGIES, REF_STRATEGIES } from './src/sim.js';
@@ -2460,6 +2461,43 @@ for (const seed of [SEED, 7979, 36832]) {
     pre[0].text === '批发市场门口贴了张手写告示：青菜、丸子，今日涨四成。'
     && pre[1].text === '粉坊机器坏了，明天没粉。',
     pre.map(e => `${e.id}「${e.text}」`).join('｜'));
+}
+
+// ── 20. 换曲单 task-bgm-swap-20261104（Orange `1e524fa`，店主指定曲目）：BGM 换入的挂载正确性 ──
+// 单上红线四条：静音键行为不变 / SAVE_VERSION 不动 / 现有合成 6 件 SFX 不删 / credit 原文一字不改。
+// 音频单当年那次事故（WAV 头写坏 → Chrome 拒解 → 真机全程哑而运行时一声不响）教的是：
+// **引用与文件必须成对钉住**，所以这里连 sha256 与字节数一起扫，不只看代码。
+{
+  const audioSrc = readFileSync(join(HERE, 'src/ui/audio.js'), 'utf8')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ').replace(/[ \t]+\/\/[^\n]*$/gm, ' ');
+  const bgmUrl = (audioSrc.match(/const BGM_URL = '([^']+)'/) || [])[1];
+  const bgmPath = join(HERE, 'public', bgmUrl.replace(/^\.\//, ''));
+  const bgmSize = statSync(bgmPath).size;
+  const bgmSha = createHash('sha256').update(readFileSync(bgmPath)).digest('hex');
+  check('BGM_URL 指的成品真在仓里、字节与 sha 对上台账（换曲单：引用与文件不许再劈一次）',
+    bgmUrl === './audio/bgm-rubber-nod.ogg' && bgmSize === 1598057
+    && bgmSha === 'c923ec9077e4b5bcab99e2848abcaf412556ae595d4ddd2dc1b00d0ab0aee9bc',
+    `${bgmUrl}｜${bgmSize} B｜sha ${bgmSha.slice(0, 12)}…`);
+
+  check('静音键与存档版本照单不动：PREF_KEY 仍是 guiju-m1-audio、audio.js 全文不叫 SAVE_VERSION/STORAGE_KEY，SAVE_VERSION 原值',
+    /const PREF_KEY = 'guiju-m1-audio'/.test(audioSrc)
+    && !/SAVE_VERSION|STORAGE_KEY|guiju-m1-save|guiju-m1-flow|guiju-m1-phase/.test(audioSrc)
+    && SAVE_VERSION === 'v4.9.3-cal.2',
+    `键 guiju-m1-audio｜SAVE_VERSION ${SAVE_VERSION}`);
+
+  const voiceKeys = (audioSrc.match(/^\s{2}(tap|grab|exact|buy|cash|level): \(\) =>/gm) || []).length;
+  check('六件合成 SFX 一条没删（VOICES 六键齐全），锅声/失败边那 12 件仍等店主的包',
+    voiceKeys === 6 && !/sfx-(cha-ching|error|boil-loop)/.test(audioSrc),
+    `VOICES 六键在场｜外部 SFX 引用 0 条（包未到，不接空路径）`);
+
+  const mainSrc = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const cssSrc = readFileSync(join(HERE, 'src/ui/theme.css'), 'utf8');
+  const CREDIT = 'Music: “Rubber Nod” by ziniyeons (niftyshelf.com/music/rubber-nod)';
+  const meBody = mainSrc.slice(mainSrc.indexOf('  me() {'), mainSrc.indexOf('  prep() {'));
+  check('署名行逐字在场且就在「我的」页末行（单上「原文一字不改」；曲名/作者/站点三要素一个字符没缩），且小字样式有规则',
+    meBody.includes(CREDIT) && meBody.lastIndexOf(CREDIT) > meBody.indexOf('clearArmed ?')
+    && /\.credit \{[^}]*font-size: 11px/.test(cssSrc),
+    `credit ${meBody.includes(CREDIT) ? '原文在场' : '缺失'}｜.credit 11px ${/\.credit \{[^}]*font-size: 11px/.test(cssSrc) ? '有' : '无'}`);
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
