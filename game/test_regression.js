@@ -2672,12 +2672,15 @@ for (const seed of [SEED, 7979, 36832]) {
   const ledger = readFileSync(join(HERE, '..', 'AUDIO-LICENSES.md'), 'utf8');
   // 单上挂载表：边（界面时刻）→ 成品文件名。逐条钉，不许谁把哪一件接错了地方
   const MOUNT = {
-    tap: 'sfx-tap', exact: 'sfx-confirm', cash: 'sfx-cha-ching', level: 'sfx-bell',
+    tap: 'tap-A-softclick', exact: 'sfx-confirm', cash: 'sfx-cha-ching', level: 'sfx-bell',
     pop: 'sfx-pop', error: 'sfx-error', coin: 'sfx-coin', paper: 'sfx-paper', stamp: 'sfx-stamp',
   };
   const ALL12 = [...Object.values(MOUNT), 'sfx-chop', 'sfx-knife', 'sfx-boil-loop'];
+  // 换音单 c915b02：tap 这一格由 sfx-tap（select_001，店主判「太难听」）换成 A 候选 click_002。
+  // 被替换的那件不删、留仓未挂载（与 bgm-shijing.wav 同一口径），所以它的 sha 单独钉在下面那根「换音留痕」针里。
+  const RETIRED = { 'sfx-tap': '7f22c5fa9ff88ed3bb68329da15307b9d2450c88ea9b3166249206dbe854e457' };
   const SHA = {
-    'sfx-tap': '7f22c5fa9ff88ed3bb68329da15307b9d2450c88ea9b3166249206dbe854e457',
+    'tap-A-softclick': 'a54c33493328ee418bda8b8e1794d3eeecc95dcdd98b8436f141c6f154093a06',
     'sfx-confirm': '33b17a9a9a2397c62b285c52c33a907fdffb476909c99e42dde603f6a7a8b12c',
     'sfx-cha-ching': 'ff516a515fb06bf50a2b38e4a242d9210a1d2346e04a4e569f984db01ca318cf',
     'sfx-bell': '33529a612c4bdbeece47a4919aa6759658772788d5d4f65c4dc32fa48de5234e',
@@ -2701,12 +2704,26 @@ for (const seed of [SEED, 7979, 36832]) {
     `12/12 在场｜sha 对不上 ${badHash.length ? badHash.join(',') : '无'}`);
 
   const unLedgered = ALL12.filter(n => !ledger.includes(n));
-  const refedButAbsent = (audioSrc.match(/sfx-[a-z-]+/g) || []).filter(n => !ALL12.includes(n));
-  check('挂载表逐条对上：九条命名边 + 备菜两件 + 锅声一件，代码里出现的每一个 sfx-* 名字都在台账与仓内',
+  const refedButAbsent = (audioSrc.match(/sfx-[a-z-]+|tap-A-softclick/g) || []).filter(n => !ALL12.includes(n));
+  check('挂载表逐条对上：九条命名边 + 备菜两件 + 锅声一件，代码里出现的每一个成品文件名都在台账与仓内（tap 换 A 候选后名字不再以 sfx- 打头，扫描式一并跟上）',
     Object.entries(MOUNT).every(([edge, f]) => new RegExp(`${edge}: '${f}'`).test(audioRaw))
     && /PREP_FILES = \['sfx-chop', 'sfx-knife'\]/.test(audioRaw) && /BOIL_FILE = 'sfx-boil-loop'/.test(audioRaw)
     && unLedgered.length === 0 && refedButAbsent.length === 0,
     `台账缺 ${unLedgered.length ? unLedgered.join(',') : '无'}｜代码引了但表里没有 ${refedButAbsent.length ? refedButAbsent.join(',') : '无'}`);
+
+  // 换音单 c915b02 留痕：被替换的那件删不删归 Orange，本针只钉「引用必须整体挪走、旧文件若要留仓就不许被悄悄改」
+  const retiredNames = Object.keys(RETIRED);
+  const retiredStill = retiredNames.filter(n => !statSync(join(HERE, 'public/audio', `${n}.ogg`), { throwIfNoEntry: false }));
+  const retiredDirty = retiredNames.filter(n => {
+    const p = join(HERE, 'public/audio', `${n}.ogg`);
+    return !RETIRED[n] || createHash('sha256').update(readFileSync(p)).digest('hex') !== RETIRED[n];
+  });
+  check('换音留痕（tap 换 A 候选）：边名 tap 不动、代码里 sfx-tap 引用归零、新件在仓且 sha 对上；被替换的旧件若留仓必须逐字节原样',
+    /tap: 'tap-A-softclick'/.test(audioRaw) && !/tap: 'sfx-tap'/.test(audioSrc)
+    && !!statSync(join(HERE, 'public/audio/tap-A-softclick.ogg'), { throwIfNoEntry: false })
+    && createHash('sha256').update(readFileSync(join(HERE, 'public/audio/tap-A-softclick.ogg'))).digest('hex') === SHA['tap-A-softclick']
+    && retiredStill.length === 0 && retiredDirty.length === 0,
+    `代码内 sfx-tap 引用 ${(audioSrc.match(/sfx-tap/g) || []).length} 处（应 0）｜旧件留仓 ${retiredStill.length === 0 ? '在' : '缺'}｜sha ${retiredDirty.length === 0 ? '原样' : retiredDirty.join(',')}`);
 
   check('合成六件是兜底位不是被替换：文件命中就放文件、没命中回落 VOICES，同一条边绝不响两声（单上「现有合成 6 件不删」）',
     /else if \(!playFile\(SFX_FILES\[name\]\) && VOICES\[name\]\) VOICES\[name\]\(\);/.test(audioRaw)

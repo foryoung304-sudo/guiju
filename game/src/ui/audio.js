@@ -19,7 +19,9 @@ const RATE = { tap: 60, grab: 90, exact: 120, buy: 200, cash: 300, level: 400,
 // 三条纪律：合成 6 件一条不删（文件没取到、没解出来就回落合成，绝不让游戏哑）；静音键统管这一层也一样；
 // 「随机二选一」只用 Math.random，绝不碰引擎的 rng 流——两轨基线因此逐字节不动。
 const SFX_FILES = {
-  tap: 'sfx-tap', exact: 'sfx-confirm', cash: 'sfx-cha-ching', level: 'sfx-bell',
+  // 点按这一格按换音单 c915b02 换成 A 候选（Kenney click_002，店主试听拍板；边名 tap 与挂载点都不动）。
+  // 它峰值 −1.77 dB，过完同一支 FILE_TRIM 得出链 0.1653，与被替换那件的 0.1671 差 0.08 dB ⇒ 推子一字不改。
+  tap: 'tap-A-softclick', exact: 'sfx-confirm', cash: 'sfx-cha-ching', level: 'sfx-bell',
   pop: 'sfx-pop', error: 'sfx-error', coin: 'sfx-coin', paper: 'sfx-paper', stamp: 'sfx-stamp',
 };
 const PREP_FILES = ['sfx-chop', 'sfx-knife'];   // 备菜：每次现抽一枚，两声都要在场
