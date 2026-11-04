@@ -2421,6 +2421,47 @@ for (const seed of [SEED, 7979, 36832]) {
     `dayGate 定义+调用共 2 处｜drawEvent 体内零 Day／零闸值引用（软抽与保底共用同一次判定）`);
 }
 
+// ── 19. 改判单 task-frontload-d3-20261104 的并行小项：晨讯／夜留言搞笑密度批（纯文案）────
+// 「每拍必落笑点」机验不了，能机验的是**这一批不许顺手碰坏的东西**：
+// ① 每池条数一格没动（pick(rng, POOL) 按池长消耗随机流，池长变了 sweep／m3 的带就漂）；
+// ② 正文 3.4 信号表里打了引号的原句逐字在场（那些是签字文案，不是我的稿）；
+// ③ ③层两条按**下标**被 buildComments 直接取用（comments.js:27–28），夸与嘀咕不许换了边；
+// ④ 晨间情报那两条是 5.2 示例原句 + 附录 D 第 176 行的 text 字段原值，文案批不许动。
+{
+  const POOL_SIZE = { qualityGood: 3, qualityBad: 3, qualityMid: 3, taste: 4, portion: 4, price: 4, soldout: 2, packing: 2, regular: 3, rumor: 2, weather: 2 };
+  const pools = Object.keys(COMMENT_POOLS);
+  check('留言池结构一格没动：11 池、32 条，逐池条数与文案批前相同（池长是随机流消耗量，动它＝动数值）',
+    pools.length === 11 && pools.every(k => COMMENT_POOLS[k].length === POOL_SIZE[k])
+    && pools.reduce((n, k) => n + COMMENT_POOLS[k].length, 0) === 32,
+    `${pools.map(k => `${k}:${COMMENT_POOLS[k].length}`).join(' ')}`);
+
+  const signed = [
+    ['qualityGood[0] 起句「这丸子是现打的吧？」', COMMENT_POOLS.qualityGood[0].startsWith('这丸子是现打的吧？')],
+    ['qualityGood[1] 起句「汤真鲜」', COMMENT_POOLS.qualityGood[1].startsWith('汤真鲜')],
+    ['qualityMid 两条原句「还行吧」「感觉没上次好吃」', COMMENT_POOLS.qualityMid.includes('还行吧。') && COMMENT_POOLS.qualityMid.includes('感觉没上次好吃。')],
+    ['qualityBad[0] 整句原样（暧昧归因的样板）', COMMENT_POOLS.qualityBad[0] === '肚子有点不舒服，不知道是不是中午那顿。'],
+    ['portion[2] 整句原样「今天这碗……有点轻。」', COMMENT_POOLS.portion[2] === '今天这碗……有点轻。'],
+    ['rumor[0] 起句「听说小吃街有人吃坏肚子」（Risk≥40 不指名）', COMMENT_POOLS.rumor[0].startsWith('听说小吃街有人吃坏肚子')],
+  ];
+  check('正文 3.4 信号表打了引号的七条签字原句（六组比对）逐字在场，没被文案批顺走',
+    signed.every(([, ok]) => ok), signed.filter(([, ok]) => !ok).map(([n]) => n).join(' / ') || '六条全在');
+
+  check('③层下标语义没换边：portion[1] 仍是足称的夸、portion[2] 仍是短斤的嘀咕（comments.js 按下标直取）',
+    COMMENT_POOLS.portion[1].includes('实在') && COMMENT_POOLS.portion[2].includes('轻'),
+    `夸 ${COMMENT_POOLS.portion[1]}｜嘀咕 ${COMMENT_POOLS.portion[2]}`);
+
+  // 品质那一层笑点不许压过判读：三条嘀咕都得留着「不确定是不是你家」的暧昧形状，不许写成指认
+  check('品质嘀咕仍是暧昧归因：三条里没有任何一条指认到摊子或料上（3.4「永远暧昧归因，不许写死是你的料」）',
+    COMMENT_POOLS.qualityBad.every(t => !/你的料|你家|黑心|缺德|劣质|便宜料|你家用/.test(t)),
+    COMMENT_POOLS.qualityBad.join(' / '));
+
+  const pre = ['evt_d_011', 'evt_d_stockout'].map(id => EVENT_BY_ID[id]);
+  check('晨间情报两条原句没动（附录 D 第 176 行的 text 字段 + spec-event-pool-6 指定的 5.2 示例原句）',
+    pre[0].text === '批发市场门口贴了张手写告示：青菜、丸子，今日涨四成。'
+    && pre[1].text === '粉坊机器坏了，明天没粉。',
+    pre.map(e => `${e.id}「${e.text}」`).join('｜'));
+}
+
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
 // 而开学周是"全线 ×1.1 + 品类系数偏肉（MB1.3/MT1.2）"；附录 D.5 的 2.5 元/碗 锚点按固定品类占比算，不含这两项。
 function bowlMarginYuan(tier, priceTierId, weatherId, semesterDay) {
