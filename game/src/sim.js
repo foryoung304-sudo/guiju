@@ -44,9 +44,12 @@ function picksFor(state, tier, bowls) {
   const omega = {};
   for (const c of SOLID_CATS) omega[c] = CAT[c].share * sc.catCoef[c];
   const Omega = SOLID_CATS.reduce((s, c) => s + omega[c], 0);
-  const picks = SOLID_CATS.filter(c => c !== state.today.delist)
-    .map(c => ({ sku: SKU_BY_ID[c + tier], qty: round3(bowls * sc.avgJin * omega[c] / Omega) }));
-  picks.push({ sku: SKU_BY_ID['SP' + tier], qty: round3(bowls * sc.T) });
+  const shelfHasTier = !(tier === 3 && !state.cheapUnlocked);
+  const picks = shelfHasTier
+    ? SOLID_CATS.filter(c => c !== state.today.delist)
+      .map(c => ({ sku: SKU_BY_ID[c + tier], qty: round3(bowls * sc.avgJin * omega[c] / Omega) }))
+    : [];
+  if (shelfHasTier) picks.push({ sku: SKU_BY_ID['SP' + tier], qty: round3(bowls * sc.T) });
   return picks;
 }
 
@@ -150,6 +153,8 @@ function investPhase(state, strategy, invests) {
 
 export function simulate(seed, days, strategy, closer = 'headless', opts = {}) {
   const state = newGame(seed);
+  // 跑表夹具：便宜线测的是「解锁之后的便宜路」，锁定窗另立探针；货架闸（market.js:36）在界面与跑表同一条读法。
+  if (strategy.tier === 3) state.cheapUnlocked = true;
   if (opts.weather) for (let i = 0; i < state.weatherCycle.length; i++) state.weatherCycle[i] = opts.weather;
   // M3 参考策略③ 的添加剂档（M1 构建按 CONFIG 恒不掺；跑 M3 口径时按 3.12 数值开档）
   if (opts.additive) state.AdditiveTier = opts.additive;

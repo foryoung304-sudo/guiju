@@ -2647,6 +2647,17 @@ for (const seed of [SEED, 7979, 36832]) {
     && Object.values(COMMENT_POOLS).reduce((n, a) => n + a.length, 0) === 32
     && !Object.values(COMMENT_POOLS).some(arr => arr.some(t => t === CHEAP_UNLOCK_CUE || t === CHEAP_TIER_WARNING)),
     `${Object.keys(COMMENT_POOLS).length} 池 ${Object.values(COMMENT_POOLS).reduce((n, a) => n + a.length, 0)} 条`);
+
+  // 裁定一（`66e8114`）：「跑表只买玩家看得见的那面货架」——界面那条闸在 sim.js 里同一条读法，
+  // 便宜参考线用开局夹具把货架预解锁（锁定窗另立探针），已签两轨因此逐字节不动（sweep 491／m3 566，diff 0）。
+  const simSrc = readFileSync(join(HERE, 'src/sim.js'), 'utf8');
+  const marketSrc = readFileSync(join(HERE, 'src/engine/market.js'), 'utf8');
+  const mirrorLine = simSrc.split('\n').find(l => l.includes('tier === 3') && l.includes('!state.cheapUnlocked'));
+  const fixtureLine = simSrc.split('\n').find(l => l.includes('strategy.tier === 3') && l.includes('cheapUnlocked = true'));
+  const gateLine = marketSrc.split('\n').find(l => l.includes('sku.tier === 3') && l.includes('!state.cheapUnlocked'));
+  check('裁定一：跑表与界面共用「未解锁的清仓摊不在场」这一条读法，两处都只读 state.cheapUnlocked、都不掷随机',
+    !!mirrorLine && !!gateLine && !!fixtureLine,
+    `界面闸「${(gateLine || '').trim().slice(0, 34)}…」｜跑表镜像「${(mirrorLine || '').trim().slice(0, 30)}…」｜夹具 ${fixtureLine ? '在场' : '缺失'}`);
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
