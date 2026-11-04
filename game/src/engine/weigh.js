@@ -22,6 +22,24 @@ export function drawHandOrders(state, rng) {
 //   本案按 ÷500 施工，已登记为待店主回签的勘误。
 export const GRAMS_PER_JIN = 500;
 
+// ── 真机修复单 f39f692（Orange 20261104）：称重屏的可选项由柜里的真货决定 ──────────
+// 只读两把尺：不写引擎任何字段、不参与扣库存（第 7 步 takeStock 仍是全日唯一扣货口），
+// 数值轨一个字没动——它们只回答界面上「这一样能不能按、最多能按出多少克」。
+// 柜里这一样有多少克（斤 × 500，与 settleWeighing 同一枚 GRAMS_PER_JIN）
+export function stockGrams(state, cat) {
+  const jin = cat === 'SP' ? state.StockSoup : state.StockSolid[cat];
+  return Math.max(0, Math.round((Number(jin) || 0) * GRAMS_PER_JIN));
+}
+
+// 这一单这一样最多称得出多少克：柜量先减掉别的单已经称走的部分（一柜货、几单分）。
+// 同一单自己已称的克数不减——封顶的意思是「秤面上的数不许越过柜里有的数」
+export function gramsCeilingFor(state, gramsBy, cust, cat) {
+  const used = Object.entries(gramsBy || {})
+    .filter(([id]) => id !== cust)
+    .reduce((sum, [, grams]) => sum + Number(grams?.[cat] || 0), 0);
+  return Math.max(0, stockGrams(state, cat) - used);
+}
+
 // 附录 H.2：逐品类实际斤数累加进 J 与流水；任一品 ratio < 0.90 记这单一笔短斤
 export function settleWeighing(order, gramsByCat) {
   const lines = [];

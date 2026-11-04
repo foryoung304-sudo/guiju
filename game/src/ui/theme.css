@@ -99,6 +99,9 @@ button.sel { background: var(--teal); color: var(--paper); }
 /* 排版批 L5：在用态原先是 4px 番茄红硬阴影——那圈红本来就画在卡框之外，窄屏下看着像探出分区框。
    改由卡自己的边框承担红框（粗细不变），硬阴影收回墨色二层，红框与卡框同一条线，撑不破也溢不出。 */
 .sku.on { background: #fff3d6; border-color: var(--tomato); box-shadow: 3px 3px 0 var(--ink-2); }
+/* 真机修复单 f39f692：这一格填的数读不出来（type=number 的 badInput：字看得见、值读回来是空）。
+   旧框红底 + 番茄描边指到具体那一格，结算按钮同时按住（main.js 的 qtyBad）——不再让它算成 0 静悄悄漏出篮子。 */
+.sku.bad { background: #f7d7ce; border-color: var(--tomato); box-shadow: 3px 3px 0 var(--tomato); }
 .sku.absent { opacity: .55; }
 .tag { font-size: 10px; padding: 1px 5px; border: 1.5px solid var(--ink); display: inline-block; }
 .tag.credit { background: var(--teal); color: var(--paper); }

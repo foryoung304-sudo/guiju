@@ -5,7 +5,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { simulate, STRATEGIES, REF_STRATEGIES } from './src/sim.js';
 import { bridgeCheck, settleDay, settleWriteoff, settleTasting } from './src/engine/ledger.js';
-import { newGame, roundJin, loadGame, STORAGE_KEY } from './src/engine/state.js';
+import { newGame, roundJin, loadGame, STORAGE_KEY, toCents } from './src/engine/state.js';
 import { effectivePrice, buildBasket, planPayment, recomputeStock, buyTool, sellBackTool, ownsTool, upgradeStall, isFacilityUnlocked, skuAvailable } from './src/engine/market.js';
 import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, PACKING_SPILL, CONFIG, SAVE_VERSION,
   ADDITIVE, PREP_LEVELS, LABOR, TASTING, TOOLS, SCALE_DELTA_J_SHARE, SCALE_C_PER_JIN, SCALE_RISK_PER_JIN,
@@ -20,7 +20,7 @@ import { beginDay, morningPreEvent, submitBasket, previewBasket, commitPrep, loc
   judgeBuyout, judgeRetire, quitVariant, quitBlurb, closeShop } from './src/engine/day.js';
 import { additiveOf, additiveUnlocked, capacityJin, computeMBase, prepBudget, prepGridUsed, qTaste, washSkipped,
   xiaodouPresent, laborCapMul, laborCostCents, tastingConvert } from './src/engine/production.js';
-import { drawHandOrders, handOrderCount } from './src/engine/weigh.js';
+import { drawHandOrders, handOrderCount, stockGrams, gramsCeilingFor } from './src/engine/weigh.js';
 import { applyHidden, resolveChoice, weightOf, drawEvent, isActionAvailable, isActionAffordable } from './src/engine/events.js';
 import { inspectionScore, ticketlessCostCents, destroyTicketless, judgeBigInspection, judgeRoutineInspection } from './src/engine/inspection.js';
 import { blanchValueAt, judgeBlanch, signalTier } from './src/engine/blanch.js';
@@ -2229,6 +2229,122 @@ for (const seed of [SEED, 7979, 36832]) {
     && /\.intro \.line\.in \{ animation: none !important/.test(cssSrc)
     && !/\.intro \.shot \{[^}]*animation/.test(cssSrc),
     '基础规则 opacity:0 仍管未进场镜（六张不叠成一坨）');
+}
+
+// ── 17. 真机修复单 f39f692（Orange 20261104）：采购—扣款—库存—称重四点一致 ──────────
+// 店主真机第一天：市场给豆制品填 3 斤点结算，最终进货单里没这一项、¥33.00 没扣，称重却能称出豆制品 59 克。
+// 查下来劈叉的不在引擎（commitPurchase 落单/扣款/入库存同一趟），在界面两条腿：
+//   ① 那一格填的字读不出来时（input[type=number] 的 badInput：屏幕上有字、el.value 读回空串）会被算成 0 静悄悄漏掉；
+//   ② 称重屏的可选性过去只看「顾客要不要」，不看「柜里有没有」，于是没买的东西也能按出克数。
+// 下面把两条腿各自钉住。数值轨（第 7 步 takeStock 扣货与流水）本单一个字没动，全是既有口径的复算。
+{
+  const mainRaw = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const mainCode = mainRaw.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ')
+    .replace(/[ \t]+\/\/[^\n]*$/gm, ' ');
+  const weighRaw = readFileSync(join(HERE, 'src/engine/weigh.js'), 'utf8');
+  // 她那一篮逐格照抄，第 4 行正是报告里被吞掉的豆制品
+  const BASKET = [['MB2', 6], ['MT2', 4], ['VG1', 3], ['BF1', 3], ['NS1', 3], ['SP1', 16]];
+  const picks = list => list.map(([sku, qty]) => ({ sku, qty }));
+
+  // 1) 六格全填 → 落单 / 扣款 / 入库存三点同时成立
+  const s1 = newGame(SEED);
+  const r1 = beginDay(s1);
+  morningPreEvent(s1, r1);
+  const cash0 = s1.Cash;
+  const res1 = submitBasket(s1, picks(BASKET), r1);
+  const rows1 = s1.PurchaseLedger.filter(l => l.day === s1.Day);
+  const expect1 = BASKET.reduce((sum, [sku, qty]) => sum + toCents(effectivePrice(s1, SKU_BY_ID[sku]) * qty), 0);
+  const byCat = Object.fromEntries(BASKET.map(([sku, qty]) => [SKU_BY_ID[sku].cat, qty]));
+  check('四点一致·落单：填六格就有六行进货单，豆制品那 3 斤在单内',
+    res1.ok && rows1.length === 6 && rows1.some(l => l.sku === 'BF1' && l.qty === 3),
+    `${rows1.length} 行：${rows1.map(l => `${l.sku}×${l.qty}${l.unit}`).join(' ')}`);
+  check('四点一致·扣款：现金降幅 = 单内总额 = 逐行「标价 × 斤数」复算（¥33.00 不许静悄悄漏掉）',
+    cash0 - s1.Cash === res1.plan.total && res1.plan.total === expect1,
+    `现金 ${cash0 / 100}→${s1.Cash / 100}｜单内 ${res1.plan.total / 100} 元｜复算 ${expect1 / 100} 元`);
+  check('四点一致·入库存：单里每一行都进柜且斤数相等，汤底进 StockSoup，批次一一对应',
+    SOLID_CATS.every(c => s1.StockSolid[c] === byCat[c]) && s1.StockSoup === byCat.SP && s1.Batches.length === 6,
+    `柜里 ${SOLID_CATS.map(c => `${c}:${s1.StockSolid[c]}`).join(' ')} 份:${s1.StockSoup}｜批次 ${s1.Batches.length} 条`);
+
+  // 2) 只买五行（她那一单的实际结果）→ 没进单的品类库存为 0，且称重侧当场不可选
+  const s2 = newGame(SEED);
+  const r2 = beginDay(s2);
+  morningPreEvent(s2, r2);
+  submitBasket(s2, picks(BASKET.filter(([sku]) => SKU_BY_ID[sku].cat !== 'BF')), r2);
+  lockTradingDay(s2, { priceTier: 'qinmin' });
+  morningEvent(s2, r2, () => null);
+  const orders2 = drawHandOrders(s2, r2);
+  const zero2 = Object.fromEntries(orders2.map(o => [o.customerId, Object.fromEntries(o.lines.map(l => [l.cat, 0]))]));
+  const bfAsked = orders2.some(o => o.lines.some(l => l.cat === 'BF'));
+  check('没进单的品类：库存为 0（StockSolid 与 Batches 两侧都空，新档初始也确为空）',
+    s2.StockSolid.BF === 0 && s2.Batches.every(b => b.cat !== 'BF'),
+    `柜里豆制品 ${s2.StockSolid.BF} 斤｜批次 ${s2.Batches.map(b => b.sku).join(' ')}`);
+  check('没进单的品类：称重封顶 0 克——顾客单里点名要豆制品的这一单，也一格都按不出来（幻影 59 克无从产生）',
+    bfAsked && orders2.every(o => gramsCeilingFor(s2, zero2, o.customerId, 'BF') === 0) && stockGrams(s2, 'BF') === 0,
+    bfAsked ? `${orders2.length} 单，豆制品封顶全 0 克` : '这个种子当天没有单点名豆制品');
+
+  // 3) 即便把 59 克硬写进秤面，也不产流水、不扣库存、不出负数（takeStock 那道闸本来就在，这一条把它钉住）
+  const ghost2 = { ...zero2 };
+  for (const o of orders2) if (o.lines.some(l => l.cat === 'BF')) ghost2[o.customerId] = { ...zero2[o.customerId], BF: 59 };
+  runDay(s2, orders2, ghost2, r2);
+  check('硬写 59 克进不了账：柜里没这一样时售出 0 斤、库存不转负、只记一笔分量嘀咕',
+    s2.today.soldJin.BF === 0 && s2.StockSolid.BF === 0 && s2.today.portionGrudge === true,
+    `售出豆制品 ${s2.today.soldJin.BF} 斤｜柜里 ${s2.StockSolid.BF} 斤｜分量嘀咕 ${s2.today.portionGrudge}`);
+
+  // 4) 一柜货几单分：封顶 = 柜量 − 别单已称走；同一单自己不重复占格
+  const s3 = newGame(SEED);
+  const r3 = beginDay(s3);
+  morningPreEvent(s3, r3);
+  submitBasket(s3, [{ sku: 'MB1', qty: 1 }], r3);
+  const orders3 = drawHandOrders(s3, r3);
+  const g3 = { [orders3[0].customerId]: { MB: 400 } };
+  check('跨单柜量封顶：柜里 500 克、头一单已称 400 克，第二单的丸子最多还能称 100 克',
+    stockGrams(s3, 'MB') === 500 && gramsCeilingFor(s3, g3, orders3[1].customerId, 'MB') === 100,
+    `柜 ${stockGrams(s3, 'MB')} 克｜别单已称 400 克｜封顶 ${gramsCeilingFor(s3, g3, orders3[1].customerId, 'MB')} 克`);
+  check('封顶读的是「秤面不许越过柜里有的数」：本单已称 400 克时它自己的上限仍是柜量 500 克（不自我扣两遍）',
+    gramsCeilingFor(s3, g3, orders3[0].customerId, 'MB') === 500,
+    `本单封顶 ${gramsCeilingFor(s3, g3, orders3[0].customerId, 'MB')} 克`);
+  const snap3 = JSON.stringify([s3.Batches, s3.StockSolid, s3.StockSoup, s3.Cash, s3.PurchaseLedger]);
+  stockGrams(s3, 'MB'); gramsCeilingFor(s3, g3, orders3[1].customerId, 'MB');
+  check('两把尺只读：调用前后批次/库存/现金/流水逐字相同（数值轨与随机轨都不动）',
+    JSON.stringify([s3.Batches, s3.StockSolid, s3.StockSoup, s3.Cash, s3.PurchaseLedger]) === snap3,
+    '界面侧新增判定不写引擎任何字段');
+
+  // 5) 界面接线（main.js 在 Node 里 import 不了，走 §16 同一路子：静态源码断言）
+  check('称重封顶接到落值那唯一一支：addGrams 先取 gramsCeilingFor 再 Math.min（抓的连续加与捏的连续减同一条 clamp）',
+    /const ceiling = gramsCeilingFor\(state, gramsBy, cust, cat\)/.test(mainCode)
+    && /Math\.min\(ceiling, Math\.max\(0, next\)\)/.test(mainCode)
+    && !/gramsBy\[cust\]\[cat\] = Math\.max\(0, Math\.round/.test(mainCode),
+    '落值一处 clamp，无第二条路径');
+  check('没货的行当场断电：orderCard 初挂就带 disabled、refreshOrder 每次松手重算，两处共用 grabDead（不各写各的）',
+    /grabDead\(o\.customerId, l\.cat\)/.test(mainCode) && /gb\.disabled = grabDead\(cust, l\.cat\)/.test(mainCode)
+    && /const grabDead = /.test(mainCode) && /rowNote\(cust, l, got\)/.test(mainCode)
+    && /rowNote\(o\.customerId, l,/.test(mainCode),
+    '禁用与话术同一次判定（F8 那条「同屏不一致」的教训）');
+  const sd17 = mainCode.slice(mainCode.indexOf('function submitDraft()'), mainCode.indexOf('function commitPrepDraft'));
+  check('结算先把屏上每一格重读进草稿，且重读在扣钱之前：篮子只由此刻格子里认得出的数决定',
+    sd17.indexOf('syncDraftFromInputs()') >= 0 && sd17.indexOf('syncDraftFromInputs()') < sd17.indexOf('submitBasket('),
+    'syncDraftFromInputs → submitBasket 同一支函数里前后脚');
+  check('认不出数不再算成 0：判读与落值同一条（打字与结算重读共用 commitOneQty），badInput 登记 + 红框 + 整篮驳回',
+    /el\.validity\?\.badInput/.test(mainCode) && /const bad = !!el\.validity\?\.badInput/.test(mainCode)
+    && (mainCode.match(/validity\?\.badInput/g) || []).length === 1
+    && /classList\.toggle\('bad', bad\)/.test(mainCode)
+    && /function setQty\(el, normalize\) \{\s*const bad = commitOneQty\(el\);/.test(mainCode)
+    && /if \(syncDraftFromInputs\(\)\) return refreshForecast\(\);/.test(mainCode),
+    '驳回走原地重绘、不走 go（重绘会把那行字洗成 0，玩家看不见错在哪一格）；setQty 里不再自己另写一次草稿');
+  check('认不出数的那一屏只有一个口径：试算与吸底条整块换成驳回话，不摆「少算那一格的合计」；首挂与实时刷新共用同两支',
+    /const marketDetailHtml = f => \(qtyBad\.size \? badBasketPanel\(\) : forecastBar\(f\) \+ buyPanel\(f\)\)/.test(mainCode)
+    && /const marketFootHtml = f => \(qtyBad\.size \? badBasketStrip\(\) : footStrip\(f\)\)/.test(mainCode)
+    && /const html = marketDetailHtml\(f\);/.test(mainCode) && /const html = marketFootHtml\(f\);/.test(mainCode)
+    && /id="marketDetail">\$\{marketDetailHtml\(forecast\)\}/.test(mainCode)
+    && /class="stickfoot">\$\{marketFootHtml\(forecast\)\}/.test(mainCode)
+    && (mainCode.match(/forecastBar\(/g) || []).length === 2
+    && (mainCode.match(/footStrip\(/g) || []).length === 2,
+    'forecastBar / footStrip 各自只剩这一道入口（驳回时整块不换算式）');
+  check('两把尺落在 weigh.js 的对外口径里：只 import 三方老三条、不新增引擎依赖',
+    /export function stockGrams/.test(weighRaw) && /export function gramsCeilingFor/.test(weighRaw)
+    && [...weighRaw.matchAll(/^import .*$/gm)].map(x => x[0].trim()).join('|')
+      === "import { CUSTOMERS, handOrderWeight } from '../data/customers.js';|import { SOLID_CATS, CONFIG } from '../data/constants.js';|import { roundJin } from './state.js';",
+    'weigh.js 的 import 表逐字未动');
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，

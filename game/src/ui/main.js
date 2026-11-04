@@ -20,7 +20,7 @@ import { armAudio, sfx, isMuted, setMuted, motionCue } from './audio.js';
 // 开场动画（task-opening-cinematic-20261102）：只借两个入口——新档首播、以及「我的」页重看。
 // 整层挂 body、不 import 引擎，撤掉 = 删这一行 + act 里两处 + me() 里那颗按钮 + theme.css 那一块。
 import { introShouldPlay, showIntro } from './intro.js';
-import { drawHandOrders, GRAMS_PER_JIN } from '../engine/weigh.js';
+import { drawHandOrders, GRAMS_PER_JIN, stockGrams, gramsCeilingFor } from '../engine/weigh.js';
 import { judgeBlanch, blanchValueAt } from '../engine/blanch.js';
 import { regularLine, REGULAR_SLOTS } from '../data/customers.js';
 import { icon, weatherIcon, calendarIcon } from './icons.js';
@@ -64,6 +64,7 @@ let state = null;
 let rng = null;
 let phase = 'boot';
 let draft = {};          // sku → 斤/份（组篮草稿，提交前不进账）
+let qtyBad = new Set();  // 屏幕上填了字、但这一格读不出数的 sku（type=number 的 badInput 态）
 let orders = [];         // 当日亲手单
 let gramsBy = {};        // customerId → { 品类: 克数 }
 let preEvent = null;     // 第 2 步晨间情报（无分支）
@@ -296,6 +297,8 @@ function render() {
     // 不等到失焦——失焦前的那一眼不能看到 7.400000095367432
     const clean = round01(Number(el.value) || 0);
     if (el.value !== String(clean)) el.value = String(clean);
+    // 货架重挂出来的格子必然是读得出数的（值是从草稿写回去的）：上一轮「认不出」跟着这一格一起作废
+    if (el.validity && !el.validity.badInput) qtyBad.delete(el.dataset.qty);
     draft[el.dataset.qty] = clean;
     el.addEventListener('input', () => setQty(el, false));
     el.addEventListener('change', () => setQty(el, true));
@@ -327,11 +330,29 @@ function render() {
 
 // 预检必修⑤：输入层的落值一律按 0.1 斤规范化（1.6000000238 这类底层残留不进草稿），
 // 并就地改写输入框，不再为了一次取整把整屏重绘掉（那会连带换掉汇总条上的按钮）
-function setQty(el, normalize) {
+// 真机修复单 f39f692：读不出来的那一格不再静悄悄算成 0 漏出篮子。判读只这一支（打字与结算重读同一条），
+// 认出坏值就登记 + 红框、草稿按 0 走（屏上不留着一个篮子已经算进去的数）；submitDraft 见登记不为空整篮驳回。
+function commitOneQty(el) {
+  const bad = !!el.validity?.badInput;
   const v = Number(el.value);
-  const clean = Number.isFinite(v) && v > 0 ? round01(v) : 0;
-  draft[el.dataset.qty] = clean;
-  if (normalize && el.value !== '' && el.value !== String(clean)) el.value = String(clean);
+  draft[el.dataset.qty] = !bad && Number.isFinite(v) && v > 0 ? round01(v) : 0;
+  if (bad) qtyBad.add(el.dataset.qty);
+  else qtyBad.delete(el.dataset.qty);
+  el.closest('.sku')?.classList.toggle('bad', bad);
+  return bad;
+}
+
+function syncDraftFromInputs() {
+  let bad = 0;
+  for (const el of app.querySelectorAll('input[data-qty]')) if (commitOneQty(el)) bad++;
+  return bad;
+}
+
+function setQty(el, normalize) {
+  const bad = commitOneQty(el);
+  const clean = draft[el.dataset.qty];
+  if (!bad && normalize && el.value !== '' && el.value !== String(clean)) el.value = String(clean);
+  commitOneQty(el);
   return refreshForecast();
 }
 
@@ -347,12 +368,12 @@ function refreshForecast() {
   if (pressedBtn) { refreshQueued = true; return f; }
   const detail = document.getElementById('marketDetail');
   if (detail) {
-    const html = forecastBar(f) + buyPanel(f);
+    const html = marketDetailHtml(f);
     if (detail.innerHTML !== html) detail.innerHTML = html;
   }
   const foot = document.getElementById('marketFoot');
   if (foot) {
-    const html = footStrip(f);
+    const html = marketFootHtml(f);
     if (foot.innerHTML !== html) foot.innerHTML = html;
   }
   return f;
@@ -521,8 +542,12 @@ function picksFromDraft() {
 }
 
 function submitDraft() {
+  // 真机修复单 f39f692：点结算这一枪先把屏上每一格重读一遍，篮子由「此刻格子里的数」决定。
+  // 有一格认不出来就原地驳回（不走 go：整屏重绘会把那行字洗成 0，玩家看不见自己错在哪一格）
+  if (syncDraftFromInputs()) return refreshForecast();
   const r = submitBasket(state, picksFromDraft(), rng);   // 第 3 步：组篮 + 支付
   if (!r.ok) return go('market');
+  qtyBad.clear();               // 成交了：上一轮的读不出的登记不带进下一屏
   sfx('buy');                 // ④ 确认采购（付得成才响）
   pricePick = state.PriceTier;
   saveGame(state);
@@ -685,7 +710,12 @@ for (const type of ['pointerup', 'pointercancel']) {
 }
 
 function addGrams(cust, cat, delta) {
-  gramsBy[cust][cat] = Math.max(0, Math.round((gramsBy[cust][cat] || 0) + delta));
+  // 真机修复单 f39f692：秤面不许写出柜里没有的货。封顶 = 柜量 − 别单已称走的部分，
+  // 引擎那侧 takeStock 本来就按柜量扣（多称的部分收不到钱、只记一笔分量嘀咕），
+  // 补上这一道是把「屏上能按出来的数」和「柜里真有的数」钉成同一个数。
+  const ceiling = gramsCeilingFor(state, gramsBy, cust, cat);
+  const next = Math.round((gramsBy[cust]?.[cat] || 0) + delta);
+  gramsBy[cust][cat] = Math.min(ceiling, Math.max(0, next));
 }
 
 function orderTotal(cust) {
@@ -748,6 +778,19 @@ function flagText(cust, l, got) {
   return `${CAT[l.cat].name}这一口下去就短了`;
 }
 
+// 真机修复单 f39f692（Orange 20261104）：没进单的品类不许在秤上凭空长出克数。
+// 柜里这一样是 0 克 → 这一行的「抓」按钮从一开始就是死的（不是藏起来：藏了玩家不知道少了哪一格）；
+// 被别单称完 → 同一枚 gramsCeilingFor 判，与 addGrams 的封顶同一个数，两处不许各说各话。
+const grabDead = (cust, cat) => Number(gramsBy[cust]?.[cat] || 0) >= gramsCeilingFor(state, gramsBy, cust, cat);
+
+// 行内那一行字：先说「柜里没有 / 柜里的称完了」，再走原来的短斤提示。渲染与实时刷新共用这一支（同 F8 的教训：一处一个口径就会同屏不一致）
+function rowNote(cust, l, got) {
+  const have = stockGrams(state, l.cat);
+  if (have <= 0) return `「${CAT[l.cat].name}」柜里没有这一样 · 这一口称不出`;
+  if (got >= gramsCeilingFor(state, gramsBy, cust, l.cat)) return `「${CAT[l.cat].name}」柜里就 ${have} 克，已经称完了`;
+  return flagText(cust, l, got);
+}
+
 // 实测反馈 #1/#2：这一屏一律用「克」，秤面读数带单位；顾客要的与实际称的两个数必须同时在屏上
 function refreshOrder(cust) {
   const o = orders.find(x => x.customerId === cust);
@@ -774,11 +817,16 @@ function refreshOrder(cust) {
   for (const l of o.lines) {
     const got = Number(g[l.cat] || 0);
     setText(`lv-${cust}-${l.cat}`, `你称 ${got} 克`);
-    setText(`flag-${cust}-${l.cat}`, flagText(cust, l, got));
+    setText(`flag-${cust}-${l.cat}`, rowNote(cust, l, got));
     // 分段步长写在按钮上：当前这行离目标多远，按钮就写对应的 ±5 / ±1
     const step = stepFor(cust, l.cat);
     setText(`tap-${cust}-${l.cat}`, `轻点 +${step} 克`);
     setText(`pn-${cust}-${l.cat}`, `捏出 −${step} 克`);
+    // 真机修复单 f39f692：柜量见底（含被别单称完）当场把这一行的「抓」断电，与 addGrams 的封顶同一次判定
+    const gb = document.getElementById(`gb-${cust}-${l.cat}`);
+    if (gb) gb.disabled = grabDead(cust, l.cat);
+    const pn = document.getElementById(`pn-${cust}-${l.cat}`);
+    if (pn) pn.disabled = got <= 0;
   }
   refreshExact();
 }
@@ -910,8 +958,8 @@ const VIEWS = {
     return hud() + `
       ${sceneImg('market', '市场采购')}
       ${ALL_CATS.map(cat => shelfRow(cat, forecast)).join('')}
-      <div id="marketDetail">${forecastBar(forecast) + buyPanel(forecast)}</div>
-      <div id="marketFoot" class="stickfoot">${footStrip(forecast)}</div>`;
+      <div id="marketDetail">${marketDetailHtml(forecast)}</div>
+      <div id="marketFoot" class="stickfoot">${marketFootHtml(forecast)}</div>`;
   },
 
   // 预检反馈 F11（signoff-f11-tabbar）：设施货架与摊位升级从市场页底部拆出来，成整屏页。
@@ -1212,7 +1260,7 @@ function skuCard(cat, s, forecast) {
     : s.receipt === 'excluded' ? ''
       : s.receipt === 'none' ? '<span class="tag nodoc">无票</span>' : '<span class="tag nodoc">票看手气</span>';
   const step = cat === 'SP' ? 1 : 0.5;
-  return `<div class="sku ${q > 0 ? 'on' : ''}">
+  return `<div class="sku ${q > 0 ? 'on' : ''}${qtyBad.has(s.sku) ? ' bad' : ''}">
     <div class="skumain">
       <div class="skuimg" data-cell="${TIER_CELL[s.tier]}" style="background-image:url(./img/${SKU_SHEET[cat]}.webp)" role="img" aria-label="${CAT[cat].name} · ${s.supplier}"></div>
       <div class="skubody">
@@ -1287,6 +1335,24 @@ function buyPanel(f) {
       <button class="go" data-act="submit" disabled>就照这一篮买</button>
     </div>
     <p class="muted" style="margin-top:6px">缩量只改草稿里的数字，改完还得你自己点「就照这一篮买」。</p></div>`;
+}
+
+// 真机修复单 f39f692（Orange 20261104）：有一格读不出数（type=number 的 badInput：屏幕上留着字、控件里值是中空），
+// 这一屏就不摆「把那一格少算掉的那篮」——屏上写着 3 斤、合计按 218.02 算，那正是本单要修的劈叉在界面上的另一半。
+// 试算与吸底条一起换成同一句话（引擎的「整篮驳回，不自动减量」在界面上的落点）；
+// 首挂与实时刷新共用下面这两支，同一屏不许两套话（F8 的教训：一个判定两处口径，屏幕上就会自己跟自己打架）。
+const marketDetailHtml = f => (qtyBad.size ? badBasketPanel() : forecastBar(f) + buyPanel(f));
+const marketFootHtml = f => (qtyBad.size ? badBasketStrip() : footStrip(f));
+
+function badBasketPanel() {
+  const who = [...qtyBad].map(k => `「${CAT[SKU_BY_ID[k].cat].name}」`).join('、');
+  return `<div class="panel accent">
+    <p class="negv">${who} 填的数认不出来：那一格屏幕上还有字，可这个数读不进来。点进红框那一格，清空、重填一遍——认不出来这一篮点不动，也不会撇下它照其余的买。</p>
+    <button class="go" data-act="submit" disabled>就照这一篮买</button></div>`;
+}
+
+function badBasketStrip() {
+  return `<span>这一篮 <b>—</b> 元</span><span>${qtyBad.size} 格的数认不出来 · 重填那一格才点得动</span>`;
 }
 
 function basketSplit(plan) {
@@ -1520,15 +1586,15 @@ function orderCard(o) {
     <div class="pinchhint" id="hint-${o.customerId}" ${hintWanted(o) ? '' : 'hidden'}>抓多了？点「捏出一点」往回捏</div>
     <div class="dual num muted" id="sum-${o.customerId}">顾客要 ${o.lines.reduce((s, l) => s + l.grams, 0)} 克 · 你称 ${gave} 克</div>
     ${o.lines.map(l => `<div class="grabrow">
-      <button class="grab" data-grab data-cust="${o.customerId}" data-cat="${l.cat}">
+      <button class="grab" id="gb-${o.customerId}-${l.cat}" data-grab data-cust="${o.customerId}" data-cat="${l.cat}"${grabDead(o.customerId, l.cat) ? ' disabled' : ''}>
         <span class="skuimg bowlchip" id="ch-${o.customerId}-${l.cat}" data-cell="tl" style="background-image:url(./img/${SKU_SHEET[l.cat]}.webp)"></span>
         <span class="grabname">${CAT[l.cat].name}<b class="want">要 ${l.grams} 克</b><span class="step" id="tap-${o.customerId}-${l.cat}">轻点 +${stepFor(o.customerId, l.cat)} 克</span></span>
       </button>
       <div class="grabfoot">
         <span class="gavecell"><span class="num gave" id="lv-${o.customerId}-${l.cat}">你称 ${g[l.cat]} 克</span><span class="exact" id="ex-${o.customerId}-${l.cat}" ${exactNow(o.customerId, l.cat) ? '' : 'hidden'}>正好</span></span>
-        <button class="pinch" id="pn-${o.customerId}-${l.cat}" data-pinch data-cust="${o.customerId}" data-cat="${l.cat}">捏出 −${stepFor(o.customerId, l.cat)} 克</button>
+        <button class="pinch" id="pn-${o.customerId}-${l.cat}" data-pinch data-cust="${o.customerId}" data-cat="${l.cat}"${Number(g[l.cat] || 0) <= 0 ? ' disabled' : ''}>捏出 −${stepFor(o.customerId, l.cat)} 克</button>
       </div></div>
-    <div class="muted kind-bad" id="flag-${o.customerId}-${l.cat}">${flagText(o.customerId, l, Number(g[l.cat] || 0))}</div>`).join('')}
+    <div class="muted kind-bad" id="flag-${o.customerId}-${l.cat}">${rowNote(o.customerId, l, Number(g[l.cat] || 0))}</div>`).join('')}
     ${blanchBlock(o)}
   </div>`;
 }
