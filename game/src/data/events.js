@@ -1,9 +1,13 @@
-// 附录 A 事件表 Schema + 附录 E 逐字段样例，本表 18 行：M1 四行（E.1 evt_d_001 / E.2 evt_d_002 / E.3 evt_d_011 /
+// 附录 A 事件表 Schema + 附录 E 逐字段样例。建表时 18 行：M1 四行（E.1 evt_d_001 / E.2 evt_d_002 / E.3 evt_d_011 /
 // E.5 evt_d_031）、M2 第四批两行（E.8 evt_s_return / E.9 evt_s_pricewar）、M2 第五批六行（E.4 evt_d_021 立账 /
 // E.6 evt_s_insp 大检查 / E.7 evt_s_flag 锦旗 / E.9 evt_s_insp2 例行检查与 evt_s_poach 挖角 / E.10 evt_s_promo 宣传队）、
 // M2 第八批六行（spec-event-pool-6：山寨摊 / 收购邀约 / 粉坊断货 / 吃坏肚子 / 汤锅裂了 / 测评号探店）。
-// effect 用声明式 op，引擎按 timing 落到对应步号入账；数值全部照附录 E 原文 + 已签勘误 + 店主签发的那份 spec，未新增。
-// 计数（spec §三 验收口径）：坏 10 / 好 5 / 中 3 = 18 条。
+// 文案批 content-batch-text-20261104（店主 2026-11-04 批）再 +6 日常（041–046），回声包 content-batch-echo-20261104 再 +2
+// （051 / 053；052 未入池，理由与三条备选写在 delta §七十一）⇒ 现表 26 行。
+// effect 用声明式 op，引擎按 timing 落到对应步号入账；数值全部照附录 E 原文 + 已签勘误 + 店主签发的那份 spec +
+// 两批 Orange 拟值，未新增。
+// 计数（spec §三 验收口径 + 文案批总口径）：坏 12 / 好 8 / 中 6 = 26 条；日常池 17 条 = 坏 7 / 好 5 / 中 5（文案批那一句的
+// 「入池后日常池 15 条」是只算它自己 +6 的口径，回声两条再补 2 条；special 池 9 条不参与本批）。
 
 // 回签审复 §一.1（20261031）：三条坏事事件全部后置到第 3 天之后——这是定稿 §四「压力后置」与本稿第 5 行
 // 出货惯例③「负面机制在第 3 天之后才解锁」的完整实现，不是新数值。菜价上涨把 condition 与 must_fire
@@ -437,6 +441,187 @@ export const EVENTS = [
     actions: [],
     open: [{ d0Buff: { mult: 1.10, days: 3 } }],
     effect_hidden: [{ Rep: 5 }],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+
+  // ── 文案批 content-batch-text-20261104（Orange 拟值、店主 2026-11-04 批）：日常池 +6，专补好与中 ──
+  // 总口径四条：不新造系统（九条新行只用已签的 op，见下「接入」节）、效果量级压在先例带内
+  // （现金 −5…−260 元 / Rep ±1…5 / Risk +4…8 / 客流乘数 0.85–1.25 / d0Buff ×1.10–1.15）、
+  // 坏事 condition 一律 Day>=3 起（定稿 §四「压力后置」+ 回签审复 §一.1，与本批 046 同一格地板）、
+  // weight/cooldown 可由 Yellow 按池平衡微调但效果量级不许超带。
+  // cash 字段与全表同量纲＝分：单上「−500」即 5 元、「−1200」即 12 元（与 evt_d_001 的 -5400＝54 元同一条尺）。
+  {
+    // 文案批一.1（好事）：客流乘数 1.25 是本批上界，与已签的 evt_d_002「免费整改」0.6 同一格（event_demand_mult，第 7 步读）。
+    id: 'evt_d_041',
+    motion: 'good',   // 呈现标签：只许呈现层读（红线见文件头）
+    pool: 'daily',
+    ship: 'M2',
+    timing: 'morning_pre',
+    kind: '好事',
+    weight: 6,
+    condition: 'Day>=6',
+    cooldown: 12,
+    text: '学校食堂今儿检修，窗口贴了张告示：师生请自便。',
+    actions: [],
+    open: [{ eventDemandMult: 1.25 }],
+    effect_hidden: [],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+  {
+    // 文案批一.2（中性）：与 evt_d_011 涨价条镜像——同 op、同 timing（morning_pre 是采购前唯一能落 priceMultToday 的时点），一涨一跌。
+    id: 'evt_d_042',
+    motion: 'calm',   // 呈现标签：只许呈现层读（红线见文件头）
+    pool: 'daily',
+    ship: 'M2',
+    timing: 'morning_pre',
+    kind: '中性',
+    weight: 7,
+    condition: 'Day>=4',
+    cooldown: 8,
+    text: '菜农老李包了块新地，第一筐菜先紧着老主顾，价比批发低一成。',
+    actions: [],
+    open: [{ priceMultToday: { cats: ['VG'], mult: 0.9 } }],
+    effect_hidden: [],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+  {
+    // 文案批一.3（好事）：照 evt_d_031 同构（deposit 定金 + reserveBowls 预订，次日 resolvePendingReserve 按成交碗数判交付）。
+    // 单上标注的 hidden `when:'reserve_delivered'/'reserve_partial'` 与 031 一样是留痕写法：
+    // 带 when 的两条在 resolveChoice 里被过滤掉，实际 ±1 Rep 由 resolvePendingReserve 那一格给（同一份事实只落一处）。
+    id: 'evt_d_043',
+    motion: 'person',   // 呈现标签：只许呈现层读（红线见文件头）
+    pool: 'daily',
+    ship: 'M2',
+    timing: 'evening',
+    kind: '好事',
+    weight: 6,
+    condition: 'Day>=4',
+    cooldown: 10,
+    text: '周哲领着一队体育生收操路过，问你能不能明儿给他们留八碗——训练完，饿得能吃下一头牛。',
+    actions: [
+      { id: 'accept', label: '留八碗', open: [{ deposit: { bowls: 8, rate: 0.2 } }, { reserveBowls: 8 }], hidden: [{ Rep: 1, when: 'reserve_delivered' }, { Rep: -1, when: 'reserve_partial' }] },
+      { id: 'refuse', label: '接不下', open: [], hidden: [] },
+    ],
+    effect_hidden: [],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+  {
+    // 文案批一.4（中性）：两分支同量级——补钱 −5 元（本批现金下界）与一句 forcedComment（① 类强制留言，已签通道）。
+    id: 'evt_d_044',
+    motion: 'calm',   // 呈现标签：只许呈现层读（红线见文件头）
+    pool: 'daily',
+    ship: 'M2',
+    timing: 'evening',
+    kind: '中性',
+    weight: 7,
+    condition: 'Day>=3',
+    cooldown: 7,
+    text: '一个学生攥着零钱回来，说你少找了他五块。旁边排队的人都停下筷子，看你。',
+    actions: [
+      { id: 'make_up', label: '补给他（−5）', open: [{ cash: -500 }], hidden: [{ Rep: 2 }] },
+      { id: 'show_board', label: '请他看价目牌', open: [{ forcedComment: '他数了数，又数了数，不好意思地把钱收回去了。' }], hidden: [] },
+    ],
+    effect_hidden: [],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+  {
+    // 文案批一.5（中性）：由他摆 = 次日客流 ×1.10，落在已签的 next_day_traffic_mult 单发通道（与 evt_d_001「当场要钱」×0.85、
+    // evt_d_complaint「硬扛」×0.92 同一格，第 7a 步读完即复位）。劝他挪挪 = 无效果（单上原文）。
+    id: 'evt_d_045',
+    motion: 'person',   // 呈现标签：只许呈现层读（红线见文件头）
+    pool: 'daily',
+    ship: 'M2',
+    timing: 'evening',
+    kind: '中性',
+    weight: 6,
+    condition: 'Day>=5',
+    cooldown: 9,
+    text: '吴爷在你摊边上支了副象棋，围观的比下棋的多。有人看饿了，就往你这边挪一步。',
+    actions: [
+      { id: 'allow', label: '由他摆', open: [{ nextDayTrafficMult: 1.10 }], hidden: [] },
+      { id: 'ask_move', label: '劝他挪挪', open: [], hidden: [] },
+    ],
+    effect_hidden: [],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+  {
+    // 文案批一.6（坏事·轻）：买新勺 −12 元走已签的 gate:'afford'（只在界面置灰，事件通则）；消毒将就 Risk +4 = 本批 Risk 下界
+    // （先例带 +4…+8，evt_d_complaint 硬扛那条是 +8）。Day>=3 地板照压力后置。
+    id: 'evt_d_046',
+    motion: 'bad',   // 呈现标签：只许呈现层读（红线见文件头）
+    pool: 'daily',
+    ship: 'M2',
+    timing: 'evening',
+    kind: '坏事',
+    weight: 5,
+    condition: 'Day>=3',
+    cooldown: 9,
+    text: '忙到飞起时发现汤勺掉锅里了，捞了三回没捞着，客人们都替你数着。',
+    actions: [
+      { id: 'buy_new', label: '买把新的（−12）', gate: 'afford', open: [{ cash: -1200 }], hidden: [] },
+      { id: 'sanitize', label: '消毒将就', open: [], hidden: [{ Risk: 4 }] },
+    ],
+    effect_hidden: [],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+
+  // ── 回声包 content-batch-echo-20261104（店主 2026-11-04 批，并入文案批同批挂载）──
+  // 目的只有一条：把「昨天的行为 → 今天找上门」摆在玩家眼前。condition 用的是**已结算的现成事实**，
+  // 一条都不新造计数器（映射表与逐条回报写在 delta §七十一）。
+  // 权重压在单上的 18–20（因攒住了果必须来），冷却 3 日防连刷。
+  {
+    // 回声一：昨日售罄 = state.YesterdaySoldOut（day.js:242 现成字段，单上拟名与本名逐字相同）。
+    id: 'evt_d_051',
+    motion: 'person',   // 呈现标签：只许呈现层读（红线见文件头）
+    pool: 'daily',
+    ship: 'M2',
+    timing: 'morning',
+    kind: '好事',
+    weight: 20,
+    condition: 'YesterdaySoldOut',
+    cooldown: 3,
+    text: '昨天排到跟前没吃上的那个学生，今儿带着俩同学，提前十分钟就站在摊前等你开火。',
+    actions: [
+      { id: 'serve_first', label: '先给他们下', open: [{ eventDemandMult: 1.15 }], hidden: [{ Rep: 1 }] },
+      { id: 'queue', label: '排队都一样', open: [{ forcedComment: '他耸耸肩排到队尾去了，倒也没走。' }], hidden: [] },
+    ],
+    effect_hidden: [],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+  {
+    // 回声三：昨日定价较前日上调 = 昨日／前日两个售价读数比大小（都从 DailyReports 现读，dsl.js 的只读别名，不落盘）。
+    // 「规矩不能动」那支的次日客流 ×0.95 落在 next_day_traffic_mult 同一格（带内 0.85–1.25）。
+    id: 'evt_d_053',
+    motion: 'person',   // 呈现标签：只许呈现层读（红线见文件头）
+    pool: 'daily',
+    ship: 'M2',
+    timing: 'evening',
+    kind: '坏事',
+    weight: 18,
+    condition: 'PriceRaisedYesterday',
+    cooldown: 3,
+    text: '赵大妈端着碗没急着走："后生，你这价又往上挪了。我吃的不是麻辣烫，是月供。"',
+    actions: [
+      { id: 'treat', label: '这碗算我的（−12）', open: [{ cash: -1200 }], hidden: [{ Rep: 2 }] },
+      { id: 'hold_price', label: '规矩不能动', open: [{ nextDayTrafficMult: 0.95 }, { forcedComment: '赵大妈把碗一放：「行，你有规矩。」——听不出是夸还是损。' }], hidden: [] },
+    ],
+    effect_hidden: [],
     weightShift: null,
     branch: null,
     must_fire: null,

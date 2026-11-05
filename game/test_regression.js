@@ -15,7 +15,7 @@ import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, PACKING_SPILL, CONFIG,
   QUALITY_BY_TIER, CHEAP_UNLOCK_CUE, CHEAP_TIER_WARNING } from './src/data/constants.js';
 import { SKU_BY_ID } from './src/data/skus.js';
 import { scenarioOf, WEATHER } from './src/data/scenario.js';
-import { evalCondition } from './src/engine/dsl.js';
+import { evalCondition, readVar } from './src/engine/dsl.js';
 import { EVENTS, EVENT_BY_ID, DRAW_GATE } from './src/data/events.js';
 import { windowOf, pushRecent, todaySignal } from './src/engine/recent.js';
 import { beginDay, morningPreEvent, submitBasket, previewBasket, commitPrep, lockTradingDay, morningEvent, runDay, nightSettle, eveningDraw, nightClose, checkEndings,
@@ -1100,8 +1100,8 @@ for (const seed of [SEED, 7979, 36832]) {
       (!off || off.ship === 'M1') && on.id === 'evt_s_insp',
       `关 → ${off ? off.id : '无'}｜开 → ${on.id}`);
     const m2Rows = EVENTS.filter(e => e.ship !== 'M1');
-    check('池子按 ship 分档：M1 四条 + M2 十四条 = 十八条（spec-event-pool-6 落完，正文 :362 的「上线必需 ≥18」达标；坏/好/中计数见 §15）',
-      EVENTS.length === 18 && m2Rows.length === 14 && EVENTS.every(e => e.ship === 'M1' || e.ship === 'M2'),
+    check('池子按 ship 分档：M1 四条 + M2 二十二条 = 二十六条（文案批 +6、回声包 +2 落在 M2 侧；坏/好/中计数见 §15）',
+      EVENTS.length === 26 && m2Rows.length === 22 && EVENTS.every(e => e.ship === 'M1' || e.ship === 'M2'),
       `M1 ${EVENTS.length - m2Rows.length} / M2 ${m2Rows.length}`);
   }
 
@@ -1787,8 +1787,8 @@ for (const seed of [SEED, 7979, 36832]) {
   // 1) 池子计数与字段口径（spec §三 验收第一条）
   const kinds = { 坏事: 0, 好事: 0, 中性: 0 };
   EVENTS.forEach(e => { kinds[e.kind] = (kinds[e.kind] || 0) + 1; });
-  check('spec §三：池子 18 条 = 坏 10 / 好 5 / 中 3（本批 +4 / +1 / +1）',
-    EVENTS.length === 18 && kinds['坏事'] === 10 && kinds['好事'] === 5 && kinds['中性'] === 3,
+  check('spec §三 + 文案批 + 回声包：池子 26 条 = 坏 12 / 好 8 / 中 6（spec 那批 18=坏10/好5/中3，文案批 +1/+2/+3，回声 +1/+1/+0）',
+    EVENTS.length === 26 && kinds['坏事'] === 12 && kinds['好事'] === 8 && kinds['中性'] === 6,
     `坏 ${kinds['坏事']}／好 ${kinds['好事']}／中 ${kinds['中性']}`);
   check('六条新行齐备、全带 ship="M2"、timing 只落在两条既有子流上（spec §三「不新增子流」）',
     SIX.length === 6 && SIX.every(e => e.ship === 'M2')
@@ -2428,16 +2428,17 @@ for (const seed of [SEED, 7979, 36832]) {
 
 // ── 19. 改判单 task-frontload-d3-20261104 的并行小项：晨讯／夜留言搞笑密度批（纯文案）────
 // 「每拍必落笑点」机验不了，能机验的是**这一批不许顺手碰坏的东西**：
-// ① 每池条数一格没动（pick(rng, POOL) 按池长消耗随机流，池长变了 sweep／m3 的带就漂）；
+// ① 每池条数落在文案批三签发的值上（批前 32 → 51；`pick(rng, POOL)` = `pool[rng.int(...)]` 恒消耗一个随机数，
+//    池长变了抽中的那句话跟着变、抽取次数一格不多不少 ⇒ 文案漂、数值不漂——这条实测写在 delta §七十一）；
 // ② 正文 3.4 信号表里打了引号的原句逐字在场（那些是签字文案，不是我的稿）；
 // ③ ③层两条按**下标**被 buildComments 直接取用（comments.js:27–28），夸与嘀咕不许换了边；
 // ④ 晨间情报那两条是 5.2 示例原句 + 附录 D 第 176 行的 text 字段原值，文案批不许动。
 {
-  const POOL_SIZE = { qualityGood: 3, qualityBad: 3, qualityMid: 3, taste: 4, portion: 4, price: 4, soldout: 2, packing: 2, regular: 3, rumor: 2, weather: 2 };
+  const POOL_SIZE = { qualityGood: 5, qualityBad: 5, qualityMid: 5, taste: 6, portion: 6, price: 6, soldout: 3, packing: 3, regular: 5, rumor: 4, weather: 3 };
   const pools = Object.keys(COMMENT_POOLS);
-  check('留言池结构一格没动：11 池、32 条，逐池条数与文案批前相同（池长是随机流消耗量，动它＝动数值）',
+  check('留言池结构：11 池、51 条，逐池条数与文案批三落定值相同（批前 32 条 + 追加 19 句；只许往后追加，下标语义归 §19-③ 那条针）',
     pools.length === 11 && pools.every(k => COMMENT_POOLS[k].length === POOL_SIZE[k])
-    && pools.reduce((n, k) => n + COMMENT_POOLS[k].length, 0) === 32,
+    && pools.reduce((n, k) => n + COMMENT_POOLS[k].length, 0) === 51,
     `${pools.map(k => `${k}:${COMMENT_POOLS[k].length}`).join(' ')}`);
 
   const signed = [
@@ -2642,9 +2643,9 @@ for (const seed of [SEED, 7979, 36832]) {
     ['MB3', 'MT3', 'VG3', 'BF3', 'NS3', 'SP3'].map(k => SKU_BY_ID[k].price).join('/') === '10.5/9.5/3/4.5/2.5/0.4'
     && cheap.every(sk => sk.q === QUALITY_BY_TIER[3] && sk.receipt === 'none' && sk.credit === false && sk.keep === false),
     `价 ${['MB3', 'MT3', 'VG3', 'BF3', 'NS3', 'SP3'].map(k => SKU_BY_ID[k].price).join('/')}｜q 全 ${QUALITY_BY_TIER[3]}`);
-  check('两句新文案一条都没塞进留言池：COMMENT_POOLS 仍是 11 池 32 条（塞一条等于动随机流＝动数值）',
+  check('两句清仓文案一条都没塞进留言池：COMMENT_POOLS 仍是 11 池（文案批三后 51 条），这两句不在任何一池里',
     Object.keys(COMMENT_POOLS).length === 11
-    && Object.values(COMMENT_POOLS).reduce((n, a) => n + a.length, 0) === 32
+    && Object.values(COMMENT_POOLS).reduce((n, a) => n + a.length, 0) === 51
     && !Object.values(COMMENT_POOLS).some(arr => arr.some(t => t === CHEAP_UNLOCK_CUE || t === CHEAP_TIER_WARNING)),
     `${Object.keys(COMMENT_POOLS).length} 池 ${Object.values(COMMENT_POOLS).reduce((n, a) => n + a.length, 0)} 条`);
 
@@ -2851,6 +2852,167 @@ for (const seed of [SEED, 7979, 36832]) {
     && (audioRaw.match(/^\s{2}(tap|grab|exact|buy|cash|level): \(\) =>/gm) || []).length === 6
     && !/GENERIC_YIELD\.has\('grab'|'buy', 'prep'/.test(audioRaw),
     '回落句式在场｜VOICES 六键齐｜名单外三条不改行为');
+}
+
+// ── §24 文案批 content-batch-text-20261104 + 回声包 content-batch-echo-20261104（店主 2026-11-04 批）──
+// 单上的回归针只点名三样（新 id 在场 / REGULAR_LINES 长度 5 / 留言池计数），其余几根是把「不许越过的线」钉住：
+// 效果量级不超带、坏事压力后置、Orange 的原句逐字在场、回声三条的映射只读现成字段（不新造计数器）、
+// 以及被扣住的 evt_d_052 不许被人悄悄补进池子（扣住的理由与三条备选写在 delta §七十一）。
+{
+  const EV = id => EVENT_BY_ID[id];
+  const SIX = ['evt_d_041', 'evt_d_042', 'evt_d_043', 'evt_d_044', 'evt_d_045', 'evt_d_046'];
+  const ECHO = ['evt_d_051', 'evt_d_053'];
+  const ALL8 = SIX.concat(ECHO);
+  const opsOf = e => (e.actions || []).flatMap(a => a.open || []).concat(e.open || []);
+  const hidOf = e => (e.actions || []).flatMap(a => a.hidden || []).concat(e.effect_hidden || []);
+
+  // 1) 八行齐备、落点合法（pool 只有 daily、timing 只有三条既有子流、ship 标 M2、motion 照文件头规则）
+  check('文案批 +6 与回声 +2 逐 id 在场，八行全 pool:daily / ship:M2 / timing 落在三条既有子流上（不新增子流）',
+    ALL8.every(id => !!EV(id)) && ALL8.every(id => {
+      const e = EV(id);
+      return e.pool === 'daily' && e.ship === 'M2' && ['morning_pre', 'morning', 'evening'].includes(e.timing)
+        && SUBSTREAMS.includes(`event_${e.timing}`)
+        && ['坏事', '好事', '中性'].includes(e.kind) && !!e.motion && !!e.text;
+    }),
+    ALL8.map(id => `${id}=${EV(id).timing}/${EV(id).kind}/w${EV(id).weight}/cd${EV(id).cooldown}`).join('　'));
+  check('被扣住的 evt_d_052（老李减量）确实不在池里——它的 priceMultToday 落不到 timing:morning（采购窗口第 3 步提交即关）',
+    !EV('evt_d_052') && !EVENTS.some(e => e.id === 'evt_d_052') && EVENTS.length === 26,
+    `池子 ${EVENTS.length} 条（8 行入 7 行，052 退回 Orange）`);
+
+  // 2) 效果量级不超带（总口径：现金 −5…−260｜Rep ±1…5｜Risk +4…8｜客流乘数 0.85–1.25）
+  const cashOps = ALL8.flatMap(id => opsOf(EV(id))).filter(o => o.cash !== undefined);
+  const repOps = ALL8.flatMap(id => hidOf(EV(id))).filter(o => o.Rep !== undefined);
+  const riskOps = ALL8.flatMap(id => hidOf(EV(id))).filter(o => o.Risk !== undefined);
+  const mults = ALL8.flatMap(id => opsOf(EV(id)))
+    .map(o => o.nextDayTrafficMult ?? o.eventDemandMult ?? (o.priceMultToday ? o.priceMultToday.mult : undefined))
+    .filter(x => x !== undefined);
+  check('八行效果全在总口径带内：现金 −12…−5｜Rep +1…+2｜Risk +4｜乘数 0.90–1.25（客流乘数带 0.85–1.25 之内）',
+    cashOps.every(o => o.cash <= 0 && Math.abs(o.cash) <= 26000 && Math.abs(o.cash) >= 500)
+    && repOps.every(o => Math.abs(o.Rep) >= 1 && Math.abs(o.Rep) <= 5)
+    && riskOps.every(o => o.Risk >= 4 && o.Risk <= 8)
+    && mults.every(m => m >= 0.85 && m <= 1.25),
+    `现金 ${cashOps.map(o => o.cash).join('/')}｜Rep ${repOps.map(o => o.Rep).join('/')}｜Risk ${riskOps.map(o => o.Risk).join('/')}｜乘数 ${mults.join('/')}`);
+  check('压力后置照旧：本批唯一的坏事 046 钉在 Day>=3；回声 053 的 Day>=3 由别名结构自带（不足两格日报恒 false ⇒ 第 3 天才可能成立）',
+    EV('evt_d_046').condition === 'Day>=3' && EV('evt_d_046').kind === '坏事'
+    && ALL8.filter(id => EV(id).kind === '坏事').every(id => EV(id).condition.includes('Day>=') || id === 'evt_d_053'),
+    `046「${EV('evt_d_046').condition}」｜053「${EV('evt_d_053').condition}」`);
+
+  // 3) 回声映射只读现成字段：Orange 的三个拟名里，两个直接落在已有状态/日报上，一个都不许新造计数器
+  const srcRoot = join(HERE, 'src');
+  const srcFiles = [];
+  (function walk(d) {
+    for (const name of readdirSync(d)) {
+      const p = join(d, name);
+      if (statSync(p).isDirectory()) walk(p); else if (name.endsWith('.js')) srcFiles.push(p);
+    }
+  })(srcRoot);
+  const grepAll = re => srcFiles.filter(f => re.test(readFileSync(f, 'utf8'))).map(f => f.slice(srcRoot.length + 1).replace(/\\/g, '/'));
+  check('回声映射不新造计数器：全仓零处 YesterdayWasteHigh / YesterdayPricePerJin / PrevDayPricePerJin（映射不上的退回，不许硬凑）',
+    grepAll(/YesterdayWasteHigh|YesterdayPricePerJin|PrevDayPricePerJin/).length === 0,
+    `命中文件 ${(grepAll(/YesterdayWasteHigh|YesterdayPricePerJin|PrevDayPricePerJin/).join(' ') || '无')}`);
+  check('051 走已存在的 state.YesterdaySoldOut（第 12 步 nightClose 早已写，一格没新存）；053 走 readVar 新别名，只读 DailyReports 的价',
+    EV('evt_d_051').condition === 'YesterdaySoldOut' && 'YesterdaySoldOut' in newGame(SEED)
+    && EV('evt_d_053').condition === 'PriceRaisedYesterday' && typeof readVar('PriceRaisedYesterday', newGame(SEED)) === 'boolean',
+    `YesterdaySoldOut 初值 ${JSON.stringify(newGame(SEED).YesterdaySoldOut)}｜别名初值 ${readVar('PriceRaisedYesterday', newGame(SEED))}`);
+
+  // 4) 别名真值表：日报不足两格恒 false；昨日 > 前日才 true；相等与下调都 false（不能把 undefined 当 0 比）
+  const rep = (n, pricePerJin) => ({ day: n, pricePerJin });
+  const cases = [
+    { r: [], want: false, why: '第 1 天（零格）' },
+    { r: [rep(1, 15)], want: false, why: '第 2 天（一格，没有「前日」）' },
+    { r: [rep(1, 15), rep(2, 16)], want: true, why: '昨 16 > 前 15' },
+    { r: [rep(1, 15), rep(2, 15)], want: false, why: '持平不算上调' },
+    { r: [rep(1, 16), rep(2, 15)], want: false, why: '降价不算' },
+    { r: [rep(1, 12), rep(2, 16), rep(3, 15)], want: false, why: '只看最后两格：昨 15 < 前 16' },
+  ];
+  const aliasGot = cases.map(c => { const s = newGame(SEED); s.DailyReports = c.r; return readVar('PriceRaisedYesterday', s); });
+  check('PriceRaisedYesterday 真值表六格全对（含 Day1–2 兜底 false、持平/下调 false、只看滚动窗口最后两格）',
+    aliasGot.every((g, i) => g === cases[i].want),
+    cases.map((c, i) => `${c.why}→${aliasGot[i]}`).join('｜'));
+  const dslSrc = readFileSync(join(srcRoot, 'engine/dsl.js'), 'utf8');
+  const aliasBody = (dslSrc.match(/if \(name === 'PriceRaisedYesterday'\) \{[\s\S]*?\n  \}/) || [''])[0];
+  check('别名只读不算：这一格只从 s.DailyReports 取最后两格的价，全文无 state 写、无属性赋值、不掷随机',
+    aliasBody.includes('s.DailyReports') && aliasBody.includes('pricePerJin')
+    && !/\bstate\b/.test(aliasBody) && !/^\s*[A-Za-z_$][\w$]*(\.[\w$]+)*\s*=[^=]/m.test(aliasBody)
+    && !/rng|Math\.random|float\(/.test(aliasBody),
+    aliasBody.replace(/\n\s*/g, ' ').slice(0, 80) + '…');
+
+  // 5) DSL 端到端：053 的 condition 走 evalCondition 判得动，051 走同一条读法（别名与状态字段在同一个求值器里）
+  {
+    const s = newGame(SEED);
+    s.DailyReports = [rep(1, 15), rep(2, 16)];
+    const up = evalCondition(EV('evt_d_053').condition, s);
+    s.DailyReports = [rep(1, 16), rep(2, 15)];
+    const down = evalCondition(EV('evt_d_053').condition, s);
+    s.YesterdaySoldOut = true;
+    const sold = evalCondition(EV('evt_d_051').condition, s);
+    s.YesterdaySoldOut = false;
+    const notSold = evalCondition(EV('evt_d_051').condition, s);
+    check('两条回声的 condition 逐字进 evalCondition 判得动：涨价真→053 成立、降价→不成立；售罄真→051 成立、假→不成立',
+      up === true && down === false && sold === true && notSold === false,
+      `053 涨/跌 ${up}/${down}｜051 售罄/未售罄 ${sold}/${notSold}`);
+  }
+
+  // 6) 常客线收尾：c01–c03 各 5 句（前 3 句旧稿逐字不动、后 2 句照 Orange 稿），c04 按已签额度继续留空
+  const OLD_HEAD = { c01: 3, c02: 3, c03: 3 };
+  const BATCH2 = {
+    c01: ['考完了！睡了一天一夜，醒来就惦记你这碗。', '成绩还没出，但我这人先过关了——汤给我加满。'],
+    c02: ['项目上线了，今晚不用通宵，我慢慢吃。', '我把你家写进我们组的外卖清单了，第一行，标了星。'],
+    c03: ['今儿孙子自己来的，点单点得比我还熟。', '他说等他挣钱了，天天请我吃你家的。'],
+  };
+  check('REGULAR_LINES：c01–c03 各 5 句（+2 拍落位）、第 4、5 句就是 Orange 批的那两句、c04 仍留空',
+    ['c01', 'c02', 'c03'].every(k => REGULAR_LINES[k].length === 5)
+    && REGULAR_LINES.c01.slice(3).join('§') === BATCH2.c01.join('§')
+    && REGULAR_LINES.c02.slice(3).join('§') === BATCH2.c02.join('§')
+    && REGULAR_LINES.c03.slice(3).join('§') === BATCH2.c03.join('§')
+    && (REGULAR_LINES.c04 || []).length === 0,
+    `长度 ${['c01', 'c02', 'c03', 'c04'].map(k => `${k}:${(REGULAR_LINES[k] || []).length}`).join(' ')}`);
+  check('补拍不许改写前头：c01–c03 的前三句逐字留在原位（那九句是 §八 已登记的 agent 自撰待审稿，本批无权动）',
+    ['c01', 'c02', 'c03'].every(k => REGULAR_LINES[k].slice(0, OLD_HEAD[k]).every(l => typeof l === 'string' && l.length > 10))
+    && REGULAR_LINES.c01[0].startsWith('从自习室逃出来一趟') && REGULAR_LINES.c02[0].startsWith('上线推到今晚了')
+    && REGULAR_LINES.c03[0].startsWith('孙子今儿没跟来'),
+    `头三句起句核对：${['c01', 'c02', 'c03'].map(k => REGULAR_LINES[k][0].slice(0, 6)).join(' / ')}`);
+  // regularLine 钳位到最后一句：批前钳在第 3 句，批后钳到第 5 句；到顶不再越界
+  {
+    const lineAt = (k, p) => regularLine(k, p);
+    check('regularLine 钳位跟着数组加长：进度 3（批前就到顶的那一格）现在吐新第 4 句，进度 5/9 停在第 5 句（到顶不回卷、不出 undefined）',
+      lineAt('c01', 3) === REGULAR_LINES.c01[3] && lineAt('c02', 3) === REGULAR_LINES.c02[3]
+      && lineAt('c01', 5) === REGULAR_LINES.c01[4] && lineAt('c01', 9) === REGULAR_LINES.c01[4]
+      && lineAt('c01', 0) === REGULAR_LINES.c01[0] && lineAt('c04', 2) === null,
+      `进度 3→第 4 句（批前这里是最后一句）｜进度 5/9→第 5 句｜c04 → null`);
+  }
+
+  // 7) 留言池：+19 只许往后追加（前缀逐字不动，下标直取那两条归 §19 那根针守），且 Orange 的十九句逐字在场
+  const HEAD_SIZE = { qualityGood: 3, qualityBad: 3, qualityMid: 3, taste: 4, portion: 4, price: 4, soldout: 2, packing: 2, regular: 3, rumor: 2, weather: 2 };
+  const NEW_TAIL = [
+    ['qualityGood', ['丸子一咬就弹牙，我跟室友打赌，输了都认。', '这汤鲜得不讲理，我是端着碗喝完的。']],
+    ['qualityBad', ['今儿这碗吃着有点飘，像没睡醒。', '回去路上肚子咕噜了一阵，说不上来。']],
+    ['qualityMid', ['中规中矩，填饱肚子没问题。', '跟昨天一个味，稳。']],
+    ['taste', ['辣度刚好卡在我出汗的边上。', '麻得嘴唇直跳舞，跳完还想再来一碗。']],
+    ['portion', ['秤星我盯着呢，你没手抖。', '这碗沉，端着就有底气。']],
+    ['price', ['比上学期贵了点，但我还在吃，你细品。', '这价钱还能陪我到毕业，够意思。']],
+    ['soldout', ['我掐着点来的还是没了，你家是不是藏着一半菜单？']],
+    ['packing', ['盒子到宿舍还是热的，盖子这次跟我很熟。']],
+    ['regular', ['老板，我的口味你比我妈记得都清。', '毕业前我得把菜单吃个遍，还剩两样。']],
+    ['rumor', ['街口那家新来的，排队的人都走到你家队尾了。', '有人把你家价目牌拍下来发群里了，配文就俩字：良心。']],
+    ['weather', ['天一凉，你这摊跟被窝一样有号召力。']],
+  ];
+  const tailFlat = NEW_TAIL.flatMap(([, a]) => a);
+  check('留言池 +19 全在各自池尾（19 句逐字对 Orange 稿），插不进头里 ⇒ 批前 32 句的相对次序一格没动',
+    NEW_TAIL.every(([k, a]) => COMMENT_POOLS[k].slice(-a.length).join('§') === a.join('§'))
+    && tailFlat.length === 19
+    && Object.keys(HEAD_SIZE).reduce((n, k) => n + HEAD_SIZE[k], 0) === 32
+    && Object.values(COMMENT_POOLS).reduce((n, a) => n + a.length, 0) === 51,
+    `尾挂核对：${NEW_TAIL.map(([k, a]) => `${k}+${a.length}`).join(' ')}｜合计 51 条`);
+  // 暧昧归因是文件头硬规范，扩容十句里品质那三池最吃劲：新句不许指认到摊子或料上
+  const ACCUSE = /你家|你这|你的料|你用的|地沟油|过期|不干净/;
+  check('新加的品质嘀咕仍守「暧昧归因」：qualityBad/qualityMid 四条新句里零指认（文件头硬规范，扩容也不给开口子）',
+    [...COMMENT_POOLS.qualityBad.slice(3), ...COMMENT_POOLS.qualityMid.slice(3)].every(t => !ACCUSE.test(t)),
+    `新句 ${COMMENT_POOLS.qualityBad.slice(3).concat(COMMENT_POOLS.qualityMid.slice(3)).length} 条零命中`);
+  check('池长改的是「抽中哪句」不是「抽几次」：buildComments 每处 pick 恒消耗一个数（rng.int 无拒绝重抽），留言文本漂、数值不漂',
+    /pool\[rng\.int\('comment', pool\.length\)\]/.test(readFileSync(join(srcRoot, 'engine/comments.js'), 'utf8'))
+    && !/while\s*\(/.test(readFileSync(join(srcRoot, 'engine/comments.js'), 'utf8')),
+    `pick = pool[rng.int(...)] 一行式｜comments.js 内零 while`);
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，

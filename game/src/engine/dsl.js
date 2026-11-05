@@ -107,5 +107,13 @@ export function readVar(name, s) {
   if (name === 'MinQ3') return Math.min(...windowOf(s).map(d => d.q));
   if (name === 'Cheap3') return windowOf(s).some(d => d.cheap);
   if (name === 'AddMore3') return windowOf(s).some(d => d.add);
+  // 回声包 content-batch-echo-20261104 的「昨日定价较前日上调」：Orange 给的拟名，按 FacilityCount / AvgQ3 同例落只读别名。
+  // 事实源是已结算的 DailyReports（第 12 步滚存；晚间第 10 步抽时最后一格正是昨日），一格都不新存、计数器一个都不新造。
+  // 不足两格（第 1–2 天）返回 false：没有「前日」就谈不上上调——不能拿 undefined 当 0 去比，那样第二天就会误判成涨价。
+  if (name === 'PriceRaisedYesterday') {
+    const r = s.DailyReports;
+    if (!Array.isArray(r) || r.length < 2) return false;
+    return r[r.length - 1].pricePerJin > r[r.length - 2].pricePerJin;
+  }
   return s[name];
 }
