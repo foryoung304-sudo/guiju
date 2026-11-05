@@ -26,6 +26,7 @@ import { introShouldPlay, showIntro } from './intro.js';
 import { windCard } from './wind.js';
 // 结算屏第二段那条播报 + 进出两组的合计（工单 task-ui-polish-20261105 第 7 条）：择句规则与词池都在这一层，引擎不认得它。
 import { broadcastLine, inoutTotals } from './settle-broadcast.js';
+import { mergeSelloutNames } from './sellout.js';
 import { drawHandOrders, GRAMS_PER_JIN, stockGrams, gramsCeilingFor } from '../engine/weigh.js';
 import { judgeBlanch, blanchValueAt } from '../engine/blanch.js';
 import { regularLine, REGULAR_SLOTS } from '../data/customers.js';
@@ -1118,8 +1119,9 @@ const VIEWS = {
     const r = dailyReport(state);   // 当日报表此刻还在 today 上，DailyReports 末尾是昨天的，不能取
     const t = state.today;
     // F7：卖断文案把当日 T 一起带出来——「买 12 份卖 11 碗还报卖断」在 T>1 的日子是对的，看不见 T 就成了玩家嘴里的 bug
-    const out = [...new Set([...t.soldOutCats.map(c => CAT[c].name),
-      ...(t.soupSoldOut ? [`汤底（每碗耗 ${t.scenario.T} 份）`] : [])])];
+    // 复现单 `task-repro-20261105` 第一项：名单在**拼装源头**按基名归并，红字行与播报 soldout 句读同一份，不各拼一份。
+    const out = mergeSelloutNames(t.soldOutCats.map(c => CAT[c].name),
+      t.soupSoldOut ? `汤底（每碗耗 ${t.scenario.T} 份）` : null);
     // 预检反馈 F6（0366bd6）：晚间事件弹层原先整屏换掉这张账，事件日就从「打烊」那一刻起再也看不到净额行。
     // 账目与事件各回各位：先把账排在屏上，弹层作为覆盖层追加，玩家点完分支照样落第 10–12 步。
     const overlay = pendingEvent ? eventOverlay() : '';

@@ -34,6 +34,7 @@ import { windCard, windBandIndex } from './src/ui/wind.js';
 import { WEATHER_TALK, weatherTalk, catDeviation } from './src/data/weather-talk.js';
 import { VOICE_INTRO, VOICE_RESULT, voiceIntroLines, voiceResultLines } from './src/data/voice.js';
 import { BROADCAST_KINDS, BROADCAST_POOL, broadcastLine, inoutTotals } from './src/ui/settle-broadcast.js';
+import { mergeSelloutNames } from './src/ui/sellout.js';
 import { morningRivals, priceWarReprice, sharesAndS, tallySuppression, rivalPriceCoef, previewShare } from './src/engine/competition.js';
 import { applyShadow, computeQ } from './src/engine/shadow.js';
 import { makeRng } from './src/engine/rng.js';
@@ -3771,6 +3772,79 @@ for (const seed of [SEED, 7979, 36832]) {
       && /const TAP_GRAMS = 5;/.test(mainSrc) && /const FINE_GRAMS = 1;/.test(mainSrc)
       && /const FINE_GAP = 20;/.test(mainSrc),
     '按住闸 150ms｜速率 60+120｜分段 +5 / ±1（差 >20 克）');
+}
+
+// ── §29 复现与修复单 task-repro-20261105（Orange `3ac1907`）第一项：卖断名单「汤底」按基名归并 ──────
+// 病灶由 Yellow §八十一 钉准、Orange 采信并定死修法：重复的不是同字面，而是同一件东西的两种说法
+// （`CAT.SP.name`「汤底」与 F7 那句带 T 的注记），所以再加一层 `new Set` 修不好。
+// 本节按单上的验收口径写针：① 双路径同入名单 ⇒ 该基名至多一条且留带 T 那条；② 其余五品类不误伤；
+// ③ 归并只在拼装源头做一次，红字行与播报句读同一份；④ 归并层不造数、不读引擎（与第四项「不许自己发明一个数填上」同一口径）。
+{
+  const NAMES = ALL_CATS.map(c => CAT[c].name);      // 丸子、鲜肉、青菜、豆制品/菌菇、粉面、汤底
+  const SOUP = CAT.SP.name;
+  const solidNames = SOLID_CATS.map(c => CAT[c].name);
+  const mainR = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const selloutSrc = readFileSync(join(HERE, 'src/ui/sellout.js'), 'utf8');
+  const T = `${SOUP}（每碗耗 1.4 份）`;
+
+  // 1) 单上点名的用例：汤底同时从两条路径进名单（品类名那格 + soupSoldOut 那格）——第 1 天什么都不称就是这个形状。
+  const both = mergeSelloutNames([SOUP], T);
+  const soupRows = both.filter(x => x.split('（')[0] === SOUP);
+  check('§29 第一项①：汤底从两条路径同时进名单 ⇒ 归并后该基名至多一条，留的是带 T 注记那条（信息量大的）',
+    soupRows.length === 1 && soupRows[0] === T, `名单[${both.join('、')}]`);
+
+  // 2) 六品类同场卖断：归并只许动汤底那一格，其余五品类逐格原样、位置不变。
+  const allSix = mergeSelloutNames(NAMES, T);
+  const hurt = solidNames.filter(n => !allSix.includes(n));
+  const moved = NAMES.slice(0, SOLID_CATS.length).filter((n, i) => allSix[i] !== n);
+  check('§29 第一项①：六品类齐卖断时其余五品类不误伤——丸子/鲜肉/青菜/豆制品·菌菇/粉面原样在场且位次不动，只有汤底换成带 T 那条',
+    allSix.length === 6 && hurt.length === 0 && moved.length === 0 && allSix[5] === T,
+    `名单[${allSix.join('、')}]｜误伤[${hurt.join('、') || '无'}]｜移位[${moved.join('、') || '无'}]`);
+
+  // 3) 穷举六品类的全部子集 × 注记有/无 ⇒ 输出恒为「基名唯一」，且条数恰好等于输入里不同基名的个数（归并不吞别的、也不多造）。
+  const exBad = [];
+  let exCount = 0;
+  for (let mask = 0; mask < (1 << NAMES.length); mask++) {
+    for (const soup of [null, T]) {
+      const input = NAMES.filter((_, i) => mask & (1 << i));
+      const pool = [...input, ...(soup ? [soup] : [])];
+      const bases = pool.map(x => x.split('（')[0]);
+      const got = mergeSelloutNames(input, soup);
+      const gotBases = got.map(x => x.split('（')[0]);
+      exCount++;
+      if (new Set(gotBases).size !== gotBases.length || got.length !== new Set(bases).size) {
+        exBad.push(`${mask}/${soup ? 'T' : '无'}`);
+      }
+    }
+  }
+  check(`§29 第一项①：${exCount} 个子集用例全过——名单里任何基名都不重复，条数恰等于输入的不同基名数（第 1 天零称重的形状也在内）`,
+    exBad.length === 0, `越界用例[${exBad.slice(0, 4).join(' ') || '无'}]`);
+
+  // 4) 只有注记那一条时不许凭空多出品类名那一格。
+  const onlyNote = mergeSelloutNames([], T);
+  check('§29 第一项①：只有 soupSoldOut（品类那格空）⇒ 名单就一条带 T 的说法，不另生一条裸「汤底」',
+    onlyNote.length === 1 && onlyNote[0] === T, `名单[${onlyNote.join('、')}]`);
+
+  // 5) 单上「红字行与播报 soldout 句共用同一份归并后的名单，不许两处各拼一份」：拼装点唯一 + 两处引用同源 + 旧拼法零残留。
+  const assembles = (mainR.match(/mergeSelloutNames\(/g) || []).length;
+  const joins = (mainR.match(/out\.join\('、'\)/g) || []).length;
+  check('§29 第一项②：名单在 settle() 的拼装源头只归并一次（调用点 1 处），红字行与播报句读同一份 out（两处引用），旧那层 new Set 拼法零残留',
+    assembles === 1 && joins === 2 && !/new Set\(\[\.\.\.t\.soldOutCats/.test(mainR)
+      && mainR.includes('soldOutText: out.join(\'、\')') && mainR.includes('今天这些卖断了：${out.join(\'、\')}'),
+    `拼装 ${assembles}/1｜引用 ${joins}/2`);
+
+  // 6) 归并层的干净：零 import、零数字字面（T 由调用方给，它不许自己造）、引擎与数据层对它全盲。
+  const selloutCode = selloutSrc.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ');
+  const rel29 = f => f.slice(join(HERE, 'src').length + 1).split('\\').join('/');
+  const listUsers = files.filter(f => /mergeSelloutNames/.test(readFileSync(f, 'utf8'))).map(rel29).sort();
+  // 结构用的 `[]`/`< 0`（下标与「找不到」哨兵）不算造数，其余任何数字字面都算——T 只能由调用方递进来。
+  const noStruct = selloutCode.replace(/\[\d+\]/g, '[]').replace(/< 0/g, '<哨兵');
+  check('§29 第一项·护栏：src/ui/sellout.js 零 import、零数字字面（T 由调用方给，它不许自己造）、不碰 state/scenario，引用点只有 ui/main.js 一处，src/engine 与 src/data 全盲',
+    (selloutSrc.match(/^import .*$/gm) || []).length === 0
+      && !/[0-9]/.test(noStruct)
+      && !/\bMath\.random\b|\bDate\.now\b|setTimeout|setInterval|\bstate\b|scenario/.test(selloutCode)
+      && listUsers.join(' ') === 'ui/main.js ui/sellout.js',
+    `引用点[${listUsers.join(' ')}]｜带数字[${/[0-9]/.test(noStruct) ? '有' : '无'}]`);
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
