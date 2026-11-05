@@ -193,7 +193,8 @@ export function loadGame() {
   // 机制单 `c152b37`（低价档亏损解锁）新带的两个字段。`NetOpsCents` 这一格**能 exact 重建**——每日账本行里就存着
   // `netOpsCents`（§二 压力测试那条「NP = Σ(经营净额 + 事件账净额)」的针证得过它逐日可加），所以旧档按已发生过的账补齐，
   // 不像 RiskShort 那样只能「不溯及既往补 0」。`cheapUnlocked` 一律补 false：**不在这里替玩家把门打开**，
-  // 因为单上红线是「不许静默上架」——旧档就算已经亏过 180，也要等下一晚第 8 步那道判定自然撞线，递话那条留言才会在场。
+  // 因为单上红线是「不许静默上架」——旧档就算已经亏过那条线（现行数值见 CONFIG.cheapUnlockNetOpsCents，v2 之后是 −120 元），
+  // 也要等下一晚第 8 步那道判定自然撞线，递话那条留言才会在场。
   if (typeof parsed.NetOpsCents !== 'number' || !Number.isFinite(parsed.NetOpsCents))
     parsed.NetOpsCents = Array.isArray(parsed.DailyReports)
       ? parsed.DailyReports.reduce((s, r) => s + (r?.netOpsCents || 0), 0) : 0;

@@ -2,12 +2,12 @@
 // E.5 evt_d_031）、M2 第四批两行（E.8 evt_s_return / E.9 evt_s_pricewar）、M2 第五批六行（E.4 evt_d_021 立账 /
 // E.6 evt_s_insp 大检查 / E.7 evt_s_flag 锦旗 / E.9 evt_s_insp2 例行检查与 evt_s_poach 挖角 / E.10 evt_s_promo 宣传队）、
 // M2 第八批六行（spec-event-pool-6：山寨摊 / 收购邀约 / 粉坊断货 / 吃坏肚子 / 汤锅裂了 / 测评号探店）。
-// 文案批 content-batch-text-20261104（店主 2026-11-04 批）再 +6 日常（041–046），回声包 content-batch-echo-20261104 再 +2
-// （051 / 053；052 未入池，理由与三条备选写在 delta §七十一）⇒ 现表 26 行。
+// 文案批 content-batch-text-20261104（店主 2026-11-04 批）再 +6 日常（041–046），回声包 content-batch-echo-20261104 再 +3
+// （051 / 052 / 053；052 曾按「假按钮」退回，`f6a8ebf` §一按丙改写后入池）⇒ 现表 27 行。
 // effect 用声明式 op，引擎按 timing 落到对应步号入账；数值全部照附录 E 原文 + 已签勘误 + 店主签发的那份 spec +
 // 两批 Orange 拟值，未新增。
-// 计数（spec §三 验收口径 + 文案批总口径）：坏 12 / 好 8 / 中 6 = 26 条；日常池 17 条 = 坏 7 / 好 5 / 中 5（文案批那一句的
-// 「入池后日常池 15 条」是只算它自己 +6 的口径，回声两条再补 2 条；special 池 9 条不参与本批）。
+// 计数（spec §三 验收口径 + 文案批总口径）：坏 12 / 好 8 / 中 7 = 27 条；日常池 18 条 = 坏 7 / 好 5 / 中 6（文案批那一句的
+// 「入池后日常池 15 条」是只算它自己 +6 的口径，回声三条再补 3 条；special 池 9 条不参与本批）。
 
 // 回签审复 §一.1（20261031）：三条坏事事件全部后置到第 3 天之后——这是定稿 §四「压力后置」与本稿第 5 行
 // 出货惯例③「负面机制在第 3 天之后才解锁」的完整实现，不是新数值。菜价上涨把 condition 与 must_fire
@@ -598,6 +598,30 @@ export const EVENTS = [
     actions: [
       { id: 'serve_first', label: '先给他们下', open: [{ eventDemandMult: 1.15 }], hidden: [{ Rep: 1 }] },
       { id: 'queue', label: '排队都一样', open: [{ forcedComment: '他耸耸肩排到队尾去了，倒也没走。' }], hidden: [] },
+    ],
+    effect_hidden: [],
+    weightShift: null,
+    branch: null,
+    must_fire: null,
+  },
+  {
+    // 回声二：昨日损耗偏高（`f6a8ebf` §一按丙落地）。原单的效果 op 是 `priceMultToday`，只管采购价、而采购在第 3 步就关门了
+    // ⇒ 那颗「少拿点」是假按钮（登记见 delta §七十一），−5% 就此作废；丙案换成表里已在带的通道：`forcedComment` ＋ `hidden [{ Rep: 1 }]`，
+    // `timing` 保持 `morning`、两颗按钮保住。「下周我那新地先紧着谁」仍是话术逗子，不落机制。
+    // 判据的量纲是**分**（`dsl.js` 的只读别名读 DailyReports 最后一格，一格都不新存）；40 元这道线自定，分布实测在 `probe-evt052-waste.js`。
+    id: 'evt_d_052',
+    motion: 'person',   // 呈现标签：只许呈现层读（红线见文件头）
+    pool: 'daily',
+    ship: 'M2',
+    timing: 'morning',
+    kind: '中性',
+    weight: 18,
+    condition: 'YesterdayWasteHigh >= 4000',
+    cooldown: 3,
+    text: '老李今早挑着担子先绕到你摊上："昨天见你剩了不少，今儿少拿点？我按老主顾价再让半成——下周我那新地先紧着谁，可就不好说了。"',
+    actions: [
+      { id: 'take_less', label: '少拿点', open: [{ forcedComment: '老李把新菜往你这边又推了推：『少拿点好，菜这东西，新鲜才值钱。』' }], hidden: [{ Rep: 1 }] },
+      { id: 'take_normal', label: '照常拿', open: [{ forcedComment: '老李把担子一挑：「成，是个过日子的。」' }], hidden: [] },
     ],
     effect_hidden: [],
     weightShift: null,

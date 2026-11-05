@@ -115,5 +115,11 @@ export function readVar(name, s) {
     if (!Array.isArray(r) || r.length < 2) return false;
     return r[r.length - 1].pricePerJin > r[r.length - 2].pricePerJin;
   }
+  // 回声包第三张 evt_d_052 的「昨日损耗」：Orange 给的拟名，量纲照表里现金那套纪律走**分**，
+  // 门槛数字留在数据行（`>= 4000`＝40 元，标定探针 `probe-evt052-waste.js`）。没有昨日返回 0，不拿 undefined 去比。
+  if (name === 'YesterdayWasteHigh') {
+    const r = s.DailyReports;
+    return Array.isArray(r) && r.length ? r[r.length - 1].writeoffCents : 0;
+  }
   return s[name];
 }

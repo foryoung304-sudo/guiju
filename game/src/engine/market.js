@@ -50,8 +50,12 @@ export function skuAvailable(state, sku, rng) {
 // 撞线当晚由第 12 步 `buildComments` 把 `CHEAP_UNLOCK_CUE` 带进夜讯，次日市场低价卡才出现。
 // 只读累计经营净额，不看现金余额：升档/买设施走投资账、事件净走第 11 步的 NP，都不进这一格 ⇒「升档花钱不算亏，不许误触」。
 // 一次解锁、永久保留：翻过牌之后不再判定，本函数全年最多递话一次；不掷随机，数值轨不漂。
+// 裁定 `f6a8ebf` §四（v2）多加一道**时间闸**：D3 晚起才跑（与 `specialFirstDay` 同节奏，压力开闸那天）。
+// 这一句把「D1–D2 不触发」从概率结论变成结构保证——v1 的单日线正是被 D1 那种零事件卡、现金还剩 460 的普通开业日照穿的。
+// 单日支不落（三档全不过，判据留在 `probe-cheap-unlock-v2.js`）⇒ 本函数体内只有累计这一支，读代码的人别去找第二条闸。
 export function cheapUnlockCheck(state) {
   if (state.cheapUnlocked) return false;
+  if (state.Day < CONFIG.cheapUnlockFirstDay) return false;
   if ((state.NetOpsCents || 0) > CONFIG.cheapUnlockNetOpsCents) return false;
   state.cheapUnlocked = true;
   state.today.forcedComments.push(CHEAP_UNLOCK_CUE);

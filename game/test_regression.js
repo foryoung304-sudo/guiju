@@ -1103,8 +1103,8 @@ for (const seed of [SEED, 7979, 36832]) {
       (!off || off.ship === 'M1') && on.id === 'evt_s_insp',
       `关 → ${off ? off.id : '无'}｜开 → ${on.id}`);
     const m2Rows = EVENTS.filter(e => e.ship !== 'M1');
-    check('池子按 ship 分档：M1 四条 + M2 二十二条 = 二十六条（文案批 +6、回声包 +2 落在 M2 侧；坏/好/中计数见 §15）',
-      EVENTS.length === 26 && m2Rows.length === 22 && EVENTS.every(e => e.ship === 'M1' || e.ship === 'M2'),
+    check('池子按 ship 分档：M1 四条 + M2 二十三条 = 二十七条（文案批 +6、回声包 +3 落在 M2 侧；坏/好/中计数见 §15）',
+      EVENTS.length === 27 && m2Rows.length === 23 && EVENTS.every(e => e.ship === 'M1' || e.ship === 'M2'),
       `M1 ${EVENTS.length - m2Rows.length} / M2 ${m2Rows.length}`);
   }
 
@@ -1790,8 +1790,8 @@ for (const seed of [SEED, 7979, 36832]) {
   // 1) 池子计数与字段口径（spec §三 验收第一条）
   const kinds = { 坏事: 0, 好事: 0, 中性: 0 };
   EVENTS.forEach(e => { kinds[e.kind] = (kinds[e.kind] || 0) + 1; });
-  check('spec §三 + 文案批 + 回声包：池子 26 条 = 坏 12 / 好 8 / 中 6（spec 那批 18=坏10/好5/中3，文案批 +1/+2/+3，回声 +1/+1/+0）',
-    EVENTS.length === 26 && kinds['坏事'] === 12 && kinds['好事'] === 8 && kinds['中性'] === 6,
+  check('spec §三 + 文案批 + 回声包：池子 27 条 = 坏 12 / 好 8 / 中 7（spec 那批 18=坏10/好5/中3，文案批 +1/+2/+3，回声 +1/+1/+1：052 按丙入池，`f6a8ebf` §一）',
+    EVENTS.length === 27 && kinds['坏事'] === 12 && kinds['好事'] === 8 && kinds['中性'] === 7,
     `坏 ${kinds['坏事']}／好 ${kinds['好事']}／中 ${kinds['中性']}`);
   check('六条新行齐备、全带 ship="M2"、timing 只落在两条既有子流上（spec §三「不新增子流」）',
     SIX.length === 6 && SIX.every(e => e.ship === 'M2')
@@ -2508,8 +2508,10 @@ for (const seed of [SEED, 7979, 36832]) {
     `credit ${meBody.includes(CREDIT) ? '原文在场' : '缺失'}｜.credit 11px ${/\.credit \{[^}]*font-size: 11px/.test(cssSrc) ? '有' : '无'}`);
 }
 
-// ── §21 机制单 task-cheap-unlock-20261104（`c152b37`，店主点子、Orange 定口径）：低价档改「绝境解锁」──
-// 单上只允许动四件：闸门（累计经营净额 ≤ −180 元）、撞线当晚递话、次日卡出场、卡面一句规矩味警告。
+// ── §21 机制单 task-cheap-unlock-20261104（`c152b37`，店主点子、Orange 定口径）＋ 裁定 `f6a8ebf` §四（v2）：低价档改「绝境解锁」──
+// 单上只允许动四件：闸门（累计经营净额 ≤ CONFIG 那一个数）、撞线当晚递话、次日卡出场、卡面一句规矩味警告。
+// v2 的两处改动都在闸门本身：① 加一道**时间闸**（D3 晚起才跑，D1–D2 不触发＝结构保证）；② 累计支 −180 ⇒ −120。
+// 单日支按 v2 原要在 {0,−20,−40} 挑一档，探针三条通过线栽在 ③（稳线首周被砸穿日压中）⇒ 三档全不过 ⇒ 只落累计支，本函数体里不该有第二条闸。
 // 价格 / 品质 / 带票 / 赊购 / 隔夜这些既有代价一字不动；闸门与递话都不掷随机（池长＝随机流消耗量，动它＝动数值）。
 {
   const cheap = Object.values(SKU_BY_ID).filter(s => s.tier === 3);
@@ -2533,54 +2535,94 @@ for (const seed of [SEED, 7979, 36832]) {
     && lockedRes.every(v => v === false) && openRes.every(v => v === true),
     `锁 ${lockedRes.join('/')} → 开 ${openRes.join('/')}｜streamCounter ${streamBefore === JSON.stringify(q0.streamCounter) ? '未动' : '漂了'}`);
 
-  // 撞线夜 = 递话夜：逐日跑真实账（什么都不买 → 每日只亏固定 75 + 人工 60），第一晚过线那一晚必须翻牌并留话
+  // 撞线夜 = 递话夜：逐日跑真实账（什么都不买 → 每日只亏固定 75 + 人工 60），闸门真正开的那一晚必须翻牌并留话。
+  // v2 之后「过线」和「开门」是两件事：D1 当晚累计就已经压过 −120，但时间闸还闭着 ⇒ 这一格找的是**第一晚两闸同开**，
+  // 而不是「累计由浅转深的那一晚」（那是 v1 的读法，现在永远找不到，因为转深发生在闭门期间）。
   const s = newGame(SEED);
   const trail = [];
-  let tripDay = null, prevSum = 0;
+  let tripDay = null;
   for (let i = 0; i < 5 && !s.EndingId; i++) {
     const r = beginDay(s);
     morningPreEvent(s, r);
     lockTradingDay(s, { priceTier: 'qinmin' });
     morningEvent(s, r, () => null);
     runDay(s, [], () => ({}), r);
-    prevSum = s.NetOpsCents;
     nightSettle(s, r);
-    const crossed = prevSum > CONFIG.cheapUnlockNetOpsCents && s.NetOpsCents <= CONFIG.cheapUnlockNetOpsCents;
+    const fired = s.Day >= CONFIG.cheapUnlockFirstDay && s.NetOpsCents <= CONFIG.cheapUnlockNetOpsCents;
     const ev = eveningDraw(s, r);
     nightClose(s, r, ev, null);
     const said = (s.CommentLog[s.CommentLog.length - 1]?.comments || []).filter(c => c === CHEAP_UNLOCK_CUE).length;
-    if (crossed && tripDay === null) tripDay = { day: s.Day, said, sum: s.NetOpsCents };
+    if (fired && tripDay === null) tripDay = { day: s.Day, said, sum: s.NetOpsCents };
     trail.push(`D${s.Day} 当日 ${(s.today.netOpsCents / 100).toFixed(0)} 累计 ${(s.NetOpsCents / 100).toFixed(0)}${said ? ' 递话' : ''}`);
   }
   const cueTotal = s.CommentLog.reduce((n, d) => n + d.comments.filter(c => c === CHEAP_UNLOCK_CUE).length, 0);
   check('撞线当晚翻牌 + 递话（单上「不许静默上架」）：第 8 步落账当刻判闸，同夜第 12 步那句熟人递话进「今晚的留言」',
     tripDay !== null && tripDay.said === 1 && s.cheapUnlocked === true,
     trail.join(' ｜ ') + `｜过线夜第 ${tripDay?.day} 天留言 ${tripDay?.said} 条`);
+  check('v2 时间闸落在真实账上：这条「什么都不买」的线 D1 累计就已 −135 元压过线，翻牌仍是 D3 晚——D1–D2 不触发是结构不是运气',
+    tripDay !== null && tripDay.day === CONFIG.cheapUnlockFirstDay, `首撞第 ${tripDay?.day} 晚（起检日 ${CONFIG.cheapUnlockFirstDay}）`);
   check('一次解锁、永久保留：跑满 5 天那句递话全场只出现一次，翻过牌之后不再判、也不回头收（门路知道就忘不掉）',
     cueTotal === 1 && cheapUnlockCheck(s) === false && s.cheapUnlocked === true,
     `累计出现 ${cueTotal} 次｜再判返回 false｜位仍 true`);
 
-  // 「升档花钱不算亏，不许误触」：投资账从现金走，一格都不进累计经营净额
+  // 「升档花钱不算亏，不许误触」：投资账从现金走，一格都不进累计经营净额。
+  // v2 之后这道针要先把时间闸打开（Day = 起检日）——否则「闸门不开」有两层原因，钱的那一半根本没被测到。
+  // 累计量也摆在**比线浅 10 元**的位置：这样「不开」只剩一个解释（那 800 元没进这一格），
+  // 而当晚落账（固定 + 人工）把它压过线 ⇒ 翻牌必须在同一晚自然发生，方向（≤）与「投资不算亏」两头都钉住。
   const inv = newGame(SEED); beginDay(inv);
   inv.Cash = 90000;
   const spent = upgradeStall(inv);
   const cashAfterSpend = inv.Cash;
+  inv.Day = CONFIG.cheapUnlockFirstDay;
+  inv.NetOpsCents = CONFIG.cheapUnlockNetOpsCents + 1000;
+  const sumBeforeNight = inv.NetOpsCents;
   const gateAfterSpend = cheapUnlockCheck(inv);
   lockTradingDay(inv, { priceTier: 'qinmin' });
   morningEvent(inv, makeRng(inv), () => null);
   runDay(inv, [], () => ({}), makeRng(inv));
   nightSettle(inv, makeRng(inv));
-  check('升档那一笔不算亏：三轮车 → 二手餐车掏掉 800 元、现金当场只剩 100 元，闸门不开；当晚落账后进这一格的只有固定 + 人工，投资那 800 元一分没进',
+  check('升档那一笔不算亏：起检日当天掏掉 800 元、现金当场只剩 100 元、累计摆在比线浅 10 元处，闸门不开；当晚落账后进这一格的只有固定 + 人工',
     spent === true && cashAfterSpend === 10000 && inv.NetInvestSpent === 80000 && gateAfterSpend === false
-    && inv.NetOpsCents === inv.today.netOpsCents
+    && inv.NetOpsCents === sumBeforeNight + inv.today.netOpsCents
     && inv.today.netOpsCents === -(inv.FixedCost + inv.LaborCost),
-    `掏完剩 ${(cashAfterSpend / 100).toFixed(0)} 元（若读现金早过 −180 那种口径）｜投资账 ${(inv.NetInvestSpent / 100).toFixed(0)} 元`
-    + `｜累计经营净额 ${(inv.NetOpsCents / 100).toFixed(0)} 元（= 固定 ${(inv.FixedCost / 100).toFixed(0)} + 人工 ${(inv.LaborCost / 100).toFixed(0)}）`);
+    `掏完剩 ${(cashAfterSpend / 100).toFixed(0)} 元（若读「当晚现金流出」早过 −120 那种口径）｜投资账 ${(inv.NetInvestSpent / 100).toFixed(0)} 元`
+    + `｜累计 ${(sumBeforeNight / 100).toFixed(0)} → ${(inv.NetOpsCents / 100).toFixed(0)} 元（当晚固定 ${(inv.FixedCost / 100).toFixed(0)} + 人工 ${(inv.LaborCost / 100).toFixed(0)}）`);
+  check('同一条线上「浅 10 元 + 一晚日常支出」自然撞线：第 8 步落账后翻牌、不静默（阈值的比较方向 ≤ 也靠这一格钉住）',
+    inv.cheapUnlocked === true && inv.today.forcedComments.includes(CHEAP_UNLOCK_CUE),
+    `落账后累计 ${(inv.NetOpsCents / 100).toFixed(0)} 元｜位 ${inv.cheapUnlocked}`);
   // 顺带钉住一条口径外溢：升档把 FixedCost 从 75 抬到 135，这一格是真的，所以「先升档再卖不动」的玩家会因此撞线——
   // 单上排除的是那 800 元本金，不是抬上去的日常固定支出。这条写进 §六十四 回报，不改口径。
-  check('升档抬高的固定支出算经营亏损（不算投资本金）：tier 2 的 FixedCost 135 元逐日进这一格',
-    inv.FixedCost === TIERS_STALL[1].fixedCost && inv.NetOpsCents <= -13500,
-    `FixedCost ${(inv.FixedCost / 100).toFixed(0)} 元｜单晚落账后 ${(inv.NetOpsCents / 100).toFixed(0)} 元`);
+  check('升档抬高的固定支出算经营亏损（不算投资本金）：tier 2 的 FixedCost 135 元逐日进当晚这一格',
+    inv.FixedCost === TIERS_STALL[1].fixedCost && inv.today.netOpsCents <= -13500,
+    `FixedCost ${(inv.FixedCost / 100).toFixed(0)} 元｜单晚落账 ${(inv.today.netOpsCents / 100).toFixed(0)} 元`);
+
+  // v2 的两根新针：① 时间闸是纯结构（累计压过线多少都不算，Day<起检日恒 false）；② 单日支不落 ⇒ 函数体里只该有一条钱闸。
+  const gate = day => { const g = newGame(SEED); beginDay(g); g.Day = day; g.NetOpsCents = -999900; return cheapUnlockCheck(g); };
+  check('D1–D2 不触发＝结构保证（裁定 §四 v2）：累计摆到 −9999 元这么深，起检日之前问三遍都不开门；起检日当晚立刻开',
+    gate(1) === false && gate(2) === false && gate(CONFIG.cheapUnlockFirstDay) === true,
+    `D1 false｜D2 false｜D${CONFIG.cheapUnlockFirstDay} true（CONFIG.cheapUnlockFirstDay = ${CONFIG.cheapUnlockFirstDay}）`);
+  const mkSrc = readFileSync(join(HERE, 'src/engine/market.js'), 'utf8');
+  const fnBody = (mkSrc.match(/export function cheapUnlockCheck\(state\) \{[\s\S]*?\n\}/) || [''])[0];
+  const dailyLeak = ['netOpsCents', 'writeoffCents', 'relOf', '单日'].filter(t => fnBody.includes(t));
+  check('单日支不落（三档全不过 ⇒ 只落累计支）：cheapUnlockCheck 体内零当日字段、只有累计那一支，读代码的人不会去找第二条闸',
+    fnBody.length > 0 && dailyLeak.length === 0 && fnBody.includes('NetOpsCents')
+    && fnBody.includes('CONFIG.cheapUnlockNetOpsCents') && fnBody.includes('CONFIG.cheapUnlockFirstDay'),
+    dailyLeak.length ? `残留 [${dailyLeak.join(' ')}]` : `函数体 ${fnBody.length} 字｜两条闸：时间 + 累计`);
+  check('两个数都从 CONFIG 读，代码里不写死：−120 与起检 D3 各只有一份（改了常量针就红，不许哪天界面和引擎各认一个数）',
+    CONFIG.cheapUnlockNetOpsCents === -12000 && CONFIG.cheapUnlockFirstDay === 3
+    && !/-12000|-18000/.test(fnBody),
+    `累计 ${CONFIG.cheapUnlockNetOpsCents / 100} 元｜起检 D${CONFIG.cheapUnlockFirstDay}`);
+  // 裁定通过线里「稳线 mid/ref3 首周不误触」这一条，跑表只验得动 mid：ref3 是 tier 3 的便宜线，
+  // sim.js:157 那条夹具（`if (strategy.tier === 3) state.cheapUnlocked = true`）本来就把门焊开着，
+  // 拿它测「不解锁」测的是夹具不是闸门（§六十五.5 判丁关单钉的就是这一条）。ref3 的首周不误触由探针对着累计量摊分布（60 天 never）。
+  const steadyWeek = [];
+  for (const seed of [20261031, 7979, 12345, 4242, 90210]) {
+    const run = simulate(seed, 7, STRATEGIES.mid, 'headless', { labor: true, competition: true, eventScope: 'full' });
+    steadyWeek.push({ seed, cum: run.state.NetOpsCents / 100, unlocked: run.state.cheapUnlocked });
+  }
+  check('稳线首周不误触（跑表验得动的那条）：mid × 五种子 × 7 天全口径，累计经营净额一条都不压线、cheapUnlocked 五局全 false',
+    steadyWeek.every(x => x.unlocked === false) && steadyWeek.every(x => x.cum > CONFIG.cheapUnlockNetOpsCents / 100),
+    steadyWeek.map(x => `s${x.seed} 累计 ${x.cum.toFixed(0)} 元/${x.unlocked ? '开' : '锁'}`).join('｜'));
 
   // 口径只有一处：全仓写 state.NetOpsCents 的地方只有第 8 步那一格与存档迁移
   const srcRoot = join(HERE, 'src');
@@ -2859,37 +2901,49 @@ for (const seed of [SEED, 7979, 36832]) {
 
 // ── §24 文案批 content-batch-text-20261104 + 回声包 content-batch-echo-20261104（店主 2026-11-04 批）──
 // 单上的回归针只点名三样（新 id 在场 / REGULAR_LINES 长度 5 / 留言池计数），其余几根是把「不许越过的线」钉住：
-// 效果量级不超带、坏事压力后置、Orange 的原句逐字在场、回声三条的映射只读现成字段（不新造计数器）、
-// 以及被扣住的 evt_d_052 不许被人悄悄补进池子（扣住的理由与三条备选写在 delta §七十一）。
+// 效果量级不超带、坏事压力后置、Orange 的原句逐字在场、回声三条的映射只读现成字段（不新造计数器）。
+// evt_d_052 随文案批入池时因「假按钮」退回（理由与三条备选写在 delta §七十一），`f6a8ebf` §一按丙改写后落地 ⇒ 本节的 052 针
+// 从「确实不在池里」翻成「丙案逐字在场、价格 op 一律不许回来」。
 {
   const EV = id => EVENT_BY_ID[id];
   const SIX = ['evt_d_041', 'evt_d_042', 'evt_d_043', 'evt_d_044', 'evt_d_045', 'evt_d_046'];
-  const ECHO = ['evt_d_051', 'evt_d_053'];
-  const ALL8 = SIX.concat(ECHO);
+  const ECHO = ['evt_d_051', 'evt_d_052', 'evt_d_053'];
+  const ALL9 = SIX.concat(ECHO);
   const opsOf = e => (e.actions || []).flatMap(a => a.open || []).concat(e.open || []);
   const hidOf = e => (e.actions || []).flatMap(a => a.hidden || []).concat(e.effect_hidden || []);
 
-  // 1) 八行齐备、落点合法（pool 只有 daily、timing 只有三条既有子流、ship 标 M2、motion 照文件头规则）
-  check('文案批 +6 与回声 +2 逐 id 在场，八行全 pool:daily / ship:M2 / timing 落在三条既有子流上（不新增子流）',
-    ALL8.every(id => !!EV(id)) && ALL8.every(id => {
+  // 1) 九行齐备、落点合法（pool 只有 daily、timing 只有三条既有子流、ship 标 M2、motion 照文件头规则）
+  check('文案批 +6 与回声 +3 逐 id 在场，九行全 pool:daily / ship:M2 / timing 落在三条既有子流上（不新增子流）',
+    ALL9.every(id => !!EV(id)) && ALL9.every(id => {
       const e = EV(id);
       return e.pool === 'daily' && e.ship === 'M2' && ['morning_pre', 'morning', 'evening'].includes(e.timing)
         && SUBSTREAMS.includes(`event_${e.timing}`)
         && ['坏事', '好事', '中性'].includes(e.kind) && !!e.motion && !!e.text;
     }),
-    ALL8.map(id => `${id}=${EV(id).timing}/${EV(id).kind}/w${EV(id).weight}/cd${EV(id).cooldown}`).join('　'));
-  check('被扣住的 evt_d_052（老李减量）确实不在池里——它的 priceMultToday 落不到 timing:morning（采购窗口第 3 步提交即关）',
-    !EV('evt_d_052') && !EVENTS.some(e => e.id === 'evt_d_052') && EVENTS.length === 26,
-    `池子 ${EVENTS.length} 条（8 行入 7 行，052 退回 Orange）`);
+    ALL9.map(id => `${id}=${EV(id).timing}/${EV(id).kind}/w${EV(id).weight}/cd${EV(id).cooldown}`).join('　'));
+  const O52 = EV('evt_d_052');
+  check('evt_d_052 按丙在场（`f6a8ebf` §一）：timing 仍是 morning 带两颗按钮，价格 op 一个不许留——「少拿点」的 −5% 就此作废，明记',
+    !!O52 && O52.timing === 'morning' && O52.actions.length === 2
+    && opsOf(O52).every(o => o.priceMultToday === undefined)
+    && !JSON.stringify(O52).includes('priceMultToday')
+    && EVENTS.some(e => e.id === 'evt_d_052') && EVENTS.length === 27,
+    `按钮 ${O52 ? O52.actions.map(a => a.label).join('/') : '无'}｜op ${O52 ? JSON.stringify(opsOf(O52)) : '—'}`);
+  check('052 两颗按钮的文案与账逐字照裁定：少拿点＝forcedComment『新菜又推了推』＋hidden Rep+1；照常拿＝forcedComment「成，是个过日子的」且无 hidden',
+    O52.actions[0].label === '少拿点' && O52.actions[0].open[0].forcedComment
+      === '老李把新菜往你这边又推了推：『少拿点好，菜这东西，新鲜才值钱。』'
+    && JSON.stringify(O52.actions[0].hidden) === '[{"Rep":1}]'
+    && O52.actions[1].label === '照常拿' && O52.actions[1].open[0].forcedComment === '老李把担子一挑：「成，是个过日子的。」'
+    && O52.actions[1].hidden.length === 0,
+    `hidden ${JSON.stringify(O52.actions.map(a => a.hidden))}`);
 
   // 2) 效果量级不超带（总口径：现金 −5…−260｜Rep ±1…5｜Risk +4…8｜客流乘数 0.85–1.25）
-  const cashOps = ALL8.flatMap(id => opsOf(EV(id))).filter(o => o.cash !== undefined);
-  const repOps = ALL8.flatMap(id => hidOf(EV(id))).filter(o => o.Rep !== undefined);
-  const riskOps = ALL8.flatMap(id => hidOf(EV(id))).filter(o => o.Risk !== undefined);
-  const mults = ALL8.flatMap(id => opsOf(EV(id)))
+  const cashOps = ALL9.flatMap(id => opsOf(EV(id))).filter(o => o.cash !== undefined);
+  const repOps = ALL9.flatMap(id => hidOf(EV(id))).filter(o => o.Rep !== undefined);
+  const riskOps = ALL9.flatMap(id => hidOf(EV(id))).filter(o => o.Risk !== undefined);
+  const mults = ALL9.flatMap(id => opsOf(EV(id)))
     .map(o => o.nextDayTrafficMult ?? o.eventDemandMult ?? (o.priceMultToday ? o.priceMultToday.mult : undefined))
     .filter(x => x !== undefined);
-  check('八行效果全在总口径带内：现金 −12…−5｜Rep +1…+2｜Risk +4｜乘数 0.90–1.25（客流乘数带 0.85–1.25 之内）',
+  check('九行效果全在总口径带内：现金 −12…−5｜Rep +1…+2｜Risk +4｜乘数 0.90–1.25（客流乘数带 0.85–1.25 之内）',
     cashOps.every(o => o.cash <= 0 && Math.abs(o.cash) <= 26000 && Math.abs(o.cash) >= 500)
     && repOps.every(o => Math.abs(o.Rep) >= 1 && Math.abs(o.Rep) <= 5)
     && riskOps.every(o => o.Risk >= 4 && o.Risk <= 8)
@@ -2897,10 +2951,10 @@ for (const seed of [SEED, 7979, 36832]) {
     `现金 ${cashOps.map(o => o.cash).join('/')}｜Rep ${repOps.map(o => o.Rep).join('/')}｜Risk ${riskOps.map(o => o.Risk).join('/')}｜乘数 ${mults.join('/')}`);
   check('压力后置照旧：本批唯一的坏事 046 钉在 Day>=3；回声 053 的 Day>=3 由别名结构自带（不足两格日报恒 false ⇒ 第 3 天才可能成立）',
     EV('evt_d_046').condition === 'Day>=3' && EV('evt_d_046').kind === '坏事'
-    && ALL8.filter(id => EV(id).kind === '坏事').every(id => EV(id).condition.includes('Day>=') || id === 'evt_d_053'),
+    && ALL9.filter(id => EV(id).kind === '坏事').every(id => EV(id).condition.includes('Day>=') || id === 'evt_d_053'),
     `046「${EV('evt_d_046').condition}」｜053「${EV('evt_d_053').condition}」`);
 
-  // 3) 回声映射只读现成字段：Orange 的三个拟名里，两个直接落在已有状态/日报上，一个都不许新造计数器
+  // 3) 回声映射只读现成字段：Orange 的三个拟名都落在已结算的日报/状态上，一个计数器都不许新造
   const srcRoot = join(HERE, 'src');
   const srcFiles = [];
   (function walk(d) {
@@ -2910,13 +2964,16 @@ for (const seed of [SEED, 7979, 36832]) {
     }
   })(srcRoot);
   const grepAll = re => srcFiles.filter(f => re.test(readFileSync(f, 'utf8'))).map(f => f.slice(srcRoot.length + 1).replace(/\\/g, '/'));
-  check('回声映射不新造计数器：全仓零处 YesterdayWasteHigh / YesterdayPricePerJin / PrevDayPricePerJin（映射不上的退回，不许硬凑）',
-    grepAll(/YesterdayWasteHigh|YesterdayPricePerJin|PrevDayPricePerJin/).length === 0,
-    `命中文件 ${(grepAll(/YesterdayWasteHigh|YesterdayPricePerJin|PrevDayPricePerJin/).join(' ') || '无')}`);
-  check('051 走已存在的 state.YesterdaySoldOut（第 12 步 nightClose 早已写，一格没新存）；053 走 readVar 新别名，只读 DailyReports 的价',
+  check('回声映射不新造计数器：全仓零处 YesterdayPricePerJin / PrevDayPricePerJin；YesterdayWasteHigh 只活在 dsl 别名与数据行条件里，不是新存的格',
+    grepAll(/YesterdayPricePerJin|PrevDayPricePerJin/).length === 0
+    && grepAll(/YesterdayWasteHigh/).join(' ') === 'data/events.js engine/dsl.js'
+    && !('YesterdayWasteHigh' in newGame(SEED)),
+    `别名命中 ${(grepAll(/YesterdayWasteHigh/).join(' ') || '无')}｜newGame 里有这一格吗 ${'YesterdayWasteHigh' in newGame(SEED)}`);
+  check('051 走已存在的 state.YesterdaySoldOut（第 12 步 nightClose 早已写，一格没新存）；052／053 走 readVar 新别名，只读 DailyReports',
     EV('evt_d_051').condition === 'YesterdaySoldOut' && 'YesterdaySoldOut' in newGame(SEED)
-    && EV('evt_d_053').condition === 'PriceRaisedYesterday' && typeof readVar('PriceRaisedYesterday', newGame(SEED)) === 'boolean',
-    `YesterdaySoldOut 初值 ${JSON.stringify(newGame(SEED).YesterdaySoldOut)}｜别名初值 ${readVar('PriceRaisedYesterday', newGame(SEED))}`);
+    && EV('evt_d_053').condition === 'PriceRaisedYesterday' && typeof readVar('PriceRaisedYesterday', newGame(SEED)) === 'boolean'
+    && EV('evt_d_052').condition === 'YesterdayWasteHigh >= 4000' && readVar('YesterdayWasteHigh', newGame(SEED)) === 0,
+    `YesterdaySoldOut 初值 ${JSON.stringify(newGame(SEED).YesterdaySoldOut)}｜053 初值 ${readVar('PriceRaisedYesterday', newGame(SEED))}｜052 初值 ${readVar('YesterdayWasteHigh', newGame(SEED))}`);
 
   // 4) 别名真值表：日报不足两格恒 false；昨日 > 前日才 true；相等与下调都 false（不能把 undefined 当 0 比）
   const rep = (n, pricePerJin) => ({ day: n, pricePerJin });
@@ -2940,7 +2997,27 @@ for (const seed of [SEED, 7979, 36832]) {
     && !/rng|Math\.random|float\(/.test(aliasBody),
     aliasBody.replace(/\n\s*/g, ' ').slice(0, 80) + '…');
 
-  // 5) DSL 端到端：053 的 condition 走 evalCondition 判得动，051 走同一条读法（别名与状态字段在同一个求值器里）
+  // 4b) 052 的别名真值表：量纲是分、只看最后一格、没有昨日兜底 0（不许拿 undefined 当数去比）
+  const wrep = (n, writeoffCents) => ({ day: n, writeoffCents });
+  const WCASES = [
+    { r: [], want: 0, why: '第 1 天没有昨日' },
+    { r: [wrep(1, 2500)], want: 2500, why: '只看昨日那一格' },
+    { r: [wrep(1, 999900), wrep(2, 1200)], want: 1200, why: '前日那格再大也不算' },
+    { r: [wrep(1, 0)], want: 0, why: '昨日零报损' },
+  ];
+  const wgot = WCASES.map(c => { const s = newGame(SEED); s.DailyReports = c.r; return readVar('YesterdayWasteHigh', s); });
+  check('YesterdayWasteHigh 真值表四格全对（报损这一格是日报现成字段 writeoffCents，量纲分）',
+    wgot.every((g, i) => g === WCASES[i].want),
+    WCASES.map((c, i) => `${c.why}→${wgot[i]}`).join('｜'));
+  const wasteBody = (dslSrc.match(/if \(name === 'YesterdayWasteHigh'\) \{[\s\S]*?\n  \}/) || [''])[0];
+  check('052 的门槛数字留在数据行（4000 分＝40 元），引擎那侧只报数不藏线：别名体里没有比较、没有常量 4000',
+    wasteBody.includes('writeoffCents') && !wasteBody.includes('4000') && !/[<>]=?/.test(wasteBody),
+    wasteBody.replace(/\n\s*/g, ' ').slice(0, 90) + '…');
+  check('自定阈值的标定件在仓里可复跑（40 元是 Yellow 按日报数据定的，回声单第 18 行点名交给谁就报给谁）',
+    statSync(join(HERE, 'probe-evt052-waste.js')).isFile() && /p75|候选阈值/.test(readFileSync(join(HERE, 'probe-evt052-waste.js'), 'utf8')),
+    'probe-evt052-waste.js 在场');
+
+  // 5) DSL 端到端：三条回声的 condition 走同一个 evalCondition 判得动（别名与状态字段在同一个求值器里）
   {
     const s = newGame(SEED);
     s.DailyReports = [rep(1, 15), rep(2, 16)];
@@ -2951,9 +3028,13 @@ for (const seed of [SEED, 7979, 36832]) {
     const sold = evalCondition(EV('evt_d_051').condition, s);
     s.YesterdaySoldOut = false;
     const notSold = evalCondition(EV('evt_d_051').condition, s);
-    check('两条回声的 condition 逐字进 evalCondition 判得动：涨价真→053 成立、降价→不成立；售罄真→051 成立、假→不成立',
-      up === true && down === false && sold === true && notSold === false,
-      `053 涨/跌 ${up}/${down}｜051 售罄/未售罄 ${sold}/${notSold}`);
+    s.DailyReports = [wrep(1, 4100)];
+    const wasteOn = evalCondition(EV('evt_d_052').condition, s);
+    s.DailyReports = [wrep(1, 3990)];
+    const wasteOff = evalCondition(EV('evt_d_052').condition, s);
+    check('三条回声的 condition 逐字进 evalCondition 判得动：涨价真→053 成立、降价→不成立；售罄真→051 成立、假→不成立；昨日报损 41 元→052 成立、39.9 元→不成立',
+      up === true && down === false && sold === true && notSold === false && wasteOn === true && wasteOff === false,
+      `053 涨/跌 ${up}/${down}｜051 售罄/未 ${sold}/${notSold}｜052 41元/39.9元 ${wasteOn}/${wasteOff}`);
   }
 
   // 6) 常客线收尾：c01–c03 各 5 句（前 3 句旧稿逐字不动、后 2 句照 Orange 稿），c04 按已签额度继续留空
@@ -3152,64 +3233,77 @@ for (const seed of [SEED, 7979, 36832]) {
     missing.length === 0 && used.length === 7, `类 [${used.join(' ')}]｜缺 [${missing.join(' ') || '无'}]`);
 }
 
-// ── §26 瘦身单 task-morning-trim-20261104（Orange `cd9b91d`，店主 2026-11-04 点选）：今晨结转收编 + 天气说人话 ──
-// 范围就两件：① 出摊页「今晨结转」整卡撤销（现金／欠着与顶栏重复 → 删；明日预报并入天气卡；乘数消失）＋
-// 昨日结算收成一行入口「昨日结转 ▸」（行内不带数字摘要）；② 天气卡加至多两句人话，乘数与系数永不进界面。
+// ── §26 瘦身单 task-morning-trim-20261104（Orange `cd9b91d`，店主 2026-11-04 点选）＋ 裁定汇总 f6a8ebf §三：今晨结转收编 + 天气说人话 ──
+// 范围三件：① 出摊页「今晨结转」整卡撤销（现金／欠着与顶栏重复 → 删；明日预报并入天气卡；乘数消失）＋
+// 昨日结算收成一行入口「昨日结转 ▸」（行内不带数字摘要）；② 天气卡加至多两句人话，乘数与系数永不进界面；
+// ③ 裁定 §三 改的词句表两处：汤底片段骑进品类句顶替负片段（原第 7 格「汤底」撤掉，表 7 行 ⇒ 6 行）、
+// 假期身份句在场时压掉泛化客流句让品类进格（考试周不压）；外加 boot 教学屏那三个乘数一并改人话（§三.4）。
+// 账本日报（§三.3）接受现状，本批不动存档结构，没有针要加。
 // 街面价签与柜里还剩本单不动（店主未批搬家）——下面用源码针把这两块钉在原位。
 {
-  // 1) 工单示例逐字复现（优先级排错就拼不出这句）
+  // 1) 裁定汇总 `f6a8ebf` §三.1 的字面示例逐字复现：汤底片段在品类句**内**顶替品类负片段，
+  // 雨天平稳读作「粉面卖得俏，汤底走得快。」——是一句的两半，不是并列的第三句（排错就拼不出这句）。
   const say = (w, d, ramp = 0) => weatherTalk(scenarioOf(w, d), { RampDays: ramp }).join('');
-  check('工单示例逐字复现：雨天 + 平稳期 ⇒「今儿人少些。粉面卖得俏，青菜容易剩。」（这条把优先级钉死：品类在汤底之上）',
-    say('rain', 10) === '今儿人少些。粉面卖得俏，青菜容易剩。', say('rain', 10));
+  check('裁定 §三.1 逐字复现：雨天 + 平稳期 ⇒「今儿人少些。粉面卖得俏，汤底走得快。」（汤底顶替品类负片段）',
+    say('rain', 10) === '今儿人少些。粉面卖得俏，汤底走得快。', say('rain', 10));
 
-  // 2) 验收点名的四种典型组合（雨天 / 考试周 / 假期 / 开学周）逐句对
+  // 2) §三.2 的字面示例：假期身份句在场时压掉泛化客流句，那一格让品类进来（假期四档同 0.8，负片段被汤底顶掉后独占）。
+  //    考试周那一格不动（它的客流是 ×1.15 高，与身份句不冗余）——两句都逐字钉住，防止哪天把压制改成「所有身份句」。
   const CASES = [
-    ['rain｜平稳期', '今儿人少些。粉面卖得俏，青菜容易剩。'],
-    ['sunny｜考试周', '考试周，学生吃得少些，备料悠着点。今儿人多。'],
-    ['sunny｜假期', '放假了，学校空了大半。今儿人少些。'],
-    ['sunny｜开学周·爬坡中', '开业头几天，还没人知道你。今儿人多。'],
-    ['sunny｜平稳期（无信号）', ''],
-    ['heat｜平稳期（青菜与豆制品同值 1.2，取声明顺序第一个）', '青菜卖得俏。'],
-    ['rain｜考试周（汤底被两格挤掉）', '考试周，学生吃得少些，备料悠着点。粉面卖得俏，青菜容易剩。'],
+    ['rain｜平稳期（§三.1 示例）', 'rain', 10, 0, '今儿人少些。粉面卖得俏，汤底走得快。'],
+    ['rain｜开学周（客流高仍与品类并列两句）', 'rain', 3, 0, '今儿人多。粉面卖得俏，汤底走得快。'],
+    ['rain｜考试周（§三.2「不动」）', 'rain', 20, 0, '考试周，学生吃得少些，备料悠着点。粉面卖得俏，汤底走得快。'],
+    ['rain｜假期（§三.2 压客流句，汤底独占品类格）', 'rain', 25, 0, '放假了，学校空了大半。汤底走得快。'],
+    ['sunny｜假期（五档同值 0.8 ⇒ 点名声明顺序第一个 MB）', 'sunny', 25, 0, '放假了，学校空了大半。丸子容易剩。'],
+    ['sunny｜平稳期（无信号）', 'sunny', 10, 0, ''],
+    ['heat｜平稳期（青菜与豆制品同值 1.2，取声明顺序第一个）', 'heat', 10, 0, '青菜卖得俏。'],
+    ['sunny｜开学周·爬坡中（身份句在场，§三.2 只压假期不压爬坡）', 'sunny', 3, 3, '开业头几天，还没人知道你。今儿人多。'],
   ];
-  const wantCase = [
-    ['rain', 10, 0], ['sunny', 20, 0], ['sunny', 25, 0], ['sunny', 3, 3], ['sunny', 10, 0], ['heat', 10, 0], ['rain', 20, 0],
-  ];
-  const badCase = CASES.map((c, i) => {
-    const [w, d, r] = wantCase[i];
+  const badCase = CASES.map(([name, w, d, r, want]) => {
     const got = say(w, d, r);
-    return got === c[1] ? null : `${c[0]}：得到「${got}」期望「${c[1]}」`;
+    return got === want ? null : `${name}：得到「${got}」期望「${want}」`;
   }).filter(Boolean);
-  check('四种典型组合 + 无信号日 + 同值并列 + 汤底被挤掉，七格逐字对上', badCase.length === 0, badCase.join(' / ') || '七格全对');
+  check('八格逐字对上：雨天四校历段 + 假期两型 + 无信号日 + 同值并列 + 爬坡中', badCase.length === 0, badCase.join(' / ') || '八格全对');
 
-  // 3) 组句规则：上限两句（全表扫）；品类「一正一负」是一句；汤底句挤进两格时舍品类负句
-  let over = 0, digit = 0, soupShown = 0;
+  // 3) 组句规则：上限两句（全表扫）；品类「一正一负」是一句，汤顶替的是那句里的负片段。
+  let over = 0, digit = 0, soupRamp0 = 0, rainRamp0 = 0, soupRampOn = 0, rainRampOn = 0;
   for (const w of ['sunny', 'cloudy', 'rain', 'heat']) for (const d of [3, 10, 20, 25]) for (const r of [0, 3]) {
     const t = weatherTalk(scenarioOf(w, d), { RampDays: r });
     if (t.length > 2) over++;
     if (t.some(x => /\d|×/.test(x))) digit++;
-    if (t.some(x => x.includes('汤底走得快'))) soupShown++;
+    const soup = t.some(x => x.includes('汤底走得快'));
+    if (w === 'rain') { if (r === 0) { rainRamp0++; soupRamp0 += soup ? 1 : 0; } else { rainRampOn++; soupRampOn += soup ? 1 : 0; } }
   }
   check('32 格组合（四天气 × 四校历段 × 爬坡两态）全守 ≤2 句、零数字零乘数', over === 0 && digit === 0,
     `超句 ${over}｜露数 ${digit}`);
-  // 汤底句在现行系数表下不可达：雨天四个校历段总有两句更高优先级的话占满两格——这条把「不可达」本身钉住，
-  // 谁改了表序或阈值就该红着重判，不许悄悄把它当活句验收（工单那句「外加汤底句时舍品类负句」因此只能用合成态验）。
-  check('登记不可达：现表四天气 × 四校历 × 爬坡两态里没有一格吐得出汤底句（雨天必被身份／客流／品类占满两格）',
-    soupShown === 0, '32 格零出场');
-  // 舍负句规则用合成 scenario 验：同一组品类系数，只把 T 从 1.0 抬到 1.4
-  const mk = T => ({ trafficTotal: 1.0, avgJin: 1.0, T, catCoef: { MB: 1, MT: 1, VG: 0.8, BF: 1, NS: 1.4 } });
-  const noSoup = weatherTalk(mk(1.0), { RampDays: 0 }), withSoup = weatherTalk(mk(1.4), { RampDays: 0 });
-  check('汤底句在场时舍品类负句（工单组句规则末句）：同一组系数 T=1.0 ⇒ 一句「粉面卖得俏，青菜容易剩。」；T=1.4 ⇒「粉面卖得俏。」＋汤底句，负的那半消失',
-    noSoup.join('') === '粉面卖得俏，青菜容易剩。' && noSoup.length === 1
-    && withSoup.join('') === '粉面卖得俏。汤底走得快，多备两份。' && withSoup.length === 2,
-    `T1.0 ${noSoup.length} 句｜T1.4 ${withSoup.length} 句`);
+  // 4) 原「32 格零出场」那根针按 §三.1 翻成正向验收：雨天四格（四个校历段、无爬坡）4/4 必出汤底句。
+  // 可达性一翻类就该红：谁改了表序、阈值或系数表，这条先响，再重判，不许悄悄退回「空转」。
+  check('雨天 + 四校历段（无爬坡）4 格全出汤底句（`f6a8ebf` §三.1 把「不可达」翻成「必出」）',
+    rainRamp0 === 4 && soupRamp0 === 4, `${soupRamp0}/${rainRamp0} 格出句`);
+  // 5) 残留待裁（不自裁扩大压制，登记在 delta）：§三.2 只点名「假期压掉泛化客流句」，爬坡那三天（开业头三天／升档后头三天）
+  // 的身份句同样占格 ⇒ 雨天爬坡格还是被身份＋客流占满两句、汤底句落不了地。四格实测钉住这个数，改与不改都要它先响。
+  check('登记待裁：雨天 + 爬坡中四格仍不出汤底句（身份句与客流句占满两格）——裁定没点爬坡这一格，甲乙已回报 Orange',
+    rainRampOn === 4 && soupRampOn === 0, `${soupRampOn}/${rainRampOn} 格出句`);
+  // 顶替负片段用合成 scenario 验「只有负片段」那一型：同一组品类系数，只把 T 从 1.0 抬到 1.4。
+  // 真表里凑不出这一型（雨天假期是「五档同值」，正片段也没有），所以负片段被顶掉后整格只剩汤底半句。
+  const mk = (T, hi) => ({ trafficTotal: 1.0, avgJin: 1.0, T, catCoef: { MB: 1, MT: 1, VG: 0.8, BF: 1, NS: hi ? 1.4 : 1 } });
+  const pair = weatherTalk(mk(1.0, true), { RampDays: 0 });
+  const swap = weatherTalk(mk(1.4, true), { RampDays: 0 });
+  const solo = weatherTalk(mk(1.4, false), { RampDays: 0 });
+  check('顶替发生在品类句内部：T=1.0 ⇒「粉面卖得俏，青菜容易剩。」；T=1.4 ⇒「粉面卖得俏，汤底走得快。」——两句都还是一句，负的那半消失',
+    pair.join('') === '粉面卖得俏，青菜容易剩。' && pair.length === 1
+    && swap.join('') === '粉面卖得俏，汤底走得快。' && swap.length === 1,
+    `T1.0 ${pair.length} 句「${pair.join('')}」｜T1.4 ${swap.length} 句「${swap.join('')}」`);
+  check('无正片段时汤底独占品类格（雨天假期那一型）：合成态「青菜容易剩。」被顶成「汤底走得快。」',
+    solo.join('') === '汤底走得快。' && solo.length === 1, `「${solo.join('')}」`);
   check('品类位取现成名（CAT[].name），阈值取工单那两个数：≥1.2 算俏、≤0.8 算剩（浮点卡线的那格靠 1e-9 过线）',
     catDeviation(scenarioOf('rain', 10)).lo.cat === 'VG' && catDeviation(scenarioOf('rain', 10)).hi.cat === 'NS'
-    && WEATHER_TALK.length === 7 && ['身份', '身份', '身份', '客流', '客流', '品类', '汤底'].join() === WEATHER_TALK.map(r => r.kind).join(),
-    `雨天平稳取到 ${catDeviation(scenarioOf('rain', 10)).hi.cat} 正 / ${catDeviation(scenarioOf('rain', 10)).lo.cat} 负`);
+    && WEATHER_TALK.length === 6 && ['身份', '身份', '身份', '客流', '客流', '品类'].join() === WEATHER_TALK.map(r => r.kind).join(),
+    `雨天平稳取到 ${catDeviation(scenarioOf('rain', 10)).hi.cat} 正 / ${catDeviation(scenarioOf('rain', 10)).lo.cat} 负｜表 ${WEATHER_TALK.length} 行`);
 
   // 4) 出摊页瘦身：main.js 在浏览器模块顶层读 localStorage，Node 里 import 不了 → 照 §16 开场动画那节的先例走静态源码断言
   const mSrc = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const scenSrc = readFileSync(join(HERE, 'src/data/scenario.js'), 'utf8');
   const morningBody = (mSrc.match(/\n  morning\(\) \{[\s\S]*?\n  \},/) || [''])[0];
   const gone = ['state.Cash', 'state.DebtSupplier', 'state.CreditCap', 'rampCoef', '×', '今晨结转', 'grid2', 's-people', 's-debt']
     .filter(t => morningBody.includes(t));
@@ -3226,6 +3320,15 @@ for (const seed of [SEED, 7979, 36832]) {
     && (mSrc.match(/state\.today\.forecast/g) || []).length === 1, '标签 + 明日一行同卡');
   check('本单不许搬家的两块仍在原位：街面价签与柜里还剩逐字留在 morning() 里（店主未批）',
     morningBody.includes('${streetPanel()}') && morningBody.includes('柜里还剩'), '两块都还在出摊页');
+  // 裁定 §三.4：教学屏那三个乘数一并改人话（与天气词句同语域）。开机画面是 boot()，它不在 morning() 体内，
+  // 所以上面那根「零乘数」针刺不到它——这里单独把 boot() 钉住：整个函数体里不许再出现 × 或那三个数。
+  const bootBody = (mSrc.match(/\n  boot\(\) \{[\s\S]*?\n  \},/) || [''])[0];
+  const bootLeak = ['×', '0.4', '0.6', '0.8', '客流 ×'].filter(t => bootBody.includes(t));
+  check('裁定 §三.4：boot 教学屏改人话——函数体内零乘号零那三个系数，「前 3 天没人气」换成与天气句同语域的一说',
+    bootBody.length > 0 && bootLeak.length === 0 && bootBody.includes('新摊子头三天没人认得你，一天比一天有人来，第四天才算站稳。'),
+    bootLeak.length ? `残留 [${bootLeak.join(' ')}]` : `boot() ${bootBody.length} 字，露数 0 项`);
+  check('priceMods 的市场注记按裁定保留（本来就是人话，不进改人话清单）：两条注记逐字在 scenario.js 里，句内零乘号零系数',
+    /note: '雨天晨采青菜涨价'/.test(scenSrc) && /note: '开学周全线小涨'/.test(scenSrc), '两条注记原样在场');
   // 5) 词句模块只读：不 import 引擎、不写状态、不落盘
   const talkSrc = readFileSync(join(HERE, 'src/data/weather-talk.js'), 'utf8');
   const talkCode = talkSrc.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ');
