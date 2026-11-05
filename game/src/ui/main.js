@@ -380,7 +380,7 @@ function setQty(el, normalize) {
 // 实测反馈 #8：打字时试算区与汇总条都要跟着动。只换这两个容器的内容，不碰输入框所在的面板；
 // 预检必修④：内容没变就不动 DOM——首击落在汇总条上时，输入框失焦会触发 change，
 // 整块重绘会把按钮从光标底下换掉，点击就丢了（表现为「缩量按钮首击无反应」）
-// 修复单 P2-2：内容真的变了还是会被换掉。改数字后第一下点「就照这一篮买」，顺序是
+// 修复单 P2-2：内容真的变了还是会被换掉。改数字后第一下点「就这一篮，付钱」，顺序是
 // pointerdown → mousedown → 输入框 blur（这里触发 change→重绘，按下的节点被摘走）→ mouseup → pointerup → click：
 // mousedown 落在一个已经离开文档树的节点上，浏览器就不再补 click，首击于是凭空消失，二击才执行（不重复扣款）。
 // 按住 [data-act] 期间不重绘，抬手后补一次；click 已经跑完就顺带被换屏覆盖，不留旧账。
@@ -528,7 +528,7 @@ function defaultDraft() {
 }
 
 // 二审复 §二.3：付不齐时给一个**由玩家点**的「按购买力缩量」——把草稿篮按等比缩到刚好可提交，
-// 缩完仍停在草稿里，玩家还能再改，改完必须自己点「就照这一篮买」。正本禁的是「系统自动减量成交」，
+// 缩完仍停在草稿里，玩家还能再改，改完必须自己点「就这一篮，付钱」。正本禁的是「系统自动减量成交」，
 // 这里一分子钱都没进账，所以不破 canon。
 // 预检必修④：与 harness 的 chooseBasket 同源——全部品类乘同一个系数（保住碗数构成），
 // 固体落 0.1 斤、汤底落整份，取整后再逐行让一步直到付得起；不让「最贵那行几乎不动、别家压到见底」。
@@ -976,7 +976,7 @@ const VIEWS = {
       ${streetPanel()}
       <div class="panel warn"><h3>${icon('s-stock')}柜里还剩</h3>
         <div class="row">${ALL_CATS.map(c => `<span class="muted">${CAT[c].name}<br><b class="chip num">${(c === 'SP' ? state.StockSoup : state.StockSolid[c]).toFixed(2)}</b>${c === 'SP' ? ' 份' : ' 斤'}</span>`).join('')}</div>
-        ${state.YesterdaySoldOut ? '<p class="negv">昨天卖断过货。</p>' : ''}</div>
+        ${state.YesterdaySoldOut ? '<p class="negv">昨天卖断过货。今天这一样多备一手。</p>' : ''}</div>
       ${preEvent ? `<div class="panel good"><h3>晨间情报</h3>
         <img class="inlineart" src="${eventArt(preEvent.id)}" alt="" />
         <p class="text">${esc(preEvent.text)}</p>
@@ -1026,10 +1026,11 @@ const VIEWS = {
         <button class="ghost" data-act="intro">重看开场</button>
       </div>
       <div class="row" style="margin-top:10px">
-        <button class="ghost" data-act="restart">重开一局</button>
+        <button class="ghost" data-act="restart">重摆一个摊</button>
         <button class="ghost" data-act="clear" ${clearArmed ? 'style="border-color:var(--tomato);color:var(--tomato)"' : ''}>${clearArmed ? '确认清除？' : '清除存档'}</button>
       </div>
       ${clearArmed ? '<p class="negv">再点一次就清：这一局的账（浏览器里那份也一起）没了，回到开屏。</p>' : ''}
+      <p class="muted">片头曲：Rubber Nod，作者 ziniyeons，可商用</p>
       <p class="muted credit">Music: “Rubber Nod” by ziniyeons (niftyshelf.com/music/rubber-nod)</p>
     </div>`;
   },
@@ -1055,7 +1056,7 @@ const VIEWS = {
       <p class="muted">早起换"晨采好货必到"：菜农直供与老李的正经货当天不断，免当日 30% 的晨采涨价。</p>
       ${washSkipped ? '<p class="negv">跳过洗切：青菜 / 豆制品菌菇 / 粉面 隔夜报损多两成。</p>' : ''}
       <p class="muted">备菜还决定今天出餐的快慢：认真备得多出几碗，跳过备得少出几碗。</p>
-      ${over ? '<p class="negv">工时不够，这一套备不下来。</p>' : ''}
+      ${over ? '<p class="negv">工时不够，这一套备不下来——先挪一格，或者把早起那格勾掉。</p>' : ''}
       <button class="go" style="margin-top:12px" data-act="prepDone" ${over ? 'disabled' : ''}>备完 · 去定版</button>
     </div>`;
   },
@@ -1094,7 +1095,7 @@ const VIEWS = {
         <p class="muted">「${ADDITIVE[additivePick].pitch}」· 按售出的碗结成本。</p>` : ''}
       ${tasteSwitch()}
       ${scaleSwitch()}
-      <button class="go" style="margin-top:14px" data-act="open">开门营业</button>
+      <button class="go" style="margin-top:14px" data-act="open">掀帘子，开门</button>
     </div>`;
   },
 
@@ -1180,7 +1181,7 @@ const VIEWS = {
       <div class="panel">
       <h2>今晚的留言</h2>
       ${t.comments.length ? t.comments.map(c => `<div class="comment ${c.kind === 'hot' ? 'hot' : ''}">${esc(c.text)}</div>`).join('')
-        : '<p class="muted">今晚没人说话。</p>'}
+        : '<p class="muted">今晚没人说话。摊布明儿还得洗。</p>'}
       ${t.reserveResult ? `<p class="muted">社团那单预订${t.reserveResult.delivered ? '按数出满了。' : '没出满。'}</p>` : ''}
     </div>
       ${t.notes.length ? `<div class="panel"><h3>今晚记下的</h3>
@@ -1209,7 +1210,7 @@ const VIEWS = {
       <div class="row"><h2>进货单</h2><button class="mini ghost" data-nav="back">返回</button></div>
       ${days.length ? days.map(d => `<h3 style="margin-top:10px">第 ${d} 天</h3>
         <div class="lrows">${byDay[d].map(purchaseRow).join('')}</div>`).join('')
-        : '<p class="muted">还没买过东西。</p>'}
+        : '<p class="muted">还没买过东西。头一天的单子都这样，比脸干净。</p>'}
       <hr /><h3>逐日账</h3>
       <div class="lrows">${p.reports.map(dayRow).join('')}</div>
       <p class="muted" style="margin-top:8px">对账：现金 ${y(p.bridge.cash)} · 账面 ${y(p.bridge.bridge)} · 差 ${y(p.bridge.diff)}
@@ -1303,7 +1304,7 @@ function absentCard(cat) {
 // 排版批 L3（task-mobile-layout-batch-20261102 + 例图）：三列窄卡改纵排宽卡——图左、名与大号单价在右、描述随后，
 // 步进器占满卡底一整行（输入框给到两位小数 + 内边距的宽度）。
 // 机制护栏照旧：三家可混买，每张卡留自家步进器，数量 >0 就入篮汇总；红框只是「这一张在用」，不是单选互斥。
-// 卡底那个小计取的是本篮计划里这一行的既有数（plan.lines 的 cost，与「就照这一篮买」扣的钱同源），不另起一套算法。
+// 卡底那个小计取的是本篮计划里这一行的既有数（plan.lines 的 cost，与「就这一篮，付钱」扣的钱同源），不另起一套算法。
 function skuCard(cat, s, forecast) {
   const price = effectivePrice(state, s);
   const q = draft[s.sku] || 0;
@@ -1344,7 +1345,7 @@ function footStrip(f) {
       <span>能出 ${f.capped.toFixed(0)} 碗</span>`;
   }
   return `<span>这一篮 <b>${y(plan.total)}</b> 元 · 付不齐，现钱要出 ${y(plan.cashUsed)}，手上 ${y(Math.max(0, state.Cash))}</span>
-    <button class="mini" data-act="shrink">按手上的钱缩量</button>`;
+    <button class="mini" data-act="shrink">照手上的钱缩一缩</button>`;
 }
 
 // 实测问题 #3：附录 C 的 capped = min(需求侧估计, 这一篮能出)，只印一个数会让玩家以为「今天就只有这么多生意」。
@@ -1378,18 +1379,18 @@ function buyPanel(f) {
   const { plan } = f;
   if (plan.submittable) {
     return `<div class="panel good">
-      <button class="go" data-act="submit">就照这一篮买</button>
+      <button class="go" data-act="submit">就这一篮，付钱</button>
       ${basketSplit(plan)}
       <p class="muted" style="margin-top:6px">现钱够就全走现钱；现钱不够的那一截才自动挂到熟人账上（只走带信用关系的正经货，${y(creditAvailable(state))} 元额度以内）。</p></div>`;
   }
   return `<div class="panel accent">
-    <p class="negv">这一篮付不齐：现钱要出 ${y(plan.cashUsed)}，手上 ${y(Math.max(0, state.Cash))}；可赊 ${y(creditAvailable(state))} 只走熟人正经货（汤底和别家货只收现金）。整篮驳回，不自动减量。</p>
+    <p class="negv">这一篮付不齐：现钱要出 ${y(plan.cashUsed)}，手上 ${y(Math.max(0, state.Cash))}；可赊 ${y(creditAvailable(state))} 只走熟人正经货（汤底和别家货只收现金）。柜里的钱不会自己变多。整篮驳回，不自动减量——点「照手上的钱缩一缩」那一颗。</p>
     ${basketSplit(plan)}
     <div class="row" style="margin-top:8px">
-      <button class="ghost" data-act="shrink">按手上的钱缩量</button>
-      <button class="go" data-act="submit" disabled>就照这一篮买</button>
+      <button class="ghost" data-act="shrink">照手上的钱缩一缩</button>
+      <button class="go" data-act="submit" disabled>就这一篮，付钱</button>
     </div>
-    <p class="muted" style="margin-top:6px">缩量只改草稿里的数字，改完还得你自己点「就照这一篮买」。</p></div>`;
+    <p class="muted" style="margin-top:6px">缩量只改草稿里的数字，改完还得你自己点「就这一篮，付钱」。</p></div>`;
 }
 
 // 真机修复单 f39f692（Orange 20261104）：有一格读不出数（type=number 的 badInput：屏幕上留着字、控件里值是中空），
@@ -1403,7 +1404,7 @@ function badBasketPanel() {
   const who = [...qtyBad].map(k => `「${CAT[SKU_BY_ID[k].cat].name}」`).join('、');
   return `<div class="panel accent">
     <p class="negv">${who} 填的数认不出来：那一格屏幕上还有字，可这个数读不进来。点进红框那一格，清空、重填一遍——认不出来这一篮点不动，也不会撇下它照其余的买。</p>
-    <button class="go" data-act="submit" disabled>就照这一篮买</button></div>`;
+    <button class="go" data-act="submit" disabled>就这一篮，付钱</button></div>`;
 }
 
 function badBasketStrip() {
@@ -1478,7 +1479,7 @@ function tierBlock() {
           ${isNext ? `<p class="muted reason">${closed ? '今天已经收摊，明早开市再升。'
       : state.Cash < nextPrice ? `现金不够，还差 ${(nextPrice - state.Cash) / 100} 元。` : ''}</p>` : ''}
         </div></div>`;
-  }).join('')}${next ? '' : '<p class="muted">这条街两个铺子都是你的了，往上没有档了。</p>'}`;
+  }).join('')}${next ? '' : '<p class="muted">往上没有档了——这条街两个铺子都是你的，你已经是这条街的摊主了。</p>'}`;
 }
 
 // 批 B：设施七件各配一枚小图标（语义照 mockup 10——牌 / 试吃碗 / 展示柜 / 证件墙 / 合同 / 招牌字 / 秤）。
@@ -1563,7 +1564,7 @@ function blanchBlock(o) {
       <button id="bs-${cust}" data-act="bstart" data-cust="${cust}" ${v === undefined ? '' : 'disabled'}>下碗 · 熟度条自己扫</button>
       <button id="bp-${cust}" data-act="bpull" data-cust="${cust}" disabled>夹出</button>
     </div>
-    <p class="muted">绿区里夹出算这一单烫到了，正中间那一线记「最佳+」；早了是夹生，晚了是烫老。不动它就等于没烫，这一只碗只影响眼前这一单。</p>
+    <p class="muted">绿区里夹出算这一单烫到了，正中间那一线记「最佳+」；早了是夹生，晚了是烫老。不夹它就等于没烫，这一只碗只管眼前这一单。</p>
   </div>`;
 }
 

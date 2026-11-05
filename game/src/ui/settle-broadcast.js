@@ -16,7 +16,7 @@ export const BROADCAST_POOL = {
   record: [
     { t: r => `今天流水 ${yuan(r.revenueCents)} 元，把之前最好的一天比下去了。` },
     { t: r => `收了 ${yuan(r.revenueCents)} 元——开张到今天，就今天最多。别飘，明儿照样早起。` },
-    { t: r => `今天这杆秤走了 ${yuan(r.revenueCents)} 元，是这段日子的新数。` },
+    { t: r => `今天进账 ${yuan(r.revenueCents)} 元，是开张以来最多的一天。` },
   ],
   // 有品类卖断（沿用现版那一串卖断名，含汤底那格）
   soldout: [
@@ -28,7 +28,7 @@ export const BROADCAST_POOL = {
   waste: [
     { t: r => `今天报损 ${yuan(r.writeoffCents)} 元。柜里的货不会自己走完。` },
     { t: r => `${yuan(r.writeoffCents)} 元倒掉了——比省下来的那点工时贵。` },
-    { t: r => `报损 ${yuan(r.writeoffCents)} 元，占今天流水的三成还多。备菜那三站，明天挪一挪。` },
+    { t: r => `报损 ${yuan(r.writeoffCents)} 元——今天流水的一大块，倒柜里了。备菜那三站，明天挪一挪。` },
   ],
   // 头三条一条没踩着：平平无奇。句子只报数，不许在亏本的日子说「账没红」。
   flat: [

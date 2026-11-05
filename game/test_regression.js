@@ -3688,11 +3688,89 @@ for (const seed of [SEED, 7979, 36832]) {
       && /#app\.hasTabs \{ padding-bottom: calc\(96px \+ var\(--tab-clear\)\); \}/.test(css),
     '预留 = 96px + 74 + 10 + 10 + 安全区');
 
-  // 13) 第 5 条走「先回报、签后再落」：改动清单正本必须落在仓里，本批一行 UI 文案梗化代码都不许提前上。
-  check('第 5 条：文案梗化改动清单作为待签件在仓（draft-ui-copy-grooming-20261105.md），本批未落任何一处——清单没签就先改＝先斩后奏',
-    statSync(join(HERE, '..', 'draft-ui-copy-grooming-20261105.md')).isFile()
-      && readFileSync(join(HERE, '..', 'draft-ui-copy-grooming-20261105.md'), 'utf8').includes('本批未落码'),
-    '清单件在场');
+  // 13) 第 5 条：裁定 `3f3d868` §一 把整张表签了（1–7 照拟改落、8–11 四条「可改」全批、12 明确不改），
+  //     待签件就此升正本。这一节从「钉未落码」换成「钉已签的字面逐字在场 + 旧字面一处不留」——
+  //     字面针是防着以后有人借再一轮梗化把签过的话悄悄换掉；旧名残留（含注释）也在这把尺下红。
+  const SIGNED_COPY = [
+    '还没买过东西。头一天的单子都这样，比脸干净。',
+    '今晚没人说话。摊布明儿还得洗。',
+    '工时不够，这一套备不下来——先挪一格，或者把早起那格勾掉。',
+    '昨天卖断过货。今天这一样多备一手。',
+    '柜里的钱不会自己变多。整篮驳回，不自动减量——点「照手上的钱缩一缩」那一颗。',
+    '往上没有档了——这条街两个铺子都是你的，你已经是这条街的摊主了。',
+    '重摆一个摊', '掀帘子，开门', '不夹它就等于没烫，这一只碗只管眼前这一单。',
+  ];
+  const copyGone = SIGNED_COPY.filter(s => !mainSrc.includes(s));
+  const KEEP12 = '再点一次就清：这一局的账（浏览器里那份也一起）没了，回到开屏。';
+  const OLD_NAMES = ['按手上的钱缩量', '就照这一篮买', '重开一局', '开门营业', '不动它就等于没烫'];
+  const staleNames = OLD_NAMES.filter(s => mainSrc.includes(s));
+  const shrinkBtns = (mainSrc.match(/data-act="shrink">照手上的钱缩一缩</g) || []).length;
+  const submitBtns = (mainSrc.match(/data-act="submit"(?: disabled)?>就这一篮，付钱</g) || []).length;
+  check('第 5 条（裁定 §一）：签下的九处新字面逐字在场；第 12 条那句实话原样不动；五枚旧字面（含注释）在 main.js 里一处不留',
+    copyGone.length === 0 && mainSrc.includes(KEEP12) && staleNames.length === 0,
+    `缺[${copyGone.join('、') || '无'}]｜旧名残留[${staleNames.join('、') || '无'}]`);
+  // 联动（裁定 §一 最后那条）：红字里引的按钮名必须和第 6 条改后的新名同一个字面，两处不许一新一旧。
+  check('第 5×6 条联动（裁定 §一）：两颗 data-act="shrink" 都是「照手上的钱缩一缩」，付不齐红字里引的也是这一串；三颗 submit 都是「就这一篮，付钱」',
+    shrinkBtns === 2 && submitBtns === 3 && mainSrc.includes('点「照手上的钱缩一缩」那一颗。')
+      && !/点「按手上的钱缩量」/.test(mainSrc),
+    `shrink ${shrinkBtns}/2｜submit ${submitBtns}/3`);
+
+  // 14) 版权行（裁定 §一）：批准在署名行上方加一行中文说明，署名本体一字不动 ⇒ 两句同时逐字钉，且新行必须就在它上面。
+  const CREDIT_TXT = 'Music: “Rubber Nod” by ziniyeons (niftyshelf.com/music/rubber-nod)';
+  const CN_CREDIT = '<p class="muted">片头曲：Rubber Nod，作者 ziniyeons，可商用</p>';
+  const meBody = mainSrc.slice(mainSrc.indexOf('  me() {'), mainSrc.indexOf('  prep() {'));
+  const iCN = meBody.indexOf(CN_CREDIT);
+  check('版权行（裁定 §一）：中文说明行在场且就在署名行上方，署名本体（曲名/作者/站点）逐字未动',
+    iCN >= 0 && meBody.includes(CREDIT_TXT) && iCN < meBody.indexOf(CREDIT_TXT)
+      && (meBody.match(/Rubber Nod/g) || []).length === 2,
+    `说明行 @${iCN}｜署名 ${meBody.includes(CREDIT_TXT) ? '逐字在场' : '被改过'}`);
+
+  // 15) 播报池两句更换（裁定 §三）：秤不走流水（比喻不成立）；三成不进句子（判据一挪句子就成了假话，
+  //     且触发是「≥ 三成」）。被点名的两句连同「成数」这种比例措辞一律不许回来，新句按裁定原文逐字钉。
+  const OLD_SAID = ['这杆秤走了', '三成还多'];
+  const goneSaid = OLD_SAID.filter(s => bcastSrc.includes(s));
+  const NEW_SAID = ['今天进账 ${yuan(r.revenueCents)} 元，是开张以来最多的一天。',
+    '报损 ${yuan(r.writeoffCents)} 元——今天流水的一大块，倒柜里了。备菜那三站，明天挪一挪。'];
+  const missingNew = NEW_SAID.filter(s => !bcastSrc.includes(s));
+  const ChengRE = /[一两三四五]成/;
+  const chengLines = poolFlat.filter(v => ChengRE.test(v.t({ ...sample, soldOutText: '粉面', writeoffCents: 40000 })));
+  check('第 7 条两句更换（裁定 §三）：record 第 3 句与 waste 第 3 句按裁定原文落码；秤走流水与「三成还多」两句零残留；十二句里再没有任何成数措辞（判据挪了句子不能变假话）',
+    goneSaid.length === 0 && missingNew.length === 0 && chengLines.length === 0,
+    `旧句残留[${goneSaid.join('、') || '无'}]｜缺新句[${missingNew.length ? '有' : '无'}]｜带成数 ${chengLines.length}`);
+
+  // 16) `WASTE_SHARE = 0.3` 签的口径（裁定 §三）：只是版面择句判据——只住在这一个模块，不进结算、不进存档、不进引擎。
+  const shareRefs = files.filter(f => /WASTE_SHARE/.test(readFileSync(f, 'utf8'))).map(rel2);
+  check('WASTE_SHARE = 0.3（裁定 §三 签）：引用点只有 settle-broadcast.js 一个文件，src/engine 与 src/data 全盲——它选句子，不参与任何账与判定',
+    shareRefs.join(' ') === 'ui/settle-broadcast.js' && /const WASTE_SHARE = 0\.3;/.test(bcastSrc),
+    `引用[${shareRefs.join(' ') || '无'}]`);
+
+  // 17) 待签件升正本：三件里被签掉与被改掉的都已在代码落定，那张单不许再留「未落码」与被撤的两句——
+  //     留着就是下一次有人照单抄回旧句。「现文」列里的旧按钮名是改动来源记录，不在禁列（旧名在屏上零残留由上一针管）。
+  const draftPath = join(HERE, '..', 'draft-ui-copy-grooming-20261105.md');
+  const draft = readFileSync(draftPath, 'utf8');
+  const draftStale = ['本批未落码', '这杆秤走了', '占今天流水的三成还多'].filter(s => draft.includes(s));
+  check('第 5 条待签件已按裁定 3f3d868 升为落码记录：正本指针指向裁定文件、被撤的两句与「未落码」口径零残留、落码表在位',
+    statSync(draftPath).isFile() && draft.includes('3f3d868') && draft.includes('ruling-batch-h-20261105.md')
+      && draftStale.length === 0 && draft.includes('## 五、落码状态')
+      && draft.includes('今天进账 {revenue} 元，是开张以来最多的一天。')
+      && draft.includes('报损 {writeoff} 元——今天流水的一大块，倒柜里了。备菜那三站，明天挪一挪。'),
+    `残留[${draftStale.join('、') || '无'}]｜指针[${draft.includes('ruling-batch-h-20261105.md') ? '在' : '缺'}]`);
+
+  // 18) 第 3 条关闭（裁定 §五）：现版预留已够，不叠第二层——第 12 节那条针逐字钉着预留量，这里补一句「不许再加」。
+  const hubAt = mainSrc.indexOf('  me() {');
+  const hubSrc = mainSrc.slice(hubAt, mainSrc.indexOf('  prep() {'));
+  check('第 3 条按裁定 §五 关闭：「我的」这一屏没为底部留白加任何补丁（屏内零 padding-bottom / margin-bottom，叠第二层只会把空白推得更长）',
+    !/padding-bottom|margin-bottom/.test(hubSrc), 'hub 屏内零底部留白补丁');
+
+  // 19) 裁定 §四.2 把「按住连加」从首更待加项里划掉，原话是「任何人不得据旧工单删它」。
+  //     第 11 节那把尺只钉屏上那句实话（删了功能、话还留着也可能），所以这里补一根钉代码的：延迟闸与 60→180 克/秒那条加速曲线逐字在场。
+  //     速率两个数是 `signoff-weighing-tuning` 签过的，本批一字未动——针红了就说明有人照旧工单动了现成功能。
+  check('裁定 §四.2：按住连加是现成功能、不是首更待加项——HOLD_DELAY = 150 与 60→180 克/秒加速曲线逐字在场（谁照旧工单「本批不做」删它，这根针先红）',
+    /const HOLD_DELAY = 150;/.test(mainSrc)
+      && /return 60 \+ 120 \* Math\.min\(1, \(held - HOLD_DELAY\) \/ 1000\);/.test(mainSrc)
+      && /const TAP_GRAMS = 5;/.test(mainSrc) && /const FINE_GRAMS = 1;/.test(mainSrc)
+      && /const FINE_GAP = 20;/.test(mainSrc),
+    '按住闸 150ms｜速率 60+120｜分段 +5 / ±1（差 >20 克）');
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
