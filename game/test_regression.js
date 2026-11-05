@@ -29,6 +29,8 @@ import { blanchValueAt, judgeBlanch, signalTier } from './src/engine/blanch.js';
 import { REGULAR_LINES, regularLine, REGULAR_SLOTS } from './src/data/customers.js';
 import { buildComments } from './src/engine/comments.js';
 import { COMMENT_POOLS } from './src/data/comments.js';
+import { WIND_ROWS } from './src/data/wind.js';
+import { windCard, windBandIndex } from './src/ui/wind.js';
 import { morningRivals, priceWarReprice, sharesAndS, tallySuppression, rivalPriceCoef, previewShare } from './src/engine/competition.js';
 import { applyShadow, computeQ } from './src/engine/shadow.js';
 import { makeRng } from './src/engine/rng.js';
@@ -3013,6 +3015,140 @@ for (const seed of [SEED, 7979, 36832]) {
     /pool\[rng\.int\('comment', pool\.length\)\]/.test(readFileSync(join(srcRoot, 'engine/comments.js'), 'utf8'))
     && !/while\s*\(/.test(readFileSync(join(srcRoot, 'engine/comments.js'), 'utf8')),
     `pick = pool[rng.int(...)] 一行式｜comments.js 内零 while`);
+}
+
+// ── §25 版面单 task-wind-panel-20261104（Orange `0902161`，店主 2026-11-04 亲签红线修订）：「摊口风向」 ──
+// 新规矩：暗线档位可以进面板；数字、计数器名、精确涨跌值永远不许进。这张卡是目前唯一获批出口，结算屏与出摊 hub 仍按旧规矩。
+// 单上点名三根针（四行在场 / 档位词只出自本词表 / 卡内无数字字面量），其余几根钉的是「不许越过的线」：
+// 只三档、不显箭头、不显与昨日差值、派生只读（不落盘、不新增计数器、SAVE_VERSION 不动 ⇒ sweep/m3 应 diff 0）、
+// 两条阈值锚在事件池已签数字上（那边改了这边就红，不许两处各飘各的）、三档在正常打法下不许成死档（工单验收）。
+{
+  const row = dim => WIND_ROWS.find(r => r.dim === dim);
+  // 扫可见文本前先剥标签：<h2> 里那个 2 不是界面数字，留着会把「零数字」这根针误判成红。
+  const visible = html => html.replace(/<[^>]*>/g, '');
+  const flat = html => visible(html).replace(/\s+/g, '');
+  // 注释里对规则的转述不算代码（本文件头就写着「SAVE_VERSION 不动」）：只拿去掉注释的正文做静态判据。
+  const codeOnly = txt => txt.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ');
+  const fresh = newGame(SEED);
+  const card = windCard(fresh);
+  const body = visible(card);
+
+  // 1) 版面：标题 + 四行、每行三档、行 = 维度名 + 档位词 + 一句场景话
+  check('标题「摊口风向」+ 四行在场：口碑 / 出品 / 熟客 / 风声 各一行，每行恰好三档，阈值两道且下界 < 上界',
+    card.includes('<h2>摊口风向</h2>') && flat(card).startsWith('摊口风向口碑')
+    && WIND_ROWS.map(r => r.dim).join('') === '口碑出品熟客风声'
+    && WIND_ROWS.every(r => r.bands.length === 3 && r.thresholds.length === 2
+      && r.thresholds[0] < r.thresholds[1] && r.bands.every(b => b.word && b.line)),
+    WIND_ROWS.map(r => `${r.dim}${r.thresholds.join('/')}`).join(' '));
+
+  // 2) 十二句逐字照工单——Orange 改字，这里就红（词表只许有一份，界面不许复制）
+  const TICKET = [
+    ['口碑', '还没传开', '还没什么人提你，排队的多半是头一回。'],
+    ['口碑', '有人惦记', '排队时有人跟同伴说：就这家。'],
+    ['口碑', '街坊都认', '不用招呼，熟客自己带着新人来。'],
+    ['出品', '有点飘', '近几碗的成色，客人吃得出差别。'],
+    ['出品', '稳当', '这几天的出品，没掉过链子。'],
+    ['出品', '讲究', '有人把汤喝得一滴不剩——讲究的摊子才有这待遇。'],
+    ['熟客', '多是生面孔', '来的多半是头一回的面孔。'],
+    ['熟客', '有几张熟脸', '有几张脸，见着就知道他要什么。'],
+    ['熟客', '老主顾的摊子', '熟客进门不用看价目牌，你也不用问。'],
+    ['风声', '松', '巡查的最近没往这条街来。'],
+    ['风声', '说不清', '风声说紧不紧，摊子摆正就没事。'],
+    ['风声', '紧', '这两天查得严，筐别出线，秤别短手。'],
+  ];
+  const gotTable = WIND_ROWS.flatMap(r => r.bands.map(b => [r.dim, b.word, b.line]));
+  check('词表十二句逐字照工单（维度名 / 档位词 / 场景话三样一起对），一句都不许多也不许改字',
+    gotTable.length === 12 && gotTable.every((g, i) => g.join('§') === TICKET[i].join('§')),
+    `逐字对 ${TICKET.length} 句`);
+
+  // 3) 档位词只出自本词表：四个源字段各扫 0–100，每屏渲染结果必须逐字等于词表 81 种组合之一
+  // （这条不是自证：它拿表独立重拼一遍，渲染层哪天偷偷加个数字或箭头就拼不上了）
+  const combos = [];
+  for (const a of row('口碑').bands) for (const b of row('出品').bands)
+    for (const c of row('熟客').bands) for (const d of row('风声').bands)
+      combos.push('摊口风向' + [a, b, c, d].map((x, i) => WIND_ROWS[i].dim + x.word + x.line).join(''));
+  const stray = [];
+  for (let v = 0; v <= 100; v++) {
+    const t = flat(windCard({ ...fresh, Rep: v, Risk: v, Q: v, RegularStory: [v, 0, 0, 0] }));
+    if (!combos.includes(t)) stray.push(`v=${v}→${t.slice(0, 18)}`);
+  }
+  check('档位词封闭：Rep / Risk / AvgQ3 / 常客合计各扫 0–100，101 屏渲染结果全部落在词表 81 组合内（表外一词即红）',
+    stray.length === 0 && combos.length === 81,
+    stray.length ? stray.slice(0, 2).join(' / ') : '101 屏 × 81 组合零表外');
+
+  // 4) 护栏：零数字、零箭头、零「与昨日差值」措辞、零计数器名——阈值只活在映射代码里
+  const LEAK = ['Rep', 'Risk', 'AvgQ3', 'RegularStory', '近三日', '昨日', '比昨天',
+    '↑', '↓', '▲', '▼', '→', '+', '＋', '−', '%'];
+  const digitHit = body.match(/\d+/g) || [];
+  const leakHit = LEAK.filter(w => body.includes(w));
+  check('风向卡内零数字字面量、零箭头、零昨日差值措辞、零计数器名（工单护栏：数字与计数器名永远不许进面板）',
+    digitHit.length === 0 && leakHit.length === 0,
+    `可见文本 ${body.length} 字｜数字[${digitHit.join('') || '无'}] 禁用词[${leakHit.join('、') || '无'}]`);
+
+  // 5) 开局那一屏：新档 Rep 20 / 窗口均值 50 / 常客 0 / Risk 0，四行都该落在「什么都没发生」档
+  check('开局不报忧：新档四行落「还没传开 / 稳当 / 多是生面孔 / 松」（出品下界若取 blogger 的 65，第一天就假报警）',
+    body.includes('还没传开') && body.includes('稳当') && body.includes('多是生面孔') && body.includes('巡查的最近没往这条街来'),
+    `开局源值 Rep ${fresh.Rep}｜Q ${fresh.Q}｜Risk ${fresh.Risk}｜常客 ${fresh.RegularStory.join('')}`);
+
+  // 6) 两条阈值锚在已签数字上：从事件数据行现读那个数比对，不在测试里重打一遍数字
+  const n45 = Number(EVENT_BY_ID.evt_d_complaint.weightCond.match(/MinQ3<(\d+)/)[1]);
+  const n40 = Number(EVENT_BY_ID.evt_s_insp2.condition.match(/Risk>=(\d+)/)[1]);
+  check('出品下界 = evt_d_complaint 权重条件里那个 MinQ3<45、风声上界 = evt_s_insp2 入池条件 Risk>=40（同一把尺子不另造第二把；事件池改了本卡就红）',
+    row('出品').thresholds[0] === n45 && row('风声').thresholds[1] === n40,
+    `45↔${n45}｜40↔${n40}`);
+  const windSrc = readFileSync(join(HERE, 'src/ui/wind.js'), 'utf8');
+  check('出品行与事件池同窗：读的是同一个 AvgQ3 别名（近三日窗在 recent.js/dsl.js 只有一份），blogger 的 condition 用的也是它',
+    /readVar\('AvgQ3'/.test(windSrc) && EVENT_BY_ID.evt_d_blogger.condition.includes('AvgQ3'),
+    `blogger condition = ${EVENT_BY_ID.evt_d_blogger.condition}`);
+
+  // 7) 派生只读 + 出口唯一（本单不改任何状态与结算）
+  const windImports = (windSrc.match(/^import .*$/gm) || [])
+    .map(l => l.replace(/^import .*?from '/, '').replace(/';.*/, ''));
+  check('派生只读：ui/wind.js 只 import 词表与 dsl 的现成读法，正文零状态写字段、零随机、不碰 SAVE_VERSION/localStorage（写坏任何一条都会惊动 sweep/m3 的 diff 0 验收）',
+    windImports.join(' ') === '../data/wind.js ../engine/dsl.js'
+    && !/\b(state|s)\.[A-Za-z_$][\w$]*\s*(=[^=]|\+\+|--)/.test(codeOnly(windSrc))
+    && !/Math\.random|\brng\b|SAVE_VERSION|localStorage/.test(codeOnly(windSrc)),
+    `import [${windImports.join(' ')}]`);
+  const SRC = join(HERE, 'src');
+  const rel = f => f.slice(SRC.length + 1).split('\\').join('/');
+  const users = files.filter(f => /windCard|WIND_ROWS/.test(readFileSync(f, 'utf8'))).map(rel).sort();
+  const mainSrc = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const at = mainSrc.indexOf('windCard(');
+  check('获批出口唯一：windCard / WIND_ROWS 只出现在 data/wind.js（词表）+ ui/wind.js（派生）+ ui/main.js 一处，且挂在 me() 页首——结算屏与出摊 hub 按旧规矩',
+    users.join(' ') === 'data/wind.js ui/main.js ui/wind.js'
+    && (mainSrc.match(/windCard\(/g) || []).length === 1
+    && mainSrc.slice(Math.max(0, at - 140), at).includes('me()'),
+    `引用点 [${users.join(' ')}]`);
+
+  // 8) 三档不许留死档（工单验收：某档在 r14 轨迹里永不出现就调阈值再报）
+  // 参考①②③ = 正常打法；两粒种子 × 120 日。风声的「说不清/紧」只有 ref③（档3 亲民 + 投资腿）走得到，
+  // 一条线缺档不算死档——口径是「三档在参考轨迹里都出现过」，逐线分布另见 game/probe-wind-bands.js 与 delta §七十三。
+  const bands = { 口碑: [0, 0, 0], 出品: [0, 0, 0], 熟客: [0, 0, 0], 风声: [0, 0, 0] };
+  for (const seed of [SEED, SEED + 977]) {
+    for (const strat of Object.values(REF_STRATEGIES)) {
+      const r = simulate(seed, 120, strat, 'headless', { labor: true, competition: true, eventScope: 'full' });
+      r.log.forEach((d, i) => {
+        bands.口碑[windBandIndex(d.Rep, row('口碑').thresholds)]++;
+        bands.风声[windBandIndex(d.Risk, row('风声').thresholds)]++;
+        // 现读同一个别名，不在测试里重算第二份均值：前两格取已结算 log，第三格是当日 Q（第 8 步落地）
+        const q3 = readVar('AvgQ3', { Recent3: r.log.slice(Math.max(0, i - 2), i).map(x => ({ q: x.Q })), Q: d.Q, today: {}, Day: d.day });
+        bands.出品[windBandIndex(q3, row('出品').thresholds)]++;
+      });
+      // 常客四槽只加不减（day.js:226 第 12 步 +1）⇒ 末值所在档以下，轨迹里一定待过；开局那一格是 0
+      const top = windBandIndex(r.state.RegularStory.reduce((a, b) => a + b, 0), row('熟客').thresholds);
+      for (let k = 0; k <= top; k++) bands.熟客[k]++;
+    }
+  }
+  const dead = Object.entries(bands).filter(([, c]) => c.some(n => n === 0));
+  check('三档全可达、零死档：参考①②③ 两粒种子 × 120 日里，四行各自的三档都出现过（缺档＝该调阈值再报，不许留死档）',
+    dead.length === 0, Object.entries(bands).map(([k, c]) => `${k}[${c.join(',')}]`).join(' '));
+
+  // 9) 借来的样式必须在场：本批零新增 CSS，卡片复用账本那一套类（少一个类＝真机上是一块没样式的哑文本）
+  const css = readFileSync(join(HERE, 'src/ui/theme.css'), 'utf8');
+  const used = [...new Set((card.match(/class="([^"]+)"/g) || []).map(m => m.slice(7, -1)).flatMap(s => s.split(/\s+/)))];
+  const missing = used.filter(c => !new RegExp('(^|[^\\w-])\\.' + c + '(?![\\w-])').test(css));
+  check('风向卡用到的每个类都在 theme.css 里（panel/lrows/lrow/lrowtop/lname/lamt/muted），本批零新增样式',
+    missing.length === 0 && used.length === 7, `类 [${used.join(' ')}]｜缺 [${missing.join(' ') || '无'}]`);
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，

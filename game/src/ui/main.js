@@ -20,6 +20,8 @@ import { armAudio, sfx, tapEdge, isMuted, setMuted, motionCue, setBoil } from '.
 // 开场动画（task-opening-cinematic-20261102）：只借两个入口——新档首播、以及「我的」页重看。
 // 整层挂 body、不 import 引擎，撤掉 = 删这一行 + act 里两处 + me() 里那颗按钮 + theme.css 那一块。
 import { introShouldPlay, showIntro } from './intro.js';
+// 「摊口风向」卡（工单 task-wind-panel-20261104）：暗线档位化的唯一获批出口，派生与词表都在 wind.js / data/wind.js 里。
+import { windCard } from './wind.js';
 import { drawHandOrders, GRAMS_PER_JIN, stockGrams, gramsCeilingFor } from '../engine/weigh.js';
 import { judgeBlanch, blanchValueAt } from '../engine/blanch.js';
 import { regularLine, REGULAR_SLOTS } from '../data/customers.js';
@@ -979,12 +981,14 @@ const VIEWS = {
     return hud() + `${facilityRow()}`;
   },
 
-  // 「我的」只做存档状态只读 + 重开 + 清除 + 版本号。裁定 §一 的红线：Rep/Risk/C/H/L/Q 一律不进这一屏，
-  // 所以这里五格全是顶栏本来就摆着的量，不做成属性面板。
+  // 「我的」只做存档状态只读 + 重开 + 清除 + 版本号。旧红线：Rep/Risk/C/H/L/Q 的数字一律不进这一屏，
+  // 所以 grid2 五格全是顶栏本来就摆着的量，不做成属性面板。
+  // 红线修订（工单 task-wind-panel-20261104，店主 2026-11-04 签）：档位可以进面板，数字、计数器名、精确涨跌值仍永远不许进；
+  // 获批出口只有页首这张「摊口风向」，本屏其余各处与结算屏、出摊 hub 一样按旧规矩，不许顺手扩散（回归 §25 钉引用点唯一）。
   // 批 C（task-ui-fidelity-batch C 项）：下半屏那片空白用画面填——陈实立绘 + 当前档位形态图（随档切换，复用 B 的六档图）。
-  // 填版只填画面：数据项一格没加、条与箭头一个没添，红线照旧。
+  // 填版只填画面：数据项一格没加、条与箭头一个没添。
   me() {
-    return hud() + `<div class="panel">
+    return hud() + windCard(state) + `<div class="panel">
       <h2>我的摊子</h2>
       <div class="meband">
         <img class="mechar" src="./img/chenshi.webp" alt="陈实" decoding="async" />
