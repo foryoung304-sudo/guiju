@@ -2935,6 +2935,13 @@ for (const seed of [SEED, 7979, 36832]) {
     && O52.actions[1].label === '照常拿' && O52.actions[1].open[0].forcedComment === '老李把担子一挑：「成，是个过日子的。」'
     && O52.actions[1].hidden.length === 0,
     `hidden ${JSON.stringify(O52.actions.map(a => a.hidden))}`);
+  // 裁定 `077733c` §五：半成已作废 ⇒ 卡面不许许诺不兑现的东西。改字只动 text 一格，机制（timing／weight／cooldown／condition／两按钮）一字没动，
+  // 所以两道门与草稿带逐字节相同（本次实测 cmp 0），「改名升签 r16、不再重算」这条才成立。
+  check('052 卡面按 `077733c` §五 改字逐字在场：「我这担子先过你这儿」替掉「我按老主顾价再让半成」，全池 27 行的文案里再没有「半成」这种不兑现的承诺',
+    O52.text === '老李今早挑着担子先绕到你摊上："昨天见你剩了不少，今儿少拿点？我这担子先过你这儿——下周我那新地先紧着谁，可就不好说了。"'
+    && !EVENTS.some(e => (e.text || '').includes('半成'))
+    && !EVENTS.some(e => JSON.stringify(e).includes('半成')),
+    `卡面「${O52.text}」`);
 
   // 2) 效果量级不超带（总口径：现金 −5…−260｜Rep ±1…5｜Risk +4…8｜客流乘数 0.85–1.25）
   const cashOps = ALL9.flatMap(id => opsOf(EV(id))).filter(o => o.cash !== undefined);
@@ -3016,6 +3023,13 @@ for (const seed of [SEED, 7979, 36832]) {
   check('自定阈值的标定件在仓里可复跑（40 元是 Yellow 按日报数据定的，回声单第 18 行点名交给谁就报给谁）',
     statSync(join(HERE, 'probe-evt052-waste.js')).isFile() && /p75|候选阈值/.test(readFileSync(join(HERE, 'probe-evt052-waste.js'), 'utf8')),
     'probe-evt052-waste.js 在场');
+  // 裁定 `077733c` §一 把【H】的验收从「逐颗种子不许翻」改成「按分布判」，并把这条定成往后每批的口径 ⇒ 复跑件必须在仓里，
+  // 否则下一次又得靠肉眼翻带子。这里只钉件在场与三条判据齐备，不钉任何数（数随基线走，钉了就会哪天自己过期）。
+  const bandDistSrc = readFileSync(join(HERE, 'probe-band-distribution.js'), 'utf8');
+  check('分布判的复跑件在仓里（`077733c` §一）：三条判据齐备——众数结局不变／存活 ≥3/5／六结局可达性集合不变',
+    statSync(join(HERE, 'probe-band-distribution.js')).isFile()
+    && /判据① 众数结局不变/.test(bandDistSrc) && /判据② 存活 ≥3\/5/.test(bandDistSrc) && /判据③ 可达性集合不变/.test(bandDistSrc),
+    'probe-band-distribution.js 在场');
 
   // 5) DSL 端到端：三条回声的 condition 走同一个 evalCondition 判得动（别名与状态字段在同一个求值器里）
   {
@@ -3280,9 +3294,10 @@ for (const seed of [SEED, 7979, 36832]) {
   // 可达性一翻类就该红：谁改了表序、阈值或系数表，这条先响，再重判，不许悄悄退回「空转」。
   check('雨天 + 四校历段（无爬坡）4 格全出汤底句（`f6a8ebf` §三.1 把「不可达」翻成「必出」）',
     rainRamp0 === 4 && soupRamp0 === 4, `${soupRamp0}/${rainRamp0} 格出句`);
-  // 5) 残留待裁（不自裁扩大压制，登记在 delta）：§三.2 只点名「假期压掉泛化客流句」，爬坡那三天（开业头三天／升档后头三天）
-  // 的身份句同样占格 ⇒ 雨天爬坡格还是被身份＋客流占满两句、汤底句落不了地。四格实测钉住这个数，改与不改都要它先响。
-  check('登记待裁：雨天 + 爬坡中四格仍不出汤底句（身份句与客流句占满两格）——裁定没点爬坡这一格，甲乙已回报 Orange',
+  // 5) 残留那一格已裁定：§三.2 只点名「假期压掉泛化客流句」，爬坡那三天（开业头三天／升档后头三天）的身份句同样占格
+  // ⇒ 雨天爬坡格还是被身份＋客流占满两句、汤底句落不了地。`077733c` §四 判乙**维持现状**（教学窗里客流句比汤底句重要，甲还会误伤开学周），
+  // 这四格从「待裁」转成「规格记录」：改与不改，这根针都要先响。
+  check('规格记录（`077733c` §四 判乙维持）：雨天 + 爬坡中四格仍不出汤底句——压制不扩到爬坡，教学窗里「今儿人多／人少些」优先',
     rainRampOn === 4 && soupRampOn === 0, `${soupRampOn}/${rainRampOn} 格出句`);
   // 顶替负片段用合成 scenario 验「只有负片段」那一型：同一组品类系数，只把 T 从 1.0 抬到 1.4。
   // 真表里凑不出这一型（雨天假期是「五档同值」，正片段也没有），所以负片段被顶掉后整格只剩汤底半句。

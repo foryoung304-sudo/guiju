@@ -609,6 +609,7 @@ export const EVENTS = [
     // ⇒ 那颗「少拿点」是假按钮（登记见 delta §七十一），−5% 就此作废；丙案换成表里已在带的通道：`forcedComment` ＋ `hidden [{ Rep: 1 }]`，
     // `timing` 保持 `morning`、两颗按钮保住。「下周我那新地先紧着谁」仍是话术逗子，不落机制。
     // 判据的量纲是**分**（`dsl.js` 的只读别名读 DailyReports 最后一格，一格都不新存）；40 元这道线自定，分布实测在 `probe-evt052-waste.js`。
+    // 裁定 `077733c` §五：半成已作废 ⇒ 卡面不许许诺不兑现的东西，「我按老主顾价再让半成」改「我这担子先过你这儿」，扣住「他先绕到你摊上」这个前提。
     id: 'evt_d_052',
     motion: 'person',   // 呈现标签：只许呈现层读（红线见文件头）
     pool: 'daily',
@@ -618,7 +619,7 @@ export const EVENTS = [
     weight: 18,
     condition: 'YesterdayWasteHigh >= 4000',
     cooldown: 3,
-    text: '老李今早挑着担子先绕到你摊上："昨天见你剩了不少，今儿少拿点？我按老主顾价再让半成——下周我那新地先紧着谁，可就不好说了。"',
+    text: '老李今早挑着担子先绕到你摊上："昨天见你剩了不少，今儿少拿点？我这担子先过你这儿——下周我那新地先紧着谁，可就不好说了。"',
     actions: [
       { id: 'take_less', label: '少拿点', open: [{ forcedComment: '老李把新菜往你这边又推了推：『少拿点好，菜这东西，新鲜才值钱。』' }], hidden: [{ Rep: 1 }] },
       { id: 'take_normal', label: '照常拿', open: [{ forcedComment: '老李把担子一挑：「成，是个过日子的。」' }], hidden: [] },
