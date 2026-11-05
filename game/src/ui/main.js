@@ -10,7 +10,7 @@ import {
   nightSettle, eveningDraw, nightClose, dailyReport, replayPage, judgeBuyout, judgeRetire, quitBlurb,
 } from '../engine/day.js';
 import { additiveUnlocked, prepBudget, prepGridUsed, xiaodouPresent, laborCostCents, tastingConvert } from '../engine/production.js';
-import { effectivePrice, skuAvailable, creditAvailable, buyFacility, isFacilityUnlocked, rampCoef, ownsTool, buyTool, sellBackTool, upgradeStall } from '../engine/market.js';
+import { effectivePrice, skuAvailable, creditAvailable, buyFacility, isFacilityUnlocked, ownsTool, buyTool, sellBackTool, upgradeStall } from '../engine/market.js';
 import { drawEvent, resolveChoice, isActionAvailable, isActionAffordable } from '../engine/events.js';
 import { ticketlessCostCents } from '../engine/inspection.js';
 import { competitionOn, streetBoard } from '../engine/competition.js';
@@ -25,6 +25,8 @@ import { windCard } from './wind.js';
 import { drawHandOrders, GRAMS_PER_JIN, stockGrams, gramsCeilingFor } from '../engine/weigh.js';
 import { judgeBlanch, blanchValueAt } from '../engine/blanch.js';
 import { regularLine, REGULAR_SLOTS } from '../data/customers.js';
+// 天气卡的人话词句表与组句规则（工单 task-morning-trim-20261104）：乘数与系数只许活在这里的判据里，不进界面。
+import { weatherTalk } from '../data/weather-talk.js';
 import { icon, weatherIcon, calendarIcon } from './icons.js';
 
 // 美术资产（ui-spec §五）：24 款 SKU 图标 = 六品类各一张 2×2 拼版（档1/档2/档3/强哥特供），同品类三档必须一眼可辨
@@ -939,20 +941,21 @@ const VIEWS = {
         新摊子前 3 天没人气（客流 ×0.4 / ×0.6 / ×0.8）。卖断货是看得见的信号，第二天买多少你说了算。</p></div>`;
   },
 
-  // 批 E（task-ui-fidelity-batch E 项）：三块信息各配语义图标（天气 / 校历 / 人气 / 欠款 / 价签 / 库存），
-  // 关键数字加同色底衬。内容、条目与口径一字未改——系统演化后的现内容为准，不回退 mockup 02 的旧条目。
+  // 瘦身单 task-morning-trim-20261104（店主 2026-11-04 点选）：「今晨结转」整卡撤销——
+  // 现金、欠着两行与顶栏重复（顶栏本来就挂现金／欠款／可赊），删掉，出摊页不留第二份；
+  // 昨日结算收成一行入口「昨日结转 ▸」，点击进账本看日报全文，行内不带数字摘要（防两处口径打架）；
+  // 明日预报并入下面这张天气卡，「人气·开业客流 ×0.4」那类乘数从界面消失，改由词句表说人话。
+  // 街面价签、柜里还剩本单不动。批 E 的语义图标与同色底衬照旧，只是不再摆重复数。
   morning() {
     const sc = state.today.scenario;
+    const talk = weatherTalk(sc, state);
     return hud() + `
       ${steamScene('stall', '三轮车摊位')}
       <div class="panel">
-        <div class="row"><h2>今晨结转</h2><span class="tag">${weatherIcon(sc.weather.id)}${calendarIcon(sc.calendar.id)}${sc.label}</span></div>
-        <div class="grid2">
-          <div><div class="muted">明日</div>${state.today.forecast}</div>
-          <div><div class="muted">${icon('s-people')}人气</div>开业第 ${4 - state.RampDays} 天 · 客流 <span class="chip num">×${rampCoef(state)}</span></div>
-          <div><div class="muted">现金</div><span class="chip num ${state.Cash < 0 ? 'neg' : ''}">${y(state.Cash)} 元</span></div>
-          <div><div class="muted">${icon('s-debt')}欠着</div><span class="chip num">${y(state.DebtSupplier)} / ${y(state.CreditCap)} 元</span></div>
-        </div>
+        <div class="row"><h2>今日天气</h2><span class="tag">${weatherIcon(sc.weather.id)}${calendarIcon(sc.calendar.id)}${sc.label}</span></div>
+        ${talk.length ? `<p class="muted">${talk.join('')}</p>` : ''}
+        <p class="muted">明日 ${state.today.forecast}</p>
+        ${state.DailyReports.length ? '<p><button class="mini ghost" data-nav="ledger">昨日结转 ▸</button></p>' : ''}
       </div>
       ${streetPanel()}
       <div class="panel warn"><h3>${icon('s-stock')}柜里还剩</h3>

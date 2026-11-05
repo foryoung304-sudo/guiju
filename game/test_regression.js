@@ -31,6 +31,7 @@ import { buildComments } from './src/engine/comments.js';
 import { COMMENT_POOLS } from './src/data/comments.js';
 import { WIND_ROWS } from './src/data/wind.js';
 import { windCard, windBandIndex } from './src/ui/wind.js';
+import { WEATHER_TALK, weatherTalk, catDeviation } from './src/data/weather-talk.js';
 import { morningRivals, priceWarReprice, sharesAndS, tallySuppression, rivalPriceCoef, previewShare } from './src/engine/competition.js';
 import { applyShadow, computeQ } from './src/engine/shadow.js';
 import { makeRng } from './src/engine/rng.js';
@@ -3149,6 +3150,89 @@ for (const seed of [SEED, 7979, 36832]) {
   const missing = used.filter(c => !new RegExp('(^|[^\\w-])\\.' + c + '(?![\\w-])').test(css));
   check('风向卡用到的每个类都在 theme.css 里（panel/lrows/lrow/lrowtop/lname/lamt/muted），本批零新增样式',
     missing.length === 0 && used.length === 7, `类 [${used.join(' ')}]｜缺 [${missing.join(' ') || '无'}]`);
+}
+
+// ── §26 瘦身单 task-morning-trim-20261104（Orange `cd9b91d`，店主 2026-11-04 点选）：今晨结转收编 + 天气说人话 ──
+// 范围就两件：① 出摊页「今晨结转」整卡撤销（现金／欠着与顶栏重复 → 删；明日预报并入天气卡；乘数消失）＋
+// 昨日结算收成一行入口「昨日结转 ▸」（行内不带数字摘要）；② 天气卡加至多两句人话，乘数与系数永不进界面。
+// 街面价签与柜里还剩本单不动（店主未批搬家）——下面用源码针把这两块钉在原位。
+{
+  // 1) 工单示例逐字复现（优先级排错就拼不出这句）
+  const say = (w, d, ramp = 0) => weatherTalk(scenarioOf(w, d), { RampDays: ramp }).join('');
+  check('工单示例逐字复现：雨天 + 平稳期 ⇒「今儿人少些。粉面卖得俏，青菜容易剩。」（这条把优先级钉死：品类在汤底之上）',
+    say('rain', 10) === '今儿人少些。粉面卖得俏，青菜容易剩。', say('rain', 10));
+
+  // 2) 验收点名的四种典型组合（雨天 / 考试周 / 假期 / 开学周）逐句对
+  const CASES = [
+    ['rain｜平稳期', '今儿人少些。粉面卖得俏，青菜容易剩。'],
+    ['sunny｜考试周', '考试周，学生吃得少些，备料悠着点。今儿人多。'],
+    ['sunny｜假期', '放假了，学校空了大半。今儿人少些。'],
+    ['sunny｜开学周·爬坡中', '开业头几天，还没人知道你。今儿人多。'],
+    ['sunny｜平稳期（无信号）', ''],
+    ['heat｜平稳期（青菜与豆制品同值 1.2，取声明顺序第一个）', '青菜卖得俏。'],
+    ['rain｜考试周（汤底被两格挤掉）', '考试周，学生吃得少些，备料悠着点。粉面卖得俏，青菜容易剩。'],
+  ];
+  const wantCase = [
+    ['rain', 10, 0], ['sunny', 20, 0], ['sunny', 25, 0], ['sunny', 3, 3], ['sunny', 10, 0], ['heat', 10, 0], ['rain', 20, 0],
+  ];
+  const badCase = CASES.map((c, i) => {
+    const [w, d, r] = wantCase[i];
+    const got = say(w, d, r);
+    return got === c[1] ? null : `${c[0]}：得到「${got}」期望「${c[1]}」`;
+  }).filter(Boolean);
+  check('四种典型组合 + 无信号日 + 同值并列 + 汤底被挤掉，七格逐字对上', badCase.length === 0, badCase.join(' / ') || '七格全对');
+
+  // 3) 组句规则：上限两句（全表扫）；品类「一正一负」是一句；汤底句挤进两格时舍品类负句
+  let over = 0, digit = 0, soupShown = 0;
+  for (const w of ['sunny', 'cloudy', 'rain', 'heat']) for (const d of [3, 10, 20, 25]) for (const r of [0, 3]) {
+    const t = weatherTalk(scenarioOf(w, d), { RampDays: r });
+    if (t.length > 2) over++;
+    if (t.some(x => /\d|×/.test(x))) digit++;
+    if (t.some(x => x.includes('汤底走得快'))) soupShown++;
+  }
+  check('32 格组合（四天气 × 四校历段 × 爬坡两态）全守 ≤2 句、零数字零乘数', over === 0 && digit === 0,
+    `超句 ${over}｜露数 ${digit}`);
+  // 汤底句在现行系数表下不可达：雨天四个校历段总有两句更高优先级的话占满两格——这条把「不可达」本身钉住，
+  // 谁改了表序或阈值就该红着重判，不许悄悄把它当活句验收（工单那句「外加汤底句时舍品类负句」因此只能用合成态验）。
+  check('登记不可达：现表四天气 × 四校历 × 爬坡两态里没有一格吐得出汤底句（雨天必被身份／客流／品类占满两格）',
+    soupShown === 0, '32 格零出场');
+  // 舍负句规则用合成 scenario 验：同一组品类系数，只把 T 从 1.0 抬到 1.4
+  const mk = T => ({ trafficTotal: 1.0, avgJin: 1.0, T, catCoef: { MB: 1, MT: 1, VG: 0.8, BF: 1, NS: 1.4 } });
+  const noSoup = weatherTalk(mk(1.0), { RampDays: 0 }), withSoup = weatherTalk(mk(1.4), { RampDays: 0 });
+  check('汤底句在场时舍品类负句（工单组句规则末句）：同一组系数 T=1.0 ⇒ 一句「粉面卖得俏，青菜容易剩。」；T=1.4 ⇒「粉面卖得俏。」＋汤底句，负的那半消失',
+    noSoup.join('') === '粉面卖得俏，青菜容易剩。' && noSoup.length === 1
+    && withSoup.join('') === '粉面卖得俏。汤底走得快，多备两份。' && withSoup.length === 2,
+    `T1.0 ${noSoup.length} 句｜T1.4 ${withSoup.length} 句`);
+  check('品类位取现成名（CAT[].name），阈值取工单那两个数：≥1.2 算俏、≤0.8 算剩（浮点卡线的那格靠 1e-9 过线）',
+    catDeviation(scenarioOf('rain', 10)).lo.cat === 'VG' && catDeviation(scenarioOf('rain', 10)).hi.cat === 'NS'
+    && WEATHER_TALK.length === 7 && ['身份', '身份', '身份', '客流', '客流', '品类', '汤底'].join() === WEATHER_TALK.map(r => r.kind).join(),
+    `雨天平稳取到 ${catDeviation(scenarioOf('rain', 10)).hi.cat} 正 / ${catDeviation(scenarioOf('rain', 10)).lo.cat} 负`);
+
+  // 4) 出摊页瘦身：main.js 在浏览器模块顶层读 localStorage，Node 里 import 不了 → 照 §16 开场动画那节的先例走静态源码断言
+  const mSrc = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const morningBody = (mSrc.match(/\n  morning\(\) \{[\s\S]*?\n  \},/) || [''])[0];
+  const gone = ['state.Cash', 'state.DebtSupplier', 'state.CreditCap', 'rampCoef', '×', '今晨结转', 'grid2', 's-people', 's-debt']
+    .filter(t => morningBody.includes(t));
+  check('今晨结转整卡撤销：出摊页这一屏零现金／欠款／额度／乘数（顶栏是唯一一份），「今晨结转」这个标题与那格 grid2 一起消失',
+    morningBody.length > 0 && gone.length === 0, gone.length ? `残留 [${gone.join(' ')}]` : 'morning() 体内九项全零命中');
+  const entry = (morningBody.match(/<p><button[^>]*>昨日结转 ▸<\/button><\/p>/) || [''])[0];
+  check('昨日结算收成一行入口：「昨日结转 ▸」这颗按钮带 data-nav="ledger"（走既有导航，落账本逐日账），行内零数字；第 1 天没有昨日 ⇒ 由 DailyReports 挡在门外',
+    entry !== '' && /data-nav="ledger"/.test(entry) && !/\d/.test(entry)
+    && /state\.DailyReports\.length\s*\?/.test(morningBody),
+    entry ? '一行入口在场（第 1 天不出场）' : '一行入口没找到');
+  check('明日预报并入天气卡（forecast 只剩这一处引用），天气与校历的现行标签照旧保留',
+    /weatherIcon\(sc\.weather\.id\)\}\$\{calendarIcon\(sc\.calendar\.id\)\}\$\{sc\.label\}/.test(morningBody)
+    && /明日 \$\{state\.today\.forecast\}/.test(morningBody)
+    && (mSrc.match(/state\.today\.forecast/g) || []).length === 1, '标签 + 明日一行同卡');
+  check('本单不许搬家的两块仍在原位：街面价签与柜里还剩逐字留在 morning() 里（店主未批）',
+    morningBody.includes('${streetPanel()}') && morningBody.includes('柜里还剩'), '两块都还在出摊页');
+  // 5) 词句模块只读：不 import 引擎、不写状态、不落盘
+  const talkSrc = readFileSync(join(HERE, 'src/data/weather-talk.js'), 'utf8');
+  const talkCode = talkSrc.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ');
+  check('派生只读：weather-talk.js 只 import constants（品类名与 SOLID_CATS），零引擎依赖、零状态写字段、零随机、不碰存档',
+    !/from '\.\.\/engine|require\(/.test(talkSrc) && !/\bstate\.[A-Za-z_$][\w$]*\s*=[^=]/.test(talkCode)
+    && !/Math\.random|localStorage|SAVE_VERSION/.test(talkCode),
+    `import ${(talkSrc.match(/from '([^']+)'/) || [, ''])[1]}`);
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
