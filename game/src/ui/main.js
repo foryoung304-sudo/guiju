@@ -24,6 +24,8 @@ import { voiceIntroLines, voiceResultLines } from '../data/voice.js';
 import { introShouldPlay, showIntro } from './intro.js';
 // 「摊口风向」卡（工单 task-wind-panel-20261104）：暗线档位化的唯一获批出口，派生与词表都在 wind.js / data/wind.js 里。
 import { windCard } from './wind.js';
+// 结算屏第二段那条播报 + 进出两组的合计（工单 task-ui-polish-20261105 第 7 条）：择句规则与词池都在这一层，引擎不认得它。
+import { broadcastLine, inoutTotals } from './settle-broadcast.js';
 import { drawHandOrders, GRAMS_PER_JIN, stockGrams, gramsCeilingFor } from '../engine/weigh.js';
 import { judgeBlanch, blanchValueAt } from '../engine/blanch.js';
 import { regularLine, REGULAR_SLOTS } from '../data/customers.js';
@@ -1076,7 +1078,7 @@ const VIEWS = {
         : pricePick === 'signature' ? '<p class="muted" style="margin-top:8px">招牌价靠门面与熟人口碑撑，考试周更吃亏。</p>'
           : '<p class="muted" style="margin-top:8px">标准价是这条街的默认档。</p>'}
       <h3 style="margin-top:14px">打包</h3>
-      <div class="row">${['bag', 'normal', 'thermal'].map(id => `<button class="${packingPick === id ? 'sel' : 'ghost'}" data-act="pack" data-pack="${id}">
+      <div class="row pickrow">${['bag', 'normal', 'thermal'].map(id => `<button class="${packingPick === id ? 'sel' : 'ghost'}" data-act="pack" data-pack="${id}">
         ${PACKING_NAMES[id]} · ${PACKING[id].toFixed(2)} 元/碗</button>`).join('')}</div>
       <p class="muted">袋子最省，汤洒得多；保温最贵，洒得最少。</p>
       <h3 style="margin-top:14px">汤底配方</h3>
@@ -1102,12 +1104,15 @@ const VIEWS = {
       <div class="panel accent">
       <div class="row"><h2>出餐站 · 亲手单 ${orders.length} 单</h2>
         <span class="whoimg"><img class="face" src="./img/chenshi.webp" alt="陈实" /><b>陈实 · 掌秤</b></span></div>
-      <p class="muted">先亮单子，再过称。按住抓菜、松手定格；抓多了就捏出一点。这一屏只用克，一碗标准 ${GRAMS_PER_JIN} 克，秤上是多少就收多少。${state.blanchOn ? '过完称，碗下烫锅。' : ''}</p>
+      <p class="muted">先亮单子，再过称。轻点一下添一小撮，一下几克写在单子右边；想多要点就按住不松，松手定格；抓多了捏出一点。这一屏只用克，一碗标准 ${GRAMS_PER_JIN} 克，秤上是多少就收多少。${state.blanchOn ? '过完称，碗下烫锅。' : ''}</p>
       <div class="stack" style="margin-top:10px">${orders.map(orderCard).join('')}</div>
       <button class="go" style="margin-top:14px" data-act="cook">下锅 · 开卖</button>
     </div>`;
   },
 
+  // 批H（工单 task-ui-polish-20261105 第 7 条）：结算屏改三段——① 净利大字最先并放大，② 紧随一条藏青播报行，
+  // ③ 收支明细收成「进账 / 出账」两组折叠（`<details>` 原生展开，不引 JS、不加计时器）。
+  // 每一行的字与数都从原来那行搬过来，一个字段没重算；播报行只读明账，暗线一个数字一档话都不进（§28 钉）。
   settle() {
     const r = dailyReport(state);   // 当日报表此刻还在 today 上，DailyReports 末尾是昨天的，不能取
     const t = state.today;
@@ -1117,23 +1122,38 @@ const VIEWS = {
     // 预检反馈 F6（0366bd6）：晚间事件弹层原先整屏换掉这张账，事件日就从「打烊」那一刻起再也看不到净额行。
     // 账目与事件各回各位：先把账排在屏上，弹层作为覆盖层追加，玩家点完分支照样落第 10–12 步。
     const overlay = pendingEvent ? eventOverlay() : '';
+    const { inCents, outCents } = inoutTotals(r);
+    const prevBest = state.DailyReports.length
+      ? Math.max(...state.DailyReports.map(x => x.revenueCents)) : null;
+    const bc = broadcastLine({ ...r, inCents, outCents, soldOutText: out.join('、') }, prevBest);
     return hud() + `${sceneImg('settlement', '收摊结算', 'settle')}
       <div class="panel">
       <h2>收摊账目</h2>
-      <table>
-        <tr><td>卖出</td><td class="r num">${r.bowls} 碗 / ${r.J.toFixed(2)} 斤${t.deltaJ ? `（秤上按 ${t.J_bill.toFixed(2)} 斤收的钱）` : ''}</td></tr>
-        <tr><td>流水</td><td class="r num"><span class="roll" data-c="${r.revenueCents}">${y(r.revenueCents)}</span></td></tr>
-        <tr><td>食材成本（卖掉的才算）</td><td class="r num">−${y(t.ingredientCents)}</td></tr>
-        <tr><td>${PACKING_NAMES[state.PackingTier]} · ${r.bowls} 碗 × ${PACKING[state.PackingTier].toFixed(2)} 元</td><td class="r num">−${y(t.packingCents)}</td></tr>
-        ${t.additiveCents ? `<tr><td>${ADDITIVE[state.AdditiveTier].goods || '添加剂'}</td><td class="r num">−${y(t.additiveCents)}</td></tr>` : ''}
-        <tr><td>成本合计</td><td class="r num">−<span class="roll" data-c="${r.cogsCents}">${y(r.cogsCents)}</span></td></tr>
-        <tr><td>销售毛利</td><td class="r num">${signRoll(r.grossCents)}</td></tr>
-        <tr><td>隔夜报损</td><td class="r num">${sign(-r.writeoffCents)}</td></tr>
-        <tr><td>固定支出</td><td class="r num">−${y(r.fixedCents)}</td></tr>
-        ${r.laborCents ? `<tr><td>人工 · 小豆日结</td><td class="r num">−${y(r.laborCents)}</td></tr>` : ''}
-        ${t.tastingPortions ? `<tr><td>试吃 ${t.tastingPortions} 份 · 每份 1 元</td><td class="r num">${sign(t.tastingIncomeCents)}</td></tr>
-        <tr><td>样品食材（今天从柜里出，不另掏现金）</td><td class="r num">−${y(t.tastingCostCents)}</td></tr>` : ''}
-        <tr><td><b>经营净额</b></td><td class="r num"><b>${signRoll(r.netOpsCents)}</b></td></tr>
+      <div class="netplate"><span class="netk">经营净额</span>
+        <b class="netv">${signRoll(r.netOpsCents)}</b>
+        <span class="muted">卖出 ${r.bowls} 碗 / ${r.J.toFixed(2)} 斤${t.deltaJ ? `（秤上按 ${t.J_bill.toFixed(2)} 斤收的钱）` : ''}</span></div>
+      <div class="bcast">${esc(bc.text)}</div>
+      <details class="grp">
+        <summary><span>进账</span><b class="num">+${y(inCents)}</b></summary>
+        <table>
+          <tr><td>流水</td><td class="r num"><span class="roll" data-c="${r.revenueCents}">${y(r.revenueCents)}</span></td></tr>
+          ${t.tastingPortions ? `<tr><td>试吃 ${t.tastingPortions} 份 · 每份 1 元</td><td class="r num">${sign(t.tastingIncomeCents)}</td></tr>` : ''}
+        </table>
+      </details>
+      <details class="grp">
+        <summary><span>出账</span><b class="num">−${y(outCents)}</b></summary>
+        <table>
+          <tr><td>食材成本（卖掉的才算）</td><td class="r num">−${y(t.ingredientCents)}</td></tr>
+          <tr><td>${PACKING_NAMES[state.PackingTier]} · ${r.bowls} 碗 × ${PACKING[state.PackingTier].toFixed(2)} 元</td><td class="r num">−${y(t.packingCents)}</td></tr>
+          ${t.additiveCents ? `<tr><td>${ADDITIVE[state.AdditiveTier].goods || '添加剂'}</td><td class="r num">−${y(t.additiveCents)}</td></tr>` : ''}
+          <tr><td>隔夜报损</td><td class="r num">${sign(-r.writeoffCents)}</td></tr>
+          <tr><td>固定支出</td><td class="r num">−${y(r.fixedCents)}</td></tr>
+          ${r.laborCents ? `<tr><td>人工 · 小豆日结</td><td class="r num">−${y(r.laborCents)}</td></tr>` : ''}
+          ${t.tastingPortions ? `<tr><td>样品食材（今天从柜里出，不另掏现金）</td><td class="r num">−${y(t.tastingCostCents)}</td></tr>` : ''}
+        </table>
+      </details>
+      <p class="muted netchk">进账 ${y(inCents)} − 出账 ${y(outCents)} = 经营净额 ${y(r.netOpsCents)} 元。</p>
+      <table class="carry">
         <tr><td>今晚自动还款</td><td class="r num">${y(t.repaidCents || 0)}</td></tr>
         <tr><td>现金</td><td class="r num ${state.Cash < 0 ? 'negv' : ''}"><span class="roll" data-c="${state.Cash}">${y(state.Cash)}</span></td></tr>
         <tr><td>还欠</td><td class="r num">${y(state.DebtSupplier)}</td></tr>

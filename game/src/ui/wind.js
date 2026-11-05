@@ -24,8 +24,12 @@ export function windCard(state) {
   return `<div class="panel">
     <h2>摊口风向</h2>
     <div class="lrows">${WIND_ROWS.map(row => {
-      const band = row.bands[windBandIndex(windValue(row.src, state), row.thresholds)];
-      return `<div class="lrow"><div class="lrowtop"><span class="lname">${row.dim}</span><b class="lamt">${band.word}</b></div><div class="muted">${band.line}</div></div>`;
+      const i = windBandIndex(windValue(row.src, state), row.thresholds);
+      const band = row.bands[i];
+      // 牌面 = 色块底衬 + 墨蓝字（工单第 6 条「按档位分色」）。字色不直接染档位色：
+      // 芥末 #f2b233 压在纸底 #fffaf0 上是 1.80:1、青绿 3.15:1，加大之后照样糊；
+      // 反过来做底衬是 7.58:1 / 4.34:1，且「芥末底＋墨蓝字」是本仓已签的既有语言（.tabbar.night button.on）。
+      return `<div class="lrow windrow"><div class="lrowtop"><span class="lname">${row.dim}</span><b class="wplate wb${i}">${band.word}</b></div><div class="muted">${band.line}</div></div>`;
     }).join('')}</div>
   </div>`;
 }

@@ -56,6 +56,11 @@ h3 { font-size: 14px; letter-spacing: .08em; }
 .num { font-variant-numeric: tabular-nums; }
 .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .row.tight { margin-bottom: 6px; }
+/* 工单 task-ui-polish-20261105 第 2 条：定版页「普通餐盒 · 0.30 元/碗」这类长标签选项钮在 360px 下被折成两行。
+   沿排版批 L1 在置办行已经签过的修法：让整排允许换行、按钮内部不许拆字——挤不下就各占一行，字还是横排的一行。
+   价格数字与 data-act 一个字没动，这是纯排版。 */
+.pickrow { flex-wrap: wrap; }
+.pickrow button { white-space: nowrap; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .stack > * + * { margin-top: 8px; }
@@ -272,6 +277,21 @@ button.up { background: var(--tomato); color: var(--paper); white-space: nowrap;
 .lmeta .muted { color: rgba(27, 42, 74, .62); font-size: inherit; }
 .lrow > .muted { font-size: 11px; line-height: 1.45; margin-top: 4px; }
 
+/* ── 工单 task-ui-polish-20261105 第 6 条：风向牌加大一号、按档位分色 ─────────────
+   牌面 = 色块底衬（低档中性 / 中档芥末 / 高档青绿），字一律墨蓝。不把档位色直接当字色：
+   芥末压纸底 1.80:1、青绿压纸底 3.15:1，加大之后照样糊；反过来当底衬是 11.53 / 7.58 / 4.34:1，
+   而「芥末底＋墨蓝字」沿的是标签栏夜间选中那一格（.tabbar.night button.on）已签的语言。
+   字号取现成的 .big 那一档 22px（旧牌面走 .lamt 19px，正好一号），不新增字号 token。
+   词面变长（「风声紧，最近查得严」九个字），所以这一行放开折行：牌占剩余宽度、左对齐维度名不缩，
+   改动锁在 .windrow 里——账本那两张表也用 .lrow/.lname，不许被风向牌带着走。 */
+.windrow .lrowtop { align-items: flex-start; }
+.windrow .lname { flex: 0 0 auto; padding-top: 3px; }
+.wplate { font-size: 22px; line-height: 1.2; font-weight: 700; padding: 1px 7px;
+  flex: 1 1 auto; min-width: 0; text-align: right; }
+.wplate.wb0 { background: var(--cream-2); color: var(--ink); }
+.wplate.wb1 { background: var(--mustard); color: var(--ink); }
+.wplate.wb2 { background: var(--teal); color: var(--ink); }
+
 /* ── 电子秤（第 7 步亲手单）─────────────────────────────── */
 .scale { display: flex; gap: 10px; }
 .scale img { width: 92px; height: 72px; object-fit: contain; background: var(--cream); border: 2px solid var(--ink); }
@@ -332,6 +352,35 @@ th { font-size: 11px; letter-spacing: .06em; color: rgba(27, 42, 74, .68); }
 td.r, th.r { text-align: right; }
 .pos { color: var(--teal); font-weight: 700; }
 .negv { color: var(--tomato); font-weight: 700; }
+
+/* ── 工单 task-ui-polish-20261105 第 7 条：结算屏三段式 ─────────────────────
+   ① 净利大字（经营净额从表里那一行提成主角）：字号取现成的 h1 那一档 26px，不新增字号 token。
+      色不写死青绿——正负沿用现版 .pos / .negv 两档（赚＝青绿、亏＝番茄红、打平＝中性墨蓝）：
+      把亏掉的那一天涂成绿的，是这张账最不该犯的谎。
+   ② 播报行：藏青底＋纸色字，沿 .forecast 那条已签的藏青语言（2px 墨线 + 硬边偏移阴影）。
+   ③ 进账 / 出账两组折叠：原生 <details>，零 JS、零计时器，默认收起只露合计。 */
+.netplate { background: var(--cream); border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink-2);
+  padding: 10px 12px; margin-bottom: 10px; }
+.netk { display: block; font-size: 11px; letter-spacing: .1em; color: rgba(27, 42, 74, .68); }
+.netv { display: block; font-size: 26px; line-height: 1.15; font-weight: 700; }
+.netplate > .muted { display: block; margin-top: 2px; }
+.bcast { background: var(--ink); color: var(--paper); border: 2px solid var(--ink);
+  box-shadow: 4px 4px 0 var(--ink-2); padding: 9px 12px; font-size: 13px; line-height: 1.45; margin-bottom: 10px; }
+.grp { background: var(--paper); border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink-2); margin-bottom: 8px; }
+.grp > summary { display: flex; align-items: baseline; gap: 8px; padding: 9px 12px; cursor: pointer;
+  font-size: 13px; font-weight: 700; letter-spacing: .06em; list-style: none; }
+.grp > summary::-webkit-details-marker { display: none; }
+.grp > summary > span { flex: 1; min-width: 0; }
+.grp > summary > b { font-variant-numeric: tabular-nums; }
+.grp > summary::after { content: "▸"; font-size: 12px; color: rgba(27, 42, 74, .55); }
+.grp[open] > summary::after { content: "▾"; }
+.grp > table { margin: 0 8px 8px; }
+.netchk { margin: 2px 0 8px; }
+.carry { margin-bottom: 6px; }
+
+/* 工单第 4 条：市场长列表末尾补一段留白——吸底汇总条是钉住的，最后一张档口卡扫到底之前
+   会被它压住尾巴。补一格让最后那行先出头，条还是那条条。 */
+#marketDetail { padding-bottom: 56px; }
 
 /* ── 留言（3.4 配比；不许出现品质数字）───────────────────── */
 .comment {
@@ -647,7 +696,7 @@ td.r, th.r { text-align: right; }
 .readout, .scale img, .scene, .inlineart, .tierimg, .mechar, .metier, .face, button {
   border-radius: var(--r);
 }
-.tag, .chip, .gavecell .exact, .thumb, .skuimg, .ava, button.mini,
+.tag, .chip, .gavecell .exact, .thumb, .skuimg, .ava, button.mini, .wplate,
 input[type=number], input[type=text] { border-radius: var(--r-sm); }
 /* 事件弹层的头图与卡框同一条边：半径按 2px 墨线往里收一格，免得两层圆角错出台阶 */
 .event .art { border-radius: calc(var(--r) - 2px) calc(var(--r) - 2px) 0 0; }

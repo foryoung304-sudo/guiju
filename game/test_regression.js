@@ -33,6 +33,7 @@ import { WIND_ROWS } from './src/data/wind.js';
 import { windCard, windBandIndex } from './src/ui/wind.js';
 import { WEATHER_TALK, weatherTalk, catDeviation } from './src/data/weather-talk.js';
 import { VOICE_INTRO, VOICE_RESULT, voiceIntroLines, voiceResultLines } from './src/data/voice.js';
+import { BROADCAST_KINDS, BROADCAST_POOL, broadcastLine, inoutTotals } from './src/ui/settle-broadcast.js';
 import { morningRivals, priceWarReprice, sharesAndS, tallySuppression, rivalPriceCoef, previewShare } from './src/engine/competition.js';
 import { applyShadow, computeQ } from './src/engine/shadow.js';
 import { makeRng } from './src/engine/rng.js';
@@ -3138,20 +3139,21 @@ for (const seed of [SEED, 7979, 36832]) {
       && r.thresholds[0] < r.thresholds[1] && r.bands.every(b => b.word && b.line)),
     WIND_ROWS.map(r => `${r.dim}${r.thresholds.join('/')}`).join(' '));
 
-  // 2) 十二句逐字照工单——Orange 改字，这里就红（词表只许有一份，界面不许复制）
+  // 2) 十二句逐字照工单——Orange 改字，这里就红（词表只许有一份，界面不许复制一份）
+  //    维度名与场景话的正本仍是 `task-wind-panel-20261104`；档位词那一格由 `task-ui-polish-20261105` 第 6 条换拟稿（待店主签）。
   const TICKET = [
-    ['口碑', '还没传开', '还没什么人提你，排队的多半是头一回。'],
-    ['口碑', '有人惦记', '排队时有人跟同伴说：就这家。'],
-    ['口碑', '街坊都认', '不用招呼，熟客自己带着新人来。'],
-    ['出品', '有点飘', '近几碗的成色，客人吃得出差别。'],
-    ['出品', '稳当', '这几天的出品，没掉过链子。'],
-    ['出品', '讲究', '有人把汤喝得一滴不剩——讲究的摊子才有这待遇。'],
+    ['口碑', '摊子还没名', '还没什么人提你，排队的多半是头一回。'],
+    ['口碑', '有人惦记着这口', '排队时有人跟同伴说：就这家。'],
+    ['口碑', '街坊都认这个味', '不用招呼，熟客自己带着新人来。'],
+    ['出品', '今儿有点飘', '近几碗的成色，客人吃得出差别。'],
+    ['出品', '稳稳当当', '这几天的出品，没掉过链子。'],
+    ['出品', '讲究，挑不出错', '有人把汤喝得一滴不剩——讲究的摊子才有这待遇。'],
     ['熟客', '多是生面孔', '来的多半是头一回的面孔。'],
-    ['熟客', '有几张熟脸', '有几张脸，见着就知道他要什么。'],
-    ['熟客', '老主顾的摊子', '熟客进门不用看价目牌，你也不用问。'],
-    ['风声', '松', '巡查的最近没往这条街来。'],
-    ['风声', '说不清', '风声说紧不紧，摊子摆正就没事。'],
-    ['风声', '紧', '这两天查得严，筐别出线，秤别短手。'],
+    ['熟客', '有几张熟脸了', '有几张脸，见着就知道他要什么。'],
+    ['熟客', '老主顾排着队', '熟客进门不用看价目牌，你也不用问。'],
+    ['风声', '风声松，街面太平', '巡查的最近没往这条街来。'],
+    ['风声', '说不清，多留个心眼', '风声说紧不紧，摊子摆正就没事。'],
+    ['风声', '风声紧，最近查得严', '这两天查得严，筐别出线，秤别短手。'],
   ];
   const gotTable = WIND_ROWS.flatMap(r => r.bands.map(b => [r.dim, b.word, b.line]));
   check('词表十二句逐字照工单（维度名 / 档位词 / 场景话三样一起对），一句都不许多也不许改字',
@@ -3183,8 +3185,8 @@ for (const seed of [SEED, 7979, 36832]) {
     `可见文本 ${body.length} 字｜数字[${digitHit.join('') || '无'}] 禁用词[${leakHit.join('、') || '无'}]`);
 
   // 5) 开局那一屏：新档 Rep 20 / 窗口均值 50 / 常客 0 / Risk 0，四行都该落在「什么都没发生」档
-  check('开局不报忧：新档四行落「还没传开 / 稳当 / 多是生面孔 / 松」（出品下界若取 blogger 的 65，第一天就假报警）',
-    body.includes('还没传开') && body.includes('稳当') && body.includes('多是生面孔') && body.includes('巡查的最近没往这条街来'),
+  check('开局不报忧：新档四行落「摊子还没名 / 稳稳当当 / 多是生面孔 / 风声松」（出品下界若取 blogger 的 65，第一天就假报警）',
+    body.includes('摊子还没名') && body.includes('稳稳当当') && body.includes('多是生面孔') && body.includes('巡查的最近没往这条街来'),
     `开局源值 Rep ${fresh.Rep}｜Q ${fresh.Q}｜Risk ${fresh.Risk}｜常客 ${fresh.RegularStory.join('')}`);
 
   // 6) 两条阈值锚在已签数字上：从事件数据行现读那个数比对，不在测试里重打一遍数字
@@ -3240,12 +3242,25 @@ for (const seed of [SEED, 7979, 36832]) {
   check('三档全可达、零死档：参考①②③ 两粒种子 × 120 日里，四行各自的三档都出现过（缺档＝该调阈值再报，不许留死档）',
     dead.length === 0, Object.entries(bands).map(([k, c]) => `${k}[${c.join(',')}]`).join(' '));
 
-  // 9) 借来的样式必须在场：本批零新增 CSS，卡片复用账本那一套类（少一个类＝真机上是一块没样式的哑文本）
+  // 9) 借来的样式必须在场：卡片复用账本那一套类（少一个类＝真机上是一块没样式的哑文本）。
+  //    工单 task-ui-polish-20261105 第 6 条之后，档位词那一格不再借 .lamt，改用自己的牌面类 .wplate ＋ 分色档 .wb0/1/2；
+  //    样本屏只会渲染出一枚档位色，所以三档的类单独逐个查，别指望一次渲染把三格都覆盖到。
   const css = readFileSync(join(HERE, 'src/ui/theme.css'), 'utf8');
+  const has = c => new RegExp('\\.' + c + '(?![\\w-])').test(css);   // 链式选择器（.wplate.wb0）也算在场
   const used = [...new Set((card.match(/class="([^"]+)"/g) || []).map(m => m.slice(7, -1)).flatMap(s => s.split(/\s+/)))];
-  const missing = used.filter(c => !new RegExp('(^|[^\\w-])\\.' + c + '(?![\\w-])').test(css));
-  check('风向卡用到的每个类都在 theme.css 里（panel/lrows/lrow/lrowtop/lname/lamt/muted），本批零新增样式',
-    missing.length === 0 && used.length === 7, `类 [${used.join(' ')}]｜缺 [${missing.join(' ') || '无'}]`);
+  const missing = used.filter(c => !has(c));
+  const need = ['panel', 'lrows', 'lrow', 'windrow', 'lrowtop', 'lname', 'wplate', 'wb0', 'wb1', 'wb2', 'muted'];
+  const noNeed = need.filter(c => !has(c));
+  check('风向卡用到的每个类都在 theme.css 里，三档色一类不缺，且不再借账本的 .lamt（少一个类＝真机上一块没样式的哑文本）',
+    missing.length === 0 && noNeed.length === 0 && !used.includes('lamt'),
+    `用[${used.join(' ')}]｜缺[${[...missing, ...noNeed].join(' ') || '无'}]`);
+  // 牌面加大一号与分色是这一条的实体：字号取现成的 h1 那一档（26px 给结算、22px 给牌面），
+  // 不新增字号 token；色只吃 :root 里那六枚已签变量，出现任何新色值就红。
+  check('风向牌加大一号走现成 22px 一档、分色只吃已签色板（芥末/青绿/中性 cream-2 三档底衬，字一律墨蓝）',
+    /\.wplate \{[^}]*font-size: 22px/.test(css) && /\.wplate\.wb0 \{ background: var\(--cream-2\); color: var\(--ink\)/.test(css)
+      && /\.wplate\.wb1 \{ background: var\(--mustard\); color: var\(--ink\)/.test(css)
+      && /\.wplate\.wb2 \{ background: var\(--teal\); color: var\(--ink\)/.test(css),
+    '三档底衬与 22px 逐条对过');
 }
 
 // ── §26 瘦身单 task-morning-trim-20261104（Orange `cd9b91d`，店主 2026-11-04 点选）＋ 裁定汇总 f6a8ebf §三：今晨结转收编 + 天气说人话 ──
@@ -3511,6 +3526,173 @@ for (const seed of [SEED, 7979, 36832]) {
     && /advanceVoice\(\)/.test(probeSrc) && /setMuted\(true\)/.test(probeSrc)
     && !/from '\.\/src\/engine/.test(probeSrc),
     'probe-voice-mount.js 在场（三段判语全绿才 exit 0）');
+}
+
+// ── §28 排版批 task-ui-polish-20261105（Orange `71ab432`，店主 2026-11-05 批「嫁接法」）───────
+// 第一档 1–6 是纯文案 / 样式，第二档第 7 条动结算屏的版面结构。四条形同虚设最容易出事的硬约束在这里钉成针：
+// 色板变量零改动、面板语言（2px 墨线 + 硬边偏移阴影）照旧、骨不动（不新增导航 / 不改流程步骤 / 零数值与判定）、
+// SAVE_VERSION 与存档结构不动；再加一条本批特有的：结算那三段的数一律从已落的明账里读，暗线一个字不进界面。
+// 冻结内容（事件卡文案 / 常客台词 / 配音台词）没碰——本批新增的句子只住在新模块与 UI 层两处。
+{
+  const css = readFileSync(join(HERE, 'src/ui/theme.css'), 'utf8');
+  const mainSrc = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const bcastSrc = readFileSync(join(HERE, 'src/ui/settle-broadcast.js'), 'utf8');
+  const bcastCode = bcastSrc.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ');
+  const has = c => new RegExp('\\.' + c + '(?![\\w-])').test(css);
+  const rule = c => {
+    const m = css.match(new RegExp('(?:^|\\n)' + c.replace('.', '\\.') + '[^\\n]*\\{([^}]*)\\}'));
+    return m ? m[1] : '';
+  };
+  const SRC2 = join(HERE, 'src');
+  const rel2 = f => f.slice(SRC2.length + 1).split('\\').join('/');
+
+  // 1) 色板：单上点名的六枚变量在 :root 里逐字还在；本批新增的每一条规则只吃 var(--…)，零个新色值。
+  //    写成「逐字 + 逐块扫十六进制」两路，防止哪天在牌面里顺手补一枚 #xxxxxx 把已签色板绕过去。
+  const rootBlock = (css.match(/:root \{[\s\S]*?\n\}/) || [''])[0];
+  const PALETTE = [['--cream', '#fbf3e4'], ['--ink', '#1b2a4a'], ['--tomato', '#e24b33'],
+    ['--mustard', '#f2b233'], ['--teal', '#2e9e8f'], ['--paper', '#fffaf0']];
+  const palBad = PALETTE.filter(([k, v]) => !rootBlock.includes(`${k}: ${v};`));
+  const NEW_RULES = ['.windrow .lrowtop', '.wplate', '.pickrow', '.netplate', '.netv', '.bcast', '.grp', '.netchk', '.carry'];
+  const hexInNew = NEW_RULES.filter(c => /#[0-9a-fA-F]{3,8}/.test(rule(c)));
+  check('硬约束·色板零改动：六枚已签变量逐字在场，本批新增规则块里一个新十六进制色值都没写（改色板要 Orange 另下签）',
+    palBad.length === 0 && hexInNew.length === 0, `缺格[${palBad.map(p => p[0]).join(' ') || '无'}]｜带新色[${hexInNew.join(' ') || '无'}]`);
+
+  // 2) 面板语言：三段式那三块外壳必须是 2px 墨线 + 硬边偏移阴影，与全站同一套（嫁接法只借构图，不借皮）。
+  const skinBad = ['.netplate', '.bcast', '.grp'].filter(c =>
+    !/border: 2px solid var\(--ink\)/.test(rule(c)) || !/box-shadow: 4px 4px 0 var\(--ink-2\)/.test(rule(c)));
+  check('硬约束·面板语言照旧：净利牌 / 播报条 / 折叠组三块都是 2px 墨线 + 4px 硬边偏移阴影（圆角半径也走现成 token，没造新的）',
+    skinBad.length === 0, `不合规[${skinBad.join(' ') || '无'}]`);
+
+  // 3) 硬约束·SAVE_VERSION 与存档：单上写「不动」，这里就把那一串字钉住；新模块连它的名字都不许出现。
+  check('硬约束·SAVE_VERSION 仍是 v4.9.3-cal.2，播报模块全文不叫 SAVE_VERSION / localStorage，也不写任何 state 字段',
+    SAVE_VERSION === 'v4.9.3-cal.2' && !/SAVE_VERSION|localStorage|sessionStorage/.test(bcastCode)
+      && !/\bstate\b/.test(bcastCode), `SAVE_VERSION = ${SAVE_VERSION}`);
+
+  // 4) 硬约束·骨不动（呈现层拆得干净那一面）：新模块零 import 零依赖，引擎与数据层认不得它。
+  const bcastUsers = files.filter(f => /settle-broadcast|broadcastLine|inoutTotals|BROADCAST_POOL/.test(readFileSync(f, 'utf8')))
+    .map(rel2).sort();
+  check('硬约束·骨不动：settle-broadcast.js 零 import（借不到引擎也就改不动引擎），引用点只有 ui/main.js 一处，src/engine 与 src/data 全盲',
+    (bcastSrc.match(/^import .*$/gm) || []).length === 0
+      && !/\bMath\.random\b|\bDate\.now\b|setTimeout|setInterval/.test(bcastCode)
+      && bcastUsers.join(' ') === 'ui/main.js ui/settle-broadcast.js',
+    `引用点[${bcastUsers.join(' ')}]｜随机 0｜计时 0`);
+  const settleAt = mainSrc.indexOf('settle() {');
+  const settleSrc = mainSrc.slice(settleAt, mainSrc.indexOf('night() {', settleAt));
+  check('硬约束·不新增导航与流程步骤：结算屏三段只用原生 <details> 折叠（零 JS），屏上控件还是那一颗 data-act="evening"，data-nav 一个没有',
+    !/data-nav=/.test(settleSrc) && (settleSrc.match(/data-act="([a-z]+)"/g) || []).join() === 'data-act="evening"'
+      && !/onclick|addEventListener|<script/.test(settleSrc)
+      && (settleSrc.match(/<details class="grp">/g) || []).length === 2 && !/details[^>]*\sopen/.test(settleSrc),
+    '两颗 <details>、默认全收起、尾部一颗按钮');
+
+  // 5) 第 7 条验收加项·「进账合计 − 出账合计 = 净利，分毫不差」：拿 r16 那四路参考轨迹的每一日报表逐日核整数分。
+  //    口径全取 dailyReport 已经落好的格（ledger.js:28/29/35 那三条恒等式），所以这不是自证：
+  //    任何一格账目在批里被挪走或漏算，这里就会在某一天的某一路上红出来。
+  let repDays = 0;
+  const repBad = [];
+  for (const [key, run] of Object.entries(runs)) {
+    for (const rep of run.state.DailyReports) {
+      repDays++;
+      const { inCents, outCents } = inoutTotals(rep);
+      if (inCents - outCents !== rep.netOpsCents) {
+        repBad.push(`${STRATEGIES[key].name}D${rep.day}:${inCents}-${outCents}=${inCents - outCents}≠${rep.netOpsCents}`);
+      }
+    }
+  }
+  check(`第 7 条：进账合计 − 出账合计 = 经营净额，${repDays} 个营业日逐日逐分对平（批里没挪走一格账、也没多算一笔）`,
+    repBad.length === 0, repBad.slice(0, 3).join(' / ') || `${repDays} 日全平`);
+
+  // 6) 合计与屏上明细行同源：出账组里那三行食材 / 包装 / 添加剂相加必须就是引擎的 cogsCents，
+  //    「折叠只藏行，不藏数」——小计收掉之后，玩家能核对的只剩明细，明细再加不回合计就是账目事故。
+  const rowsBad = [];
+  for (const run of Object.values(runs)) {
+    const t = run.state.today, rep = run.state.DailyReports[run.state.DailyReports.length - 1];
+    if (!t || !rep || !rep.cogsCents) continue;
+    if (t.ingredientCents + t.packingCents + t.additiveCents !== rep.cogsCents) {
+      rowsBad.push(`D${rep.day}:${t.ingredientCents}+${t.packingCents}+${t.additiveCents}≠${rep.cogsCents}`);
+    }
+  }
+  check('出账组三行明细（食材 / 包装 / 添加剂）相加＝那一格 cogsCents：折叠把「成本合计」收掉了，剩下的行必须还能自己加回来说得的数',
+    rowsBad.length === 0, rowsBad.slice(0, 3).join(' / ') || '四路末日均平');
+
+  // 7) 结算三段顺序与明细行不丢：净利牌在最前、播报条紧随、两组折叠在后；屏上每一行的字面都从现版搬来。
+  //    「成本合计 / 销售毛利」两格按折叠口径收掉（它们是中间小计不是明细行）；尾部那句定义话仍写「销售毛利」，
+  //    那是账本逐日账里的字段名，本批不动它——列进第 5 条回报，等 Orange 判要不要跟着换字。
+  const iNet = settleSrc.indexOf('class="netplate"');
+  const iBcast = settleSrc.indexOf('class="bcast"');
+  const iGrp = settleSrc.indexOf('<details class="grp">');
+  const ROW_LABELS = ['卖出', '流水', '食材成本（卖掉的才算）', '隔夜报损', '固定支出', '人工 · 小豆日结',
+    '试吃', '样品食材（今天从柜里出，不另掏现金）', '今晚自动还款', '现金', '还欠'];
+  const labelGone = ROW_LABELS.filter(x => !settleSrc.includes(x));
+  check('第 7 条版面：净利大字最先 → 播报行紧随 → 两组折叠在后；明细十一行一行不丢（卖出那格升进牌里，字与数照搬）',
+    iNet >= 0 && iNet < iBcast && iBcast < iGrp && labelGone.length === 0
+      && !/<td>成本合计<\/td>/.test(settleSrc) && !/<td>销售毛利<\/td>/.test(settleSrc)
+      && settleSrc.includes('PACKING_NAMES[state.PackingTier]') && settleSrc.includes('sceneImg(\'settlement\''),
+    `顺序[${iNet},${iBcast},${iGrp}]｜缺行[${labelGone.join('、') || '无'}]`);
+
+  // 8) 结算屏用到的每个类都在 theme.css 里（§25 同一把尺：少一个类＝真机上一块没样式的哑文本）。
+  //    例外只有 .roll：它是滚动的那一层挂钩，按追补单的裁定「终值由模板先写好、不写 CSS 关键帧」（theme.css:525），本来就没有样式。
+  const sClasses = [...new Set((settleSrc.match(/class="([^"]*)"/g) || []).map(m => m.slice(7, -1))
+    .flatMap(s => s.replace(/\$\{[^}]*\}/g, ' ').split(/\s+/)).filter(Boolean))];
+  const sMissing = sClasses.filter(c => c !== 'roll' && !has(c));
+  check('结算屏用到的每个类都在 theme.css 里（netplate / netk / netv / bcast / grp / netchk / carry 一枚不缺；.roll 除外，它按裁定只有 JS 挂钩没有样式）',
+    sMissing.length === 0 && ['netplate', 'netk', 'netv', 'bcast', 'grp', 'netchk', 'carry'].every(has),
+    `用[${sClasses.sort().join(' ')}]｜缺[${sMissing.join(' ') || '无'}]`);
+  check('第 7 条①「放大」走现成字号 token：净利数字取 h1 那一档 26px，不新增字号；正负色仍由 .pos / .negv 决定（亏的日子不许涂绿）',
+    /\.netv \{[^}]*font-size: 26px/.test(css) && !/\.netv \{[^}]*color:/.test(css),
+    rule('.netv').trim());
+
+  // 9) 播报池：四类 × 三句、句内只许中文与钱数（拉丁字母＝计数器名与字段名的入口，一刀切掉），择句确定性。
+  const kinds = Object.keys(BROADCAST_POOL);
+  const poolFlat = kinds.flatMap(k => BROADCAST_POOL[k]);
+  const sample = { day: 3, revenueCents: 100000, writeoffCents: 0, soldOutText: '', inCents: 100000, outCents: 75000, netOpsCents: 25000 };
+  const said = kinds.flatMap(k => BROADCAST_POOL[k].map(v => v.t({ ...sample, soldOutText: '粉面、汤底（每碗耗 2 份）', writeoffCents: 40000 })));
+  const latin = said.filter(s => /[A-Za-z]/.test(s));
+  const leaks = said.filter(s => /%|↑|↓|→|系数|乘数|概率|暗线|档位|Rep|Risk|AvgQ3|RegularStory/.test(s));
+  const blanks = said.filter(s => !s || /NaN|undefined|null/.test(s));
+  check('第 7 条②：模板池四类起步、每类三句、字面互不重复；十二句里零拉丁字母（Rep / Risk / COGS 这类字段名进不来）、零禁用措辞、无空句与 NaN',
+    kinds.join(' ') === BROADCAST_KINDS.join(' ') && kinds.join(' ') === 'record soldout waste flat'
+      && poolFlat.length === 12 && new Set(said).size === 12 && latin.length === 0 && leaks.length === 0 && blanks.length === 0,
+    `池[${kinds.map(k => `${k}:${BROADCAST_POOL[k].length}`).join(' ')}]｜带字母[${latin.join('|') || '无'}]｜越线[${leaks.join('|') || '无'}]`);
+
+  // 10) 择句只认当日明账，且同账必同句；优先级照单上的行文顺序（流水新高 > 卖断 > 报损 > 平平无奇）。
+  const pick = (over, prevBest) => broadcastLine({ ...sample, ...over }, prevBest).kind;
+  const order = [
+    ['record', pick({ revenueCents: 100001 }, 100000) === 'record' && pick({ revenueCents: 100001, soldOutText: '粉面', writeoffCents: 90000 }, 100000) === 'record'],
+    ['soldout', pick({ revenueCents: 100000, soldOutText: '粉面' }, 100000) === 'soldout'],
+    ['waste', pick({ revenueCents: 100000, writeoffCents: 30000 }, null) === 'waste'],
+    ['flat', pick({ revenueCents: 100000, writeoffCents: 29999 }, null) === 'flat'],
+  ];
+  const wrongOrder = order.filter(([, ok]) => !ok).map(([k]) => k);
+  const once = broadcastLine(sample, null), twice = broadcastLine(sample, null);
+  const threeDays = [1, 2, 3].map(d => broadcastLine({ ...sample, day: d }, null).text);
+  check('择句确定性：优先级四类各验一次（第一天没有「上一笔」可比 ⇒ 不吹流水新高）；同账两次调用同一句；连三天各轮一遍变体（按 Day 取模，不掷随机）',
+    wrongOrder.length === 0 && once.kind === twice.kind && once.text === twice.text
+      && new Set(threeDays).size === 3 && threeDays.every(s => s === broadcastLine({ ...sample, day: 1 }, null).text || true),
+    `优先级越界[${wrongOrder.join(' ') || '无'}]｜三日变体 ${new Set(threeDays).size}/3`);
+
+  // 11) 第 1 / 2 条的实物：称重说明三种操作都写实话（点按 / 按住 / 捏出），包装那一行改的是排版不是价。
+  check('第 1 条：称重说明三种操作各有一句实话（轻点添一小撮 + 按住不松 + 松手定格 + 捏出减量），不在屏上写死克数——步长是 +5 / +1 分段的，数字归单子右边那一格',
+    mainSrc.includes('轻点一下添一小撮') && mainSrc.includes('按住不松') && mainSrc.includes('松手定格')
+      && mainSrc.includes('捏出一点') && !/轻点[^\n]{0,12}5 克/.test(mainSrc.slice(mainSrc.indexOf('先亮单子'), mainSrc.indexOf('先亮单子') + 400)),
+    '秤上一句不含写死的 5 克');
+  check('第 2 条：定价页那一排加的是 .pickrow（整排可换行、按钮内不拆字），价格数字与 data-act 一个字没动',
+    /\.pickrow \{ flex-wrap: wrap; \}/.test(css) && /\.pickrow button \{ white-space: nowrap; \}/.test(css)
+      && (mainSrc.match(/class="row pickrow"/g) || []).length >= 1,
+    '「普通餐盒 · 0.30 元/碗」那排挂 .pickrow');
+
+  // 12) 第 3 / 4 条的留白账：市场那一格是本批新补（#marketDetail），「我的」页那一格沿的是已签的 --tab-clear 预留——
+  //     单上「≥ 底部导航高度」这一条现版本来就满足（预留 190px + 安全区 > 导航盒 94px + 安全区），不许为它再叠一层。
+  check('第 4 条：市场长列表末尾补了 56px（吸底汇总条不再压住最后一张档口卡）；第 3 条的 hub 预留量逐字未动，「我的」页不许叠第二层留白',
+    /#marketDetail \{ padding-bottom: 56px; \}/.test(css)
+      && /--tab-clear: calc\(var\(--tab-h\) \+ var\(--tab-pad\) \+ var\(--tab-gap\) \+ env\(safe-area-inset-bottom\)\)/.test(css)
+      && /#app\.hasTabs \{ padding-bottom: calc\(96px \+ var\(--tab-clear\)\); \}/.test(css),
+    '预留 = 96px + 74 + 10 + 10 + 安全区');
+
+  // 13) 第 5 条走「先回报、签后再落」：改动清单正本必须落在仓里，本批一行 UI 文案梗化代码都不许提前上。
+  check('第 5 条：文案梗化改动清单作为待签件在仓（draft-ui-copy-grooming-20261105.md），本批未落任何一处——清单没签就先改＝先斩后奏',
+    statSync(join(HERE, '..', 'draft-ui-copy-grooming-20261105.md')).isFile()
+      && readFileSync(join(HERE, '..', 'draft-ui-copy-grooming-20261105.md'), 'utf8').includes('本批未落码'),
+    '清单件在场');
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
