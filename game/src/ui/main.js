@@ -16,7 +16,9 @@ import { ticketlessCostCents } from '../engine/inspection.js';
 import { competitionOn, streetBoard } from '../engine/competition.js';
 import { evalCondition } from '../engine/dsl.js';
 import { EVENTS } from '../data/events.js';
-import { armAudio, sfx, tapEdge, isMuted, setMuted, motionCue, setBoil } from './audio.js';
+import { armAudio, sfx, tapEdge, isMuted, setMuted, motionCue, setBoil, playVoice, advanceVoice, stopVoice } from './audio.js';
+// 特殊事件配音的挂载表（挂载单 voice-qc-mount-20261105）：本文件只问「这一段该出声的是哪几句」，出声全在 audio.js。
+import { voiceIntroLines, voiceResultLines } from '../data/voice.js';
 // 开场动画（task-opening-cinematic-20261102）：只借两个入口——新档首播、以及「我的」页重看。
 // 整层挂 body、不 import 引擎，撤掉 = 删这一行 + act 里两处 + me() 里那颗按钮 + theme.css 那一块。
 import { introShouldPlay, showIntro } from './intro.js';
@@ -265,6 +267,14 @@ app.addEventListener('click', e => {
   // 追补单三：点按即落定。落在这一屏任何一处都算，位置在换屏与选择逻辑之前；
   // 滚动期间没有加过任何 pointer-events，所以「落定」与「按到按钮」是同一只手，不互相挡。
   if (rollCancel) rollCancel();
+  // 追补单二：王老板线四套专属都「点按可跳过整段」——遮罩上再加一个 fx-done，CSS 把这一屏的子件全钉到落定态，
+  // 同样不留计时器。延后出现的按钮在落定前不接点击（theme.css 的 pointer-events），所以头一下必定是跳过，
+  // 不会被一颗还看不见、但按下去就会扣钱的按钮吃掉。（closest 上移到 act 之前：配音那一格要认这一次按的是不是入场）
+  const skip = e.target.closest('.overlay.fx-wang');
+  // 配音点按推进（挂载单 voice-qc-mount-20261105）：玩家点按＝跳当前句进下一句，队列空着就什么都不做。
+  // 唯一让位的是王老板线入场那一下——落定前按钮不接点击，那一下归动画，不许顺手吃掉一句词。
+  // 排在 act 之前：卡片被点选之后就归结果句（检查两条），旧句序不再往前跳。
+  if (!(skip && !skip.classList.contains('fx-done'))) advanceVoice();
   if (tab) return goTab(tab.dataset.tab);
   if (nav) {
     if (nav.dataset.nav === 'ledger') { ledgerBack = phase; return go('ledger'); }
@@ -275,10 +285,6 @@ app.addEventListener('click', e => {
   // 放在 act 之后，点在按钮上的那一下仍旧照常走选择逻辑（.text 里没有按钮，两者不打架）
   const typed = e.target.closest('.event .text');
   if (typed) typed.classList.add('done');
-  // 追补单二：王老板线四套专属都「点按可跳过整段」——遮罩上再加一个 fx-done，CSS 把这一屏的子件全钉到落定态，
-  // 同样不留计时器。延后出现的按钮在落定前不接点击（theme.css 的 pointer-events），所以头一下必定是跳过，
-  // 不会被一颗还看不见、但按下去就会扣钱的按钮吃掉。
-  const skip = e.target.closest('.overlay.fx-wang');
   if (skip) skip.classList.add('fx-done');
 });
 // 按住与抬起要各记一次：见 refreshForecast 上方的 P2-2 注（捕获阶段先于按钮自身与失焦处理）
@@ -856,13 +862,16 @@ function cook() {
 function afterEvening() {
   if (pendingEvent) return go(phase);        // 已经抽出来了，重复点「打烊」不再二次抽卡
   pendingEvent = eveningDraw(state, rng);  // 第 10 步抽取
-  if (pendingEvent) { sfx('pop'); return go(phase); }        // 停在弹层等玩家选（接入单 594b908：弹出走独立的 pop）
+  // 事件出场＝配音出场（挂载单 voice-qc-mount-20261105 第一条：按序号逐句播）。九条目标事件全是 timing:'evening'，
+  // 晨间没有挂载对象，所以挂载点只有这一处。出声与出声成败都不挡这一句 go：正文和选项照原时序渲染，音频只负责出声。
+  if (pendingEvent) { sfx('pop'); playVoice(voiceIntroLines(pendingEvent.id, state)); return go(phase); }   // 停在弹层等玩家选（接入单 594b908：弹出走独立的 pop）
   return finishNight(null);
 }
 
 function resolvePending(choice) {
   const ev = pendingEvent;
   pendingEvent = null;
+  stopVoice();   // 卡片一落定，这一段对白就收：扩写演完落回原选择点，出场句不许越过玩家的点选往后播
   if (ev.timing === 'morning') {
     resolveChoice(state, ev, choice);      // 第 6 步当场入账
     saveGame(state);
@@ -873,9 +882,13 @@ function resolvePending(choice) {
 
 // ev 显式传入：晚间事件要等玩家点选才落地，抽到的那张不能在中途被清空
 function finishNight(choice, ev = pendingEvent) {
-  nightClose(state, rng, ev || null, choice ?? null);
+  const res = nightClose(state, rng, ev || null, choice ?? null);
   pendingEvent = null;
   saveGame(state);
+  // 检查两条的结果句（vo_insp_*/vo_insp2_* 的 02 起）挂在这里：认的是 inspection.js 刚写进 today.notes 的那句判定原文，
+  // 判哪一档就播哪一句（挂载单「按结果原文落点挂，不许顺序乱播」）。其余七条没有结果句，这一步天然为空。
+  const judge = res && res.evening ? res.evening.choice.judgment : null;
+  if (judge) playVoice(voiceResultLines(judge.id, state.today.notes));
   return go('night');
 }
 

@@ -130,7 +130,7 @@ export const isMuted = () => muted;
 export function setMuted(v) {
   muted = !!v;
   localStorage.setItem(PREF_KEY, muted ? '1' : '0');
-  if (muted) { stopBgm(); stopBoil(); boilWanted = false; if (ctx) ctx.suspend(); }
+  if (muted) { stopBgm(); stopBoil(); boilWanted = false; stopVoice(); if (ctx) ctx.suspend(); }
   else if (ensure()) {
     if (ctx.state === 'suspended') ctx.resume().then(openAll, () => {});
     else openAll();
@@ -245,6 +245,100 @@ export function tapEdge() {
   queueMicrotask(() => { if (edgePass !== id) sfx('tap'); });
 }
 
+// ── 特殊事件配音（挂载单 voice-qc-mount-20261105，Orange `e21520c`）────────────────────
+// 台词与句序在 src/data/voice.js，这一层只管出声与推进。三条纪律照单执行：
+// ① 音频绝不挡流程——playVoice 只出声，卡片正文、选项、点选逻辑一处都不等它（挂载单「文字与选项的原有时序不许被音频拖住」）；
+// ② 缺文件/解不开＝静默跳过那一句直接下一句，不卡事件、不报错、不上画面（vo_poach_02 补录没到，正是这一条在兜 01→03→04→05，
+//    所以「补录哪一句」绝不允许写死进代码：文件名到位那天自动接上，表与代码一字不改）；
+// ③ 与 BGM/SFX 同一个静音开关（guiju-m1-audio）：静音时整段不播、连文件都不取，中途按下也立刻收声收队列。
+// 取件按句惰性发（一句一发，解开的留缓冲），不进 armAudio 那一批：48 句成品 1.7 MB，全量预取会拖慢首屏。
+// 响度：成品已归一到 −16 LUFS / 峰值 −1.5 dB，过 VOICE_TRIM × SFX_GAIN × MASTER = −18.3 LUFS 出链，
+// 压在已签的 BGM 出链（−22.9 LUFS）之上 4.6 个 LU，峰值 0.64 满幅不碰顶。扳柄就 VOICE_TRIM 这一格，真机听感终判归店主。
+const VOICE_TRIM = 1.0;
+let voiceBufs = {}, voiceFail = {}, voiceWanted = new Map();   // 解好的缓冲 / 失败原因 / 在途那一条的 Promise（同名重复请求共用，绝不等出新句）
+let voiceSeq = [], voiceI = 0, voiceSrc = null, voiceTick = 0;  // voiceTick = 本轮出声编号：异步回来的句子靠它认领「还是不是我该放的那一句」
+
+// 事件出场：按挂载表给好的句序逐句播（表已经在 main.js 那边过完分支与判定条件）。
+// 一句一发的惰性取件留到这一层做，不在 armAudio 那一批里预取；但整段一开场就并发取齐——
+// 逐句播要是等上一句播完才去取下一句，句间就多出一次网络等待，台词会对不上玩家正在读的那一行。
+export function playVoice(names) {
+  stopVoice();
+  if (muted || !Array.isArray(names) || !names.length) return;
+  voiceSeq = names.slice(); voiceI = 0;
+  if (!ctx) ensure();
+  names.forEach(voiceFetch);        // 并发取齐整段（没有 WebAudio 时 voiceFetch 自己就不取）
+  voiceStep();
+}
+
+// 点按＝跳当前句进下一句；队列空着就是普通点按，什么都不多做
+export function advanceVoice() {
+  if (!voiceSeq.length) return;
+  const rest = voiceSeq.slice(voiceI + 1);
+  stopVoice();
+  if (!rest.length || muted) return;
+  voiceSeq = rest; voiceI = 0;
+  voiceStep();
+}
+
+// 收掉这一整段：编号先加，在途的取件与解码回来对不上号就自己作废
+export function stopVoice() {
+  voiceTick++;
+  voiceSeq = []; voiceI = 0;
+  if (voiceSrc) {
+    voiceSrc.onended = null;
+    try { voiceSrc.stop(); } catch {}
+    voiceSrc.disconnect(); voiceSrc = null;
+  }
+}
+
+// 同名重复请求共用这一支 Promise：取到留缓冲，取不到/解不开只记原因（挂载单「文件缺失或解码失败 ⇒ 静默走纯文字」）
+function voiceFetch(name) {
+  if (voiceBufs[name] || voiceFail[name]) return Promise.resolve(voiceBufs[name] || null);
+  if (!ctx) return Promise.resolve(null);
+  let p = voiceWanted.get(name);
+  if (!p) {
+    p = fetch(`./audio/${name}.ogg`)
+      .then(r => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then(b => ctx.decodeAudioData(b))
+      .then(buf => { voiceBufs[name] = buf; return buf; })
+      .catch(e => { voiceFail[name] = String(e && e.message || e); });
+    voiceWanted.set(name, p);
+  }
+  return p;
+}
+
+// 放当前这一句。取不到就跳下一句，取到了就播完自动接下一句——队列里任何一步都不留计时器，也不碰选项
+function voiceStep() {
+  const tick = ++voiceTick;
+  voiceSrc = null;
+  if (muted) { voiceSeq = []; return; }
+  while (voiceI < voiceSeq.length && voiceFail[voiceSeq[voiceI]]) voiceI++;   // 已知坏件：一句都不等
+  if (voiceI >= voiceSeq.length) { voiceSeq = []; return; }
+  if (!ctx && !ensure()) { voiceSeq = []; return; }                            // 老 WebView 没有 WebAudio：整层不出声，玩法照常
+  if (ctx.state === 'suspended') { voiceSeq = []; return; }                     // 被挂起就不硬起，队列收掉（切后台回来不追播旧对白）
+  const i = voiceI, name = voiceSeq[i];
+  if (voiceBufs[name]) { voicePlay(voiceBufs[name], tick, i); return; }
+  voiceFetch(name).then(buf => {
+    if (tick !== voiceTick || voiceI !== i) return;   // 玩家已经点到下一句/卡片已落定：这一句过期，不出声
+    if (buf) voicePlay(buf, tick, i);
+    else { voiceI++; voiceStep(); }                   // 取不到/解不开：静默跳过，绝不让整段停在这一格
+  });
+}
+
+function voicePlay(buf, tick, i) {
+  if (tick !== voiceTick || i !== voiceI) return;
+  try {
+    voiceSrc = ctx.createBufferSource(); voiceSrc.buffer = buf;
+    const g = ctx.createGain(); g.gain.value = VOICE_TRIM;
+    voiceSrc.connect(g); g.connect(sfxBus);
+    voiceSrc.onended = () => {
+      if (tick !== voiceTick) return;                 // 被 stopVoice 摘掉 onended 之外，挂起/中断回来的那一下也一并作废
+      voiceSrc = null; voiceI++; voiceStep();
+    };
+    voiceSrc.start();
+  } catch { voiceSeq = []; voiceSrc = null; }         // 出声这一格任何意外都不许把玩法带下水：收队列，静默走文字
+}
+
 // 回报与自检用的实时读数（不写进任何画面）
 export function audioStatus() {
   return { available: !!ctx, state: ctx ? ctx.state : 'none', muted, gestured,
@@ -254,7 +348,10 @@ export function audioStatus() {
     sfxFilesReady: Object.keys(fileBufs).length, sfxFilesTotal: ALL_FILES.length,
     sfxFileFail: Object.keys(fileFail).length ? fileFail : null,
     boilPlaying: !!boilSrc, boilWanted, fileTrim: FILE_TRIM, boilTrim: BOIL_TRIM,
-    boilSeconds: fileBufs[BOIL_FILE] ? +fileBufs[BOIL_FILE].duration.toFixed(3) : null };
+    boilSeconds: fileBufs[BOIL_FILE] ? +fileBufs[BOIL_FILE].duration.toFixed(3) : null,
+    // 配音层（挂载单 e21520c）：解开了几句、哪几句取不到、当前这段还剩几句（真机回听时「48 句到底落地没有」就看这一串）
+    voiceLoaded: Object.keys(voiceBufs).length, voiceFail: Object.keys(voiceFail).length ? voiceFail : null,
+    voiceLine: voiceSeq.length ? voiceSeq[voiceI] : null, voiceLeft: voiceSeq.length, voiceTrim: VOICE_TRIM };
 }
 
 // ── 声音标记（动画单 task-event-motion-20261102 第二条）：整块由下面的开关隔离 ──────────
