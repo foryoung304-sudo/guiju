@@ -345,6 +345,63 @@ button.up { background: var(--tomato); color: var(--paper); white-space: nowrap;
 .scale.ok .readout { color: #1b2e4e; background: var(--mustard); }
 .scale.ok .readout .jin { border-left-color: rgba(27, 42, 74, .35); }
 
+/* ── 工单 task-ui-visual-20261105 第一 / 二件：顾客气泡 · 金色浮字 · 称重进度轨 ──────────
+   三条口径钉死在这一节里，JS 那侧不另立一份：
+   ① 一桌一泡（槽位 #bub-顾客号 天生一桌一个），同屏气泡 ≤2、浮字 ≤3——上限值只有 feedfx.js 那一处；
+   ② 只用 transform / opacity 动，色一律吃现成 var(--…)，本节零个新色值（色板是 Orange 签的，动色板要另下签）；
+   ③ 降级屏（prefers-reduced-motion）由 main.js 的 fxOn 挡在门外：那一档连节点都不生成，不留动不起来的空壳。 */
+.ordercard { position: relative; }
+.bub { position: absolute; top: 10px; right: 10px; z-index: 3; display: none; pointer-events: none;
+  max-width: 56%; padding: 4px 8px; font-size: 12px; line-height: 1.35;
+  background: var(--paper); border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink-2); }
+.bub.on { display: block; animation: fxBub 2600ms cubic-bezier(.2, .7, .2, 1) 1 both; }
+/* 泡尖朝左指着头像：一颗硬边三角，不做模糊投影（STYLE-FLATPLUS 禁写实光影） */
+.bub::before { content: ""; position: absolute; left: -7px; bottom: 8px;
+  border: 4px solid transparent; border-right-color: var(--ink); }
+@keyframes fxBub {
+  0% { opacity: 0; transform: translate3d(0, 4px, 0) scale(.86); }
+  14% { opacity: 1; transform: none; }
+  76% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translate3d(0, -6px, 0) scale(.96); }
+}
+/* 金色浮字：从数字出现的那一行上浮消散。芥末底 + 墨蓝字（= 风向牌那一档已签的 11.53:1 语言），
+   不写成芥末字压纸底——那只有 1.80:1，加大也糊。摘节点交给 animationend，JS 一侧不留计时器。 */
+.float { position: absolute; right: 4px; top: -14px; z-index: 4; pointer-events: none;
+  padding: 0 6px; font-size: 13px; font-weight: 700; white-space: nowrap;
+  background: var(--mustard); color: var(--ink); border: 1.5px solid var(--ink);
+  animation: fxFloatUp 900ms ease-out 1 both; }
+.gavecell, .grabrow { position: relative; }   /* 浮字的两个锚点：数出现在哪一行，字就从哪一行上浮 */
+@keyframes fxFloatUp {
+  0% { opacity: 0; transform: translate3d(0, 6px, 0); }
+  22% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translate3d(0, -22px, 0); }
+}
+/* 克数大字气泡与进度轨读同一枚 --p（paintGram 一次写死），进带位复用已签的那一枚 .ok：
+   秤面反色、气泡描边、色带点亮三处都只吃它，不出第四个口径。 */
+.gramrow { display: flex; align-items: center; gap: 8px; margin: 8px 0 2px; }
+.grambub { flex: none; min-width: 78px; text-align: center; padding: 3px 9px;
+  font-size: 22px; font-weight: 700; background: var(--paper);
+  border: 2px solid var(--ink); box-shadow: 3px 3px 0 var(--ink-2); }
+.ordercard.ok .grambub { border-color: var(--teal); }
+.grambub.settle { animation: fxSettle 150ms ease-out 1; }
+@keyframes fxSettle {   /* 松手顿帧 + 回弹：单上写「≤150ms」，这里就钉在 150ms 顶格 */
+  0% { transform: none; }
+  34% { transform: translate3d(0, -3px, 0) scale(1.06); }
+  66% { transform: translate3d(0, 1px, 0) scale(.97); }
+  100% { transform: none; }
+}
+.weigauge { flex: 1 1 auto; min-width: 0; position: relative; height: 16px;
+  background: var(--paper); border: 2px solid var(--ink);
+  /* 细密刻度 = 满幅 20 等分（满幅本身是纯几何：要的克数 ×1.25），只当尺子看，不参与任何判定 */
+  background-image: repeating-linear-gradient(to right, var(--ink-2) 0 1px, transparent 1px 5%); }
+.weigauge::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0;
+  width: var(--p, 0%); background: var(--mustard); }
+.weigauge .band { position: absolute; top: 0; bottom: 0; left: var(--band, 78%);
+  right: calc(100% - var(--band2, 88%)); background: var(--teal); opacity: .35; }
+.ordercard.ok .weigauge .band { opacity: .7; }   /* 过带点亮一档 */
+.weigauge .mark { position: absolute; top: -1px; bottom: -1px; left: var(--p, 0%);
+  width: 2px; margin-left: -1px; background: var(--ink); }
+
 /* ── 结算页账目 ─────────────────────────────────────────── */
 table { width: 100%; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
 th, td { text-align: left; padding: 4px 6px; border-bottom: 1.5px solid var(--ink-2); }
@@ -388,6 +445,25 @@ td.r, th.r { text-align: right; }
   font-size: 13px; margin-bottom: 6px;
 }
 .comment.hot { border-left-color: var(--tomato); }
+
+/* ── 工单 task-ui-visual-20261105 第三件：今晚留言的信封三态 ──────────────────────────
+   壳子只加一层读法，内容一个字不动：留言正文、条数、出现条件、底部按钮与流程顺序都还是原来那一套。
+   未读 = 封口（硬阴影浮起 + 左侧芥末色条，沿 .panel.warn / .comment 已签的「左边一条＝这条待办」语言，
+   不借用标签栏那颗红点——红点只两语义是签过的红线）只露一行标题；
+   点开 = 拆封（正文在原位展开，走的还是 .comment 那一层皮）；再点一下 = 压平置后
+   （阴影收回、色条转中性、字压淡，排到队尾）。三态只活在当晚会话里（main.js 的 envState），不进存档、不加键。 */
+.env {
+  display: block; width: 100%; text-align: left; position: relative; margin-bottom: 8px;
+  padding: 8px 10px; font-size: 13px; background: var(--paper);
+  border: 2px solid var(--ink); border-left: 8px solid var(--mustard); box-shadow: 4px 4px 0 var(--ink-2);
+}
+.env.read { border-left-color: var(--ink-2); box-shadow: none; opacity: .62; }
+/* 拆封那一刻由一层阴影升成 .panel 那套二层硬阴影（已签的「抬起来」语言）：封口 → 抬起 → 压平，三态分得开 */
+.env.open { box-shadow: 4px 4px 0 var(--ink-2), 8px 8px 0 var(--cream-2); }
+.env:active { transform: translate(2px, 2px); }
+.envt { display: block; font-weight: 700; letter-spacing: .04em; line-height: 1.35; }
+.envbody { display: block; margin-top: 6px; }
+.envbody[hidden] { display: none; }   /* .comment 的块级样式会盖掉 [hidden] 的默认收起，这一格按「正好」徽标同一处理补回来 */
 
 /* ── 事件弹层（立绘 + 对话框）──────────────────── */
 .overlay {
@@ -693,10 +769,12 @@ td.r, th.r { text-align: right; }
    胶囊件（.pill、标签栏与其中的选中块）本来就是圆角语言。 */
 :root { --r: 9px; --r-sm: 5px; }
 .panel, .event, .forecast, .tierrow, .lrow, .sku, .grab, .comment, .pinch, .pinchhint,
-.readout, .scale img, .scene, .inlineart, .tierimg, .mechar, .metier, .face, button {
+.readout, .scale img, .scene, .inlineart, .tierimg, .mechar, .metier, .face, button,
+.bub, .grambub {
   border-radius: var(--r);
 }
 .tag, .chip, .gavecell .exact, .thumb, .skuimg, .ava, button.mini, .wplate,
+.float, .weigauge,
 input[type=number], input[type=text] { border-radius: var(--r-sm); }
 /* 事件弹层的头图与卡框同一条边：半径按 2px 墨线往里收一格，免得两层圆角错出台阶 */
 .event .art { border-radius: calc(var(--r) - 2px) calc(var(--r) - 2px) 0 0; }

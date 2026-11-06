@@ -245,6 +245,14 @@ export function tapEdge() {
   queueMicrotask(() => { if (edgePass !== id) sfx('tap'); });
 }
 
+// 视觉批 I 第二件（工单 task-ui-visual-20261105）·秤上跨整百那一声。素材就是点按那一件（tap-A-softclick，
+// Kenney click_002，店主试听拍板过的那一支），只是在这一格另起一个名字，两条已签的规矩因此一个字不动：
+// ① main.js 里「通用点按」仍只有 tapEdge 一个入口（裁定 d619ed6 那根针钉的是这一格）；
+// ② RATE / SFX_FILES 两张注册表逐字未改（音频单 594b908 那批的针）。
+// 为什么不直接复用 coin：那一件的挂载语义是「单笔收款」，秤上过一格没有钱进出，声音不许把数说成别的数。
+// 抓菜与捏出的按钮都不带 data-act，够不着 tapEdge ⇒ 这一声与通用点按天然不在同一次点击里叠响。
+export const weighTick = () => sfx('tap');
+
 // ── 特殊事件配音（挂载单 voice-qc-mount-20261105，Orange `e21520c`）────────────────────
 // 台词与句序在 src/data/voice.js，这一层只管出声与推进。三条纪律照单执行：
 // ① 音频绝不挡流程——playVoice 只出声，卡片正文、选项、点选逻辑一处都不等它（挂载单「文字与选项的原有时序不许被音频拖住」）；

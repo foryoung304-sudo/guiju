@@ -16,7 +16,7 @@ import { ticketlessCostCents } from '../engine/inspection.js';
 import { competitionOn, streetBoard } from '../engine/competition.js';
 import { evalCondition } from '../engine/dsl.js';
 import { EVENTS } from '../data/events.js';
-import { armAudio, sfx, tapEdge, isMuted, setMuted, motionCue, setBoil, playVoice, advanceVoice, stopVoice } from './audio.js';
+import { armAudio, sfx, tapEdge, weighTick, isMuted, setMuted, motionCue, setBoil, playVoice, advanceVoice, stopVoice } from './audio.js';
 // 特殊事件配音的挂载表（挂载单 voice-qc-mount-20261105）：本文件只问「这一段该出声的是哪几句」，出声全在 audio.js。
 import { voiceIntroLines, voiceResultLines } from '../data/voice.js';
 // 开场动画（task-opening-cinematic-20261102）：只借两个入口——新档首播、以及「我的」页重看。
@@ -27,6 +27,9 @@ import { windCard } from './wind.js';
 // 结算屏第二段那条播报 + 进出两组的合计（工单 task-ui-polish-20261105 第 7 条）：择句规则与词池都在这一层，引擎不认得它。
 import { broadcastLine, inoutTotals } from './settle-broadcast.js';
 import { mergeSelloutNames } from './sellout.js';
+// 营业屏气泡 / 金色浮字 / 夜晚信封（视觉批 I，工单 task-ui-visual-20261105）：文案与上限都在 feedfx.js 那一层，
+// 它零引擎 import、不写 state、不掷随机、不留计时器（撤掉 = 删这一行 + 下面调用点 + theme.css 那两块）。
+import { orderSay, praiseSay, grumbleSay, rushSay, showBubbles, showFloats, envKey, envOrder, envelopeTitle } from './feedfx.js';
 import { drawHandOrders, GRAMS_PER_JIN, stockGrams, gramsCeilingFor } from '../engine/weigh.js';
 import { judgeBlanch, blanchValueAt } from '../engine/blanch.js';
 import { regularLine, REGULAR_SLOTS } from '../data/customers.js';
@@ -87,6 +90,10 @@ let wakePick = false;                        // 早起勾选（占 1 格工时�
 let packingPick = CONFIG.packingTier;        // 第 5 步②打包档
 let flavorPick = { spicy: 3, numbing: 2, umami: 3 };   // 第 5 步③调味三维
 let additivePick = CONFIG.additiveTier;      // 第 5 步④添加剂档
+// 视觉批 I 第三件：今晚信箱的信封三态（封口 / 拆封 / 压平）。只活在这一页会话里——
+// 不进 saveFlow、不进 SAVE_VERSION、不给引擎加一个字段（单上红线，§30 有针盯着这一格）。
+// 刷新页面就重新封口，读没读过是玩家的观感问题，不是存档问题。
+let envState = {};
 let tastingPick = 0;                 // 第 5 步⑤试吃份数（挂了试吃角才出现）
 let scalePick = false;               // 第 5 步⑥显多秤开关（秤在手才出现）
 let ledgerBack = 'morning';
@@ -347,6 +354,7 @@ function render() {
     });
   });
   rollMount();     // 结算屏的主数字：先有终值，再盖显示（非结算屏找不到 .roll，直接返回）
+  mountOrderSay(); // 营业屏开屏那一眼：气泡只在这一屏挂，别的屏走 fxOn 直接返回（视觉批 I 第一件）
   steamPause();    // 热气按可见性起停：换屏重挂时也把「正在后台」这一态补上
 }
 
@@ -447,6 +455,7 @@ function act(host) {
     case 'prepLevel': prepPick[Number(d.station)] = d.level; sfx('prep'); return go('prep');   // 备菜一格 = chop/knife 随机二选一
     case 'wake': wakePick = !wakePick; return go('prep');
     case 'prepDone': return commitPrepDraft();
+    case 'env': return toggleEnv(d.n);                       // 夜晚信箱：拆封 / 压平（只动会话态，不动留言本体）
     case 'open': return openShop();
     case 'cook': return cook();
     case 'bstart': return startBlanch(d.cust);
@@ -507,6 +516,7 @@ function resume() {
 function newDay() {
   rng = makeRng(state);
   orders = []; gramsBy = {}; pendingEvent = null; draft = {};   // 昨天的亲手单、待选事件、组篮草稿不带进今天
+  envState = {};                                                // 昨晚的信封重新封口（视觉批 I 第三件：这是会话态，不是账）
   blanchBy = {};                                                                // 昨天的熟度读数同样不带进今天
   beginDay(state);                          // 第 1 步：晨间结转
   syncProdPicks();
@@ -621,6 +631,16 @@ const TAP_GRAMS = 5;
 const FINE_GRAMS = 1;
 const FINE_GAP = 20;
 const PINCH_RATE = 30;
+// 视觉批 I 第二件：把原先写死在判定式子里的两枚比例请成名字，值一字未改（0.98 = 足称带、1.1 = 该捏回那一道），
+// 好让进度轨的色带和判定读同一个数——一个判定两处口径正是 F8 那轮的教训，此处不留第二份。
+// FULL_SHARE 只出现在 enough 与色带左沿，OVER_SHARE 只出现在 hintWanted 与色带右沿，§30 有针逐字钉这两枚值与出现次数。
+const FULL_SHARE = 0.98;
+const OVER_SHARE = 1.1;
+// 轨道的几何：满幅 = 顾客要的克数 × 1.25。它只决定「画面最右那一边画到哪儿」，不参与任何判定（谁也没读它做取舍）。
+// 不这样留白的话，98%–110% 那一带正好压在轨道最右沿，色带细成一看不见的缝。
+const TRACK_SPAN = 1.25;
+// 整百 tick 的那一枚「百」：秤面上的数跨过去响一声，方向上下都算（克数往下掉过整百同样是「过了一格」）。
+const TICK_EVERY = 100;
 let grab = null;
 let pinch = null;
 
@@ -682,7 +702,16 @@ function stopGrab(e) {
   if (performance.now() - g.t0 < HOLD_DELAY && e?.type !== 'pointercancel') addGrams(g.cust, g.cat, stepFor(g.cust, g.cat));
   refreshOrder(g.cust);
   // ② 抓菜落袋（音频单）：这一口真落了克才出声，指针被系统收走或空放不算
-  if (Number((gramsBy[g.cust] || {})[g.cat] || 0) > g.g0) sfx('grab');
+  const gave = Number((gramsBy[g.cust] || {})[g.cat] || 0);
+  if (gave > g.g0) {
+    sfx('grab');
+    // 视觉批 I 第二件·松手顿帧 + 第一件·出餐浮字：都只挂在「这一口真落了克」那一条既有分支上，
+    // 空放与指针被收走那一趟依旧什么都不放。浮字锚在数字出现的那一行（你称 X 克 所在的那一排）。
+    if (fxOn()) {
+      settleBubble(g.cust);
+      showFloats(app, [{ in: document.getElementById(`lv-${g.cust}-${g.cat}`)?.parentElement, text: `${gave} 克` }]);
+    }
+  }
 }
 
 function startPinch(e, el) {
@@ -690,7 +719,8 @@ function startPinch(e, el) {
   e.preventDefault();
   try { el.setPointerCapture?.(e.pointerId); } catch { /* 同上 */ }
   el.classList.add('on');
-  pinch = { cust: el.dataset.cust, cat: el.dataset.cat, el, t0: performance.now(), last: performance.now(), acc: 0, flow: false, timer: 0 };
+  pinch = { cust: el.dataset.cust, cat: el.dataset.cat, el, t0: performance.now(), last: performance.now(), acc: 0, flow: false, timer: 0,
+    total0: orderTotal(el.dataset.cust) };
   pinch.timer = setInterval(tickPinch, 16);
 }
 
@@ -717,6 +747,8 @@ function stopPinch(e) {
   if (!p.flow && e?.type !== 'pointercancel') addGrams(p.cust, p.cat, -stepFor(p.cust, p.cat));
   usePinchHint();
   refreshOrder(p.cust);
+  // 顿帧同一条规矩也挂在捏回收手这一格：只要这一趟真动了克就定一下（与抓菜共用同一个判据形状，不新造判定）
+  if (fxOn() && orderTotal(p.cust) !== p.total0) settleBubble(p.cust);
 }
 
 // 教学提示只用一次：捏过就整档退场，并立刻落档（spec-weighing-hint-20261031）
@@ -737,8 +769,16 @@ function addGrams(cust, cat, delta) {
   // 引擎那侧 takeStock 本来就按柜量扣（多称的部分收不到钱、只记一笔分量嘀咕），
   // 补上这一道是把「屏上能按出来的数」和「柜里真有的数」钉成同一个数。
   const ceiling = gramsCeilingFor(state, gramsBy, cust, cat);
+  const before = orderTotal(cust);
   const next = Math.round((gramsBy[cust]?.[cat] || 0) + delta);
   gramsBy[cust][cat] = Math.min(ceiling, Math.max(0, next));
+  // 视觉批 I 第二件·整百 tick：这一桌的总克数跨过一格整百，响一声轻的。
+  // 挂在这一支是刻意选的——轻点、按住连加、长按捏出、键盘单击四条路全走这里，写一处就是写全部；
+  // 封顶挡掉的那一截（before === after）天然不响，不需要第二条规矩。
+  // 声音走 audio.js 的 weighTick：素材还是现成音效池里点按那一件（tap-A-softclick），不新录、不外找，
+  // 只是不在 main.js 里直写那条通用点按的边（裁定 d619ed6 的「只剩一个入口」那根针照旧成立）。
+  const after = orderTotal(cust);
+  if (Math.floor(after / TICK_EVERY) !== Math.floor(before / TICK_EVERY)) weighTick();
 }
 
 function orderTotal(cust) {
@@ -747,19 +787,37 @@ function orderTotal(cust) {
   return (o ? o.lines : []).reduce((s, l) => s + Number(gramsBy[cust][l.cat] || 0), 0);
 }
 
-// 秤面跳读的 ±3 克抖动只加在显示上，落进结算的是实际克数；刹车区传 false，显示真值
-function jitterScale(cust, jitter) {
-  const el = document.getElementById('rd-' + cust);
-  if (!el) return;
-  const total = orderTotal(cust);
-  el.textContent = String(jitter ? Math.round(total + (Math.random() * 6 - 3)) : total);
+// 顾客这一单要的总克数：原先在 orderCard、refreshOrder 里各写一遍同样的 reduce，现在进度轨是第三处引用，
+// 收成一支点——三处读同一支，不派生出口径
+function orderWant(cust) {
+  const o = orders.find(x => x.customerId === cust);
+  return o ? o.lines.reduce((s, l) => s + l.grams, 0) : 0;
 }
 
-// 捏回提示的判定：从未捏过、且任一品类已 ≥ 该行目标的 110%
+// 秤面读数、大字气泡、进度轨游标：屏上那三格「同一个数」由这一支笔一起写。
+// shown 是给人看的那一个（高速段带跳读），real 是这一桌真正的总克数（游标跟真值走，不跟着抖，
+// 否则色带会被抖成「进带又出带」，看着像判定在晃）。
+function paintGram(cust, shown, real) {
+  for (const id of ['rd-', 'gramb-']) {
+    const el = document.getElementById(id + cust);
+    if (el) el.textContent = shown;
+  }
+  const gauge = document.getElementById('wg-' + cust);
+  const want = orderWant(cust);
+  if (gauge && want > 0) gauge.style.setProperty('--p', `${(Math.min(1, real / (want * TRACK_SPAN)) * 100).toFixed(2)}%`);
+}
+
+// 秤面跳读的 ±3 克抖动只加在显示上，落进结算的是实际克数；刹车区传 false，显示真值
+function jitterScale(cust, jitter) {
+  const total = orderTotal(cust);
+  paintGram(cust, String(jitter ? Math.round(total + (Math.random() * 6 - 3)) : total), total);
+}
+
+// 捏回提示的判定：从未捏过、且任一品类已 ≥ 该行目标的 110%（这一枚比例与进度轨色带右沿同一个数）
 function hintWanted(o) {
   if (state.pinchHintUsed) return false;
   const g = gramsBy[o.customerId] || {};
-  return o.lines.some(l => Number(g[l.cat] || 0) >= l.grams * 1.1);
+  return o.lines.some(l => Number(g[l.cat] || 0) >= l.grams * OVER_SHARE);
 }
 
 // 「正好」：这一行自己称到的数与目标差 ≤ max(1 克, 目标 1%) 就在**这一行**点一下（只做呈现，不改判定）。
@@ -793,6 +851,17 @@ function refreshExact() {
   if (hit) sfx('exact');   // ③ 称「正好」正反馈叮声
 }
 
+// 松手顿帧（视觉批 I 第二件）：大字气泡自己顶一下再回弹。挂在「这一口真落了克」那一条既有分支上，
+// 判定、克数、封顶一个字不动；摘 class 交给 animationend，这一层不留计时器（同追补单三的手法）。
+function settleBubble(cust) {
+  const el = document.getElementById('gramb-' + cust);
+  if (!el) return;
+  el.classList.remove('settle');
+  void el.offsetWidth;                     // 不强制这一帧重排，连按两次只有第二段动
+  el.classList.add('settle');
+  el.onanimationend = () => el.classList.remove('settle');
+}
+
 // 短斤带（<90%）行内提示的口径：这一行进过碗、松手后仍不足。0 克是「还没称」不是「这一口下去了」，不提示。
 // 预检反馈 F8（0366bd6）：原来还额外豁免「刚松手的那一行」，于是六品类里谁能看到红字，取决于玩家最后放了哪一行——
 // 同屏两人同为 50/100 克，一个有红字一个没有。豁免撤掉后规则对六品类一致：满足条件必出。
@@ -819,39 +888,75 @@ function refreshOrder(cust) {
   const o = orders.find(x => x.customerId === cust);
   const g = gramsBy[cust];
   const setText = (id, txt) => { const el = document.getElementById(id); if (el) el.textContent = txt; };
-  const total = o.lines.reduce((s, l) => s + Number(g[l.cat] || 0), 0);
-  setText('rd-' + cust, String(total));
+  const total = orderTotal(cust);
+  const want = orderWant(cust);
+  paintGram(cust, String(total), total);
   // 预检应修⑦：秤面主读数保持克（真实秤就是这么读），斤换算常驻角标——买菜论斤、称重论克本就是真实口径
   setText('rj-' + cust, `${(total / GRAMS_PER_JIN).toFixed(2)} 斤`);
-  setText('sum-' + cust, `顾客要 ${o.lines.reduce((s, l) => s + l.grams, 0)} 克 · 你称 ${total} 克`);
-  const want = o.lines.reduce((s, l) => s + l.grams, 0);
-  const enough = want > 0 && total / want >= 0.98;
+  setText('sum-' + cust, `顾客要 ${want} 克 · 你称 ${total} 克`);
+  const enough = want > 0 && total / want >= FULL_SHARE;
   const sc = document.getElementById('sc-' + cust);
+  // 视觉批 I：这一枚 ok 是全场唯一的「进带」位（判定式子一字未动）。它同时点亮三处呈现——
+  // 秤面反色、气泡描边转青绿、色带点亮一档；三处都只吃这一枚 class，不出第四个口径。
+  document.getElementById('oc-' + cust)?.classList.toggle('ok', enough);
   if (sc) {
     sc.classList.toggle('ok', enough);
     // 足称那一刻：真机震一下（浏览器/无震动接口的环境自动跳过），音效素材后补
-    if (enough && !okRef[cust]) navigator.vibrate?.(10);
+    if (enough && !okRef[cust]) {
+      navigator.vibrate?.(10);
+      // 「夸」泡：由藏到亮这一次才冒（松手定格与长按捏出的每一跳都走这里，翻回来再翻过去才算第二次）
+      if (fxOn()) showBubbles(app, [{ cust, text: praiseSay() }]);
+    }
   }
   okRef[cust] = enough;
   // 捏回教学：只在「松手定格」后判（refreshOrder 不在按住途中调用），任一品类 ≥110% 且从未捏回才露
   // 长按捏出的每一跳也会走到这里：正在捏的时候不提示「去捏」
   const hint = document.getElementById('hint-' + cust);
   if (hint) hint.hidden = !!pinch || !hintWanted(o);
+  const fx = [];
   for (const l of o.lines) {
     const got = Number(g[l.cat] || 0);
     setText(`lv-${cust}-${l.cat}`, `你称 ${got} 克`);
-    setText(`flag-${cust}-${l.cat}`, rowNote(cust, l, got));
+    // 行内那一句（短斤嘀咕 / 柜里没有 / 已经称完了）的前后态直接从 DOM 读，不另立一份记录：
+    // 空 → 有字 = 这一口刚短下去（冒「抱怨」泡）；抓按钮 活 → 死 = 这一样柜里刚称完（冒「卖断」浮字）。
+    const flag = document.getElementById(`flag-${cust}-${l.cat}`);
+    const wasFlagged = !!flag?.textContent;
+    const note = rowNote(cust, l, got);
+    if (flag) flag.textContent = note;
+    if (!wasFlagged && note) {
+      if (fxOn() && flagText(cust, l, got)) showBubbles(app, [{ cust, text: grumbleSay() }]);
+    }
     // 分段步长写在按钮上：当前这行离目标多远，按钮就写对应的 ±5 / ±1
     const step = stepFor(cust, l.cat);
     setText(`tap-${cust}-${l.cat}`, `轻点 +${step} 克`);
     setText(`pn-${cust}-${l.cat}`, `捏出 −${step} 克`);
     // 真机修复单 f39f692：柜量见底（含被别单称完）当场把这一行的「抓」断电，与 addGrams 的封顶同一次判定
     const gb = document.getElementById(`gb-${cust}-${l.cat}`);
-    if (gb) gb.disabled = grabDead(cust, l.cat);
+    if (gb) {
+      const wasAlive = !gb.disabled;          // 前后态直接从 DOM 读，不另立一份记录（视觉批 I：这一跳就是「柜里刚称完」）
+      gb.disabled = grabDead(cust, l.cat);
+      if (fxOn() && wasAlive && gb.disabled) fx.push({ in: gb.parentElement, text: note });
+    }
     const pn = document.getElementById(`pn-${cust}-${l.cat}`);
     if (pn) pn.disabled = got <= 0;
   }
+  if (fx.length) showFloats(app, fx);
   refreshExact();
+}
+
+// 视觉批 I 的总闸：动效只在营业屏（weigh）那一屏放，别的屏连节点都不生成。
+// 降级屏（prefers-reduced-motion）与切后台（fx-paused 同一判据）也走这一格——单上「不许糊屏」在低配机上的落点。
+const fxOn = () => phase === 'weigh' && !reduceMotion();
+
+// 进这一屏那一刻，每一桌把单子自己念一遍（点单泡）。信号源就是亲手单本身（碗数 + 品类名），不引新词。
+// 「催」挂第一桌：现成字段只有 state.YesterdaySoldOut 这一枚当日布尔位（出摊页那句红字同一个字段），
+// 它说不出「哪一桌在催」，也不许为这一泡新造一桌一计数——单上红线：信号只许映射现成字段。
+// 它排在最前，于是同屏上限那一格先被「催」占掉一席，剩下的一席给第一桌以外的下一张单子（上限与取舍见 feedfx）。
+function mountOrderSay() {
+  if (!fxOn() || !orders.length) return;
+  const cands = orders.map(o => ({ cust: o.customerId, text: orderSay(o) }));
+  if (state.YesterdaySoldOut) cands.unshift({ cust: orders[0].customerId, text: rushSay() });
+  showBubbles(app, cands);
 }
 
 function cook() {
@@ -940,6 +1045,30 @@ const deductCell = r => {
   if (r.tastingNetCents) parts.push(`试吃净额 ${r.tastingNetCents > 0 ? '+' : '−'}${y(Math.abs(r.tastingNetCents))}`);
   return parts.length ? `<div class="muted">${parts.join(' · ')}</div>` : '';
 };
+
+// 视觉批 I 第三件：今晚的留言壳子换成信封三态。正文一个字没改，条数、出现条件、底部按钮与流程顺序全照旧。
+// 未读 = 封口只露一行标题（标题取法见 feedfx 的 envelopeTitle，只截显示用的那一行）；
+// 点开 = 拆封展开全文（正文仍走已签的 .comment 那一层皮）；再点一下 = 压平置后（硬阴影撤掉、排到队尾）。
+// 「置后」只动同一批留言在屏上的先后，不动 t.comments 本身——那是引擎的账，呈现层不碰。
+function envList(comments) {
+  const key = i => envKey(state.Day, i);
+  const row = (c, i) => {
+    const st = envState[key(i)];
+    const open = st === 'open';
+    return `<button class="env${open ? ' open' : st === 'read' ? ' read' : ''}" data-act="env" data-n="${i}">
+      <span class="envt">${esc(envelopeTitle(c.text))}</span>
+      <span class="envbody comment${c.kind === 'hot' ? ' hot' : ''}"${open ? '' : ' hidden'}>${esc(c.text)}</span></button>`;
+  };
+  const idx = envOrder(comments.map((_, i) => envState[key(i)]));
+  return idx.map(i => row(comments[i], i)).join('');
+}
+
+// 拆封 / 压平：只有这一格会话态，写完立刻重绘这一屏。不落存档、不落 localStorage、不进引擎字段。
+function toggleEnv(n) {
+  const k = envKey(state.Day, Number(n) || 0);
+  envState[k] = envState[k] === 'open' ? 'read' : 'open';
+  return go('night');
+}
 
 // ── 画面 ─────────────────────────────────────────────────
 const VIEWS = {
@@ -1182,7 +1311,7 @@ const VIEWS = {
       </div>` : ''}
       <div class="panel">
       <h2>今晚的留言</h2>
-      ${t.comments.length ? t.comments.map(c => `<div class="comment ${c.kind === 'hot' ? 'hot' : ''}">${esc(c.text)}</div>`).join('')
+      ${t.comments.length ? envList(t.comments)
         : '<p class="muted">今晚没人说话。摊布明儿还得洗。</p>'}
       ${t.reserveResult ? `<p class="muted">社团那单预订${t.reserveResult.delivered ? '按数出满了。' : '没出满。'}</p>` : ''}
     </div>
@@ -1629,20 +1758,38 @@ function regularChatter(o) {
   return `<p class="muted" style="margin:6px 0 0">${esc(line)}</p>`;
 }
 
+// 进度轨的三条线全是现成的数：带沿 = 已签的两个比例（足称 0.98 / 该捏回 1.1），
+// 满幅 = TRACK_SPAN（纯几何，只决定尺子画多长，不参与任何判定）。
+// 带子与判定读同一枚常量，不派生第四个口径（预检反馈 F8 的教训：一处一个口径就会同屏不一致）。
+function gaugeVars(cust, gave) {
+  const want = orderWant(cust);
+  const p = want > 0 ? Math.min(1, gave / (want * TRACK_SPAN)) * 100 : 0;
+  return `--band:${(FULL_SHARE / TRACK_SPAN * 100).toFixed(2)}%;--band2:${(OVER_SHARE / TRACK_SPAN * 100).toFixed(2)}%;--p:${p.toFixed(2)}%`;
+}
+
 function orderCard(o) {
   const g = gramsBy[o.customerId];
   const gave = o.lines.reduce((s, l) => s + Number(g[l.cat] || 0), 0);
-  return `<div class="panel" style="box-shadow:3px 3px 0 var(--ink-2);background:var(--cream)">
+  const want = orderWant(o.customerId);
+  // 进带位在模板里就算出来：CSS 的「气泡描边转青绿」与「色带点亮」两条吃的是卡片上那一枚 .ok，
+  // 只等 refreshOrder 补挂的话，换屏/读档重绘那一刻就会出现「秤面反色在、另两处不在」的同屏不一致（F8 同一类）。
+  const ok = gave > 0 && gave / want >= FULL_SHARE;
+  return `<div class="panel ordercard${ok ? ' ok' : ''}" id="oc-${o.customerId}" style="box-shadow:3px 3px 0 var(--ink-2);background:var(--cream)">
     <div class="cust"><div class="ava ava-${o.customerId}" style="background-image:url(${AVA_SHEET})" role="img" aria-label="${esc(o.name)}"></div>
-      <div><h3>${esc(o.name)}</h3><span class="muted">${esc(o.role)} · ${o.bowls} 碗</span></div></div>
+      <div><h3>${esc(o.name)}</h3><span class="muted">${esc(o.role)} · ${o.bowls} 碗</span></div>
+      <span class="bub" id="bub-${o.customerId}" aria-hidden="true"></span></div>
     ${regularChatter(o)}
-    <div class="scale${gave > 0 && gave / o.lines.reduce((s, l) => s + l.grams, 0) >= 0.98 ? ' ok' : ''}" id="sc-${o.customerId}" style="margin:8px 0">
+    <div class="scale${ok ? ' ok' : ''}" id="sc-${o.customerId}" style="margin:8px 0">
       <img src="./img/scale.webp" alt="电子秤" />
       <div class="readout num"><span id="rd-${o.customerId}">${gave}</span><span class="u">克</span>
         <span class="jin" id="rj-${o.customerId}">${(gave / GRAMS_PER_JIN).toFixed(2)} 斤</span></div>
     </div>
+    <div class="gramrow">
+      <span class="grambub num" id="gramb-${o.customerId}">${gave}</span>
+      <span class="weigauge" id="wg-${o.customerId}" style="${gaugeVars(o.customerId, gave)}" aria-hidden="true"><i class="band"></i><i class="mark"></i></span>
+    </div>
     <div class="pinchhint" id="hint-${o.customerId}" ${hintWanted(o) ? '' : 'hidden'}>抓多了？点「捏出一点」往回捏</div>
-    <div class="dual num muted" id="sum-${o.customerId}">顾客要 ${o.lines.reduce((s, l) => s + l.grams, 0)} 克 · 你称 ${gave} 克</div>
+    <div class="dual num muted" id="sum-${o.customerId}">顾客要 ${want} 克 · 你称 ${gave} 克</div>
     ${o.lines.map(l => `<div class="grabrow">
       <button class="grab" id="gb-${o.customerId}-${l.cat}" data-grab data-cust="${o.customerId}" data-cat="${l.cat}"${grabDead(o.customerId, l.cat) ? ' disabled' : ''}>
         <span class="skuimg bowlchip" id="ch-${o.customerId}-${l.cat}" data-cell="tl" style="background-image:url(./img/${SKU_SHEET[l.cat]}.webp)"></span>

@@ -35,6 +35,7 @@ import { WEATHER_TALK, weatherTalk, catDeviation } from './src/data/weather-talk
 import { VOICE_INTRO, VOICE_RESULT, voiceIntroLines, voiceResultLines } from './src/data/voice.js';
 import { BROADCAST_KINDS, BROADCAST_POOL, broadcastLine, inoutTotals } from './src/ui/settle-broadcast.js';
 import { mergeSelloutNames } from './src/ui/sellout.js';
+import { BUBBLE_MAX, FLOAT_MAX, takeBubbles, takeFloats, orderSay, praiseSay, grumbleSay, rushSay, envKey, envOrder, envelopeTitle } from './src/ui/feedfx.js';
 import { morningRivals, priceWarReprice, sharesAndS, tallySuppression, rivalPriceCoef, previewShare } from './src/engine/competition.js';
 import { applyShadow, computeQ } from './src/engine/shadow.js';
 import { makeRng } from './src/engine/rng.js';
@@ -3845,6 +3846,249 @@ for (const seed of [SEED, 7979, 36832]) {
       && !/\bMath\.random\b|\bDate\.now\b|setTimeout|setInterval|\bstate\b|scenario/.test(selloutCode)
       && listUsers.join(' ') === 'ui/main.js ui/sellout.js',
     `引用点[${listUsers.join(' ')}]｜带数字[${/[0-9]/.test(noStruct) ? '有' : '无'}]`);
+}
+
+// ── §30 视觉批 I task-ui-visual-20261105（Orange `f22590c`；店主拍板：首更三件整体提前到上线前）───────
+// 三件全在呈现层：营业屏气泡 + 金色浮字 / 称重手感（刻度 · 色带 · 克数气泡 · 松手顿帧 · 整百 tick）/ 夜晚留言信箱三态。
+// 单上最容易「顺手改出事」的四条硬约束逐条钉死：① 信号只许映射现成字段与现成台词池（不新造计数器、不改任何数值与判定）；
+// ② 色板变量零改动；③ SAVE_VERSION 与存档结构不动（已读态只活当晚会话）；④ 新模块照播报模块的护栏规格，src/engine 与 src/data 对它全盲。
+// 按住连加那三数（HOLD_DELAY / 60→180 克每秒曲线 / 分段 5·1·20）§28 已钉防删针，本批只在它外面加呈现——第 6 针把「tick 挂在封顶之后」再钉一次。
+// 金色浮字单上列的三类里，本批只落得下两类（出餐 = 这一口自己的克数、卖断 = 现成 rowNote 串）：
+// 出餐金额要 UI 侧另算一遍钱、连对加成要一个新计数器，两条都撞单上红线 ⇒ 按 ⊘ 回报，不编数（第 4 针钉「没编」）。
+{
+  const strip30 = s => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ').replace(/[ \t]+\/\/[^\n]*$/gm, ' ');
+  const mainRaw30 = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const mainC30 = strip30(mainRaw30);
+  const feedRaw30 = readFileSync(join(HERE, 'src/ui/feedfx.js'), 'utf8');
+  const feedC30 = strip30(feedRaw30);
+  const audio30 = readFileSync(join(HERE, 'src/ui/audio.js'), 'utf8');
+  const css30 = readFileSync(join(HERE, 'src/ui/theme.css'), 'utf8');
+  const cut30 = (a, b) => { const i = mainRaw30.indexOf(a); return mainRaw30.slice(i, mainRaw30.indexOf(b, i)); };
+  const rule30 = sel => {
+    const m = css30.match(new RegExp('(?:^|\\n)' + sel.replace(/\./g, '\\.') + '\\s*\\{([\\s\\S]*?)\\}'));
+    return m ? m[1].replace(/\/\*[\s\S]*?\*\//g, ' ') : '';
+  };
+  const kfProps = n => {
+    const m = css30.match(new RegExp('@keyframes ' + n + ' \\{([\\s\\S]*?)\\n\\}'));
+    if (!m) return ['<没有这条关键帧>'];
+    const body = m[1].replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/\d+%/g, '');
+    return [...new Set(body.match(/[a-z-]+(?=\s*:)/g) || [])].sort();
+  };
+  const has30 = cls => new RegExp('\\.' + cls + '(?![\\w-])').test(css30);
+  const n30 = (re, s) => (s.match(re) || []).length;
+  const rel30 = f => f.slice(join(HERE, 'src').length + 1).split('\\').join('/');
+  const card30 = cut30('function orderCard(o) {', '\nfunction streetPanel');
+  const envList30 = cut30('function envList(comments) {', '\nfunction toggleEnv');
+  const night30 = cut30('  night() {', '\n  },');
+  const NEWRULES = ['.ordercard', '.bub', '.bub.on', '.bub::before', '.float', '.gramrow', '.grambub',
+    '.grambub.settle', '.weigauge', '.weigauge::before', '.weigauge .band', '.weigauge .mark',
+    '.env', '.env.read', '.env.open', '.envt', '.envbody'];
+
+  // 1) 信号白名单（单上验收加项原话「只许列出现成字段名」）。四类气泡一句都不许是这一层新写的词，也不许长出一个计数器。
+  const praiseTxt = COMMENT_POOLS.portion[1], grumbleTxt = COMMENT_POOLS.portion[2], rushTxt = COMMENT_POOLS.soldout[1];
+  check('§30 第一件·信号白名单四类逐字钉住：点单泡只读单子自己那两格（order.bowls + CAT[l.cat].name，附录 H.1 的具名单），夸／抱怨＝portion 池第 1、2 两句（与引擎结算那晚 signalFullCount／signalShortCount 抽的同一对、同一下标直取），催＝soldout 池第 2 句；三句台词零拉丁字母，这一层零 ++、零 +=、零 combo／streak（没有新计数器的落脚处）',
+    orderSay({ bowls: 3, lines: [{ cat: 'MB' }, { cat: 'SP' }] }) === `3 碗 · ${CAT.MB.name}、${CAT.SP.name}`
+      && praiseSay() === praiseTxt && grumbleSay() === grumbleTxt && rushSay() === rushTxt
+      && [praiseTxt, grumbleTxt, rushTxt].every(s => !!s && !/[A-Za-z]/.test(s))
+      && /^export const orderSay = order => `\$\{order\.bowls\} 碗 · \$\{order\.lines\.map\(l => CAT\[l\.cat\]\.name\)\.join\('、'\)}`;$/m.test(feedRaw30)
+      && /^export const praiseSay = \(\) => COMMENT_POOLS\.portion\[1\];$/m.test(feedRaw30)
+      && /^export const grumbleSay = \(\) => COMMENT_POOLS\.portion\[2\];$/m.test(feedRaw30)
+      && /^export const rushSay = \(\) => COMMENT_POOLS\.soldout\[1\];$/m.test(feedRaw30)
+      && !/\+\+|\+=|\bcombo\b|\bstreak\b/.test(feedC30) && !/\bcombo\b|\bstreak\b/.test(mainC30),
+    `夸[${praiseTxt}]｜抱怨[${grumbleTxt}]｜催[${rushTxt}]`);
+
+  // 2) 「催」这一泡的门禁只许多读一次引擎本来就在写的布尔位，不许为它新写一格。
+  check('§30 第一件·催的门禁是现成字段不是新计数：判据 state.YesterdaySoldOut 由 src/engine/day.js 的 nightClose 在写（day.js:242，出摊页那句红字也在读），main.js 对它零赋值；它挂第一桌是因为该字段是「天」级、给不出「哪一桌在催」——这一取舍写进回报，不改信号源',
+    /if \(state\.YesterdaySoldOut\) cands\.unshift\(\{ cust: orders\[0\]\.customerId, text: rushSay\(\) \}\);/.test(mainC30)
+      && !/YesterdaySoldOut\s*=[^=]/.test(mainRaw30)
+      && /state\.YesterdaySoldOut = /.test(readFileSync(join(HERE, 'src/engine/day.js'), 'utf8')),
+    `main.js 引用 ${n30(/YesterdaySoldOut/g, mainRaw30)} 处（含注释）｜赋值 0 处`);
+
+  // 3) 同屏上限就是单上那两个数，超限按「丢弃」不是「排队」——取舍本身进针，防止以后有人顺手改成缓冲。
+  const fourTab = [1, 2, 3, 4].map(i => ({ cust: 'c' + i, text: 'T' + i }));
+  const dupTab = takeBubbles([{ cust: 'a', text: '1' }, { cust: 'a', text: '2' }, { cust: 'b', text: '3' }]);
+  check('§30 第一件·上限＝气泡 2 / 浮字 3（值只在 feedfx 定义一处，main.js 不另抄），越界即丢弃：四桌同报只上前两桌、第 3、4 桌当场没了；同一桌第二泡被去重（一桌一泡）；余量为零时一条不进；浮字五条只上前三条。「排队」不选是因为同一句话会在玩家看完这一单之后才冒出来，读起来像屏幕自己坏了——这一取舍写进回报',
+    BUBBLE_MAX === 2 && FLOAT_MAX === 3
+      && /^export const BUBBLE_MAX = 2;$/m.test(feedRaw30) && /^export const FLOAT_MAX = 3;$/m.test(feedRaw30)
+      && n30(/BUBBLE_MAX|FLOAT_MAX/g, mainC30) === 0
+      && takeBubbles(fourTab).map(c => c.cust).join(',') === 'c1,c2'
+      && takeBubbles(fourTab, 0).length === 0
+      && dupTab.map(c => c.cust + ':' + c.text).join(',') === 'a:1,b:3'
+      && takeFloats([1, 2, 3, 4, 5].map(i => ({ in: i, text: 'x' }))).length === 3
+      && takeFloats([1, 2], 0).length === 0,
+    `四桌→[${takeBubbles(fourTab).map(c => c.cust).join(' ')}]｜同桌重复→[${dupTab.map(c => c.cust).join(' ')}]`);
+
+  // 4) 金色浮字两处挂点：都挂在「已经发生的那一下」上，锚点是数字自己那一行；单上第三类（连对加成）与金额类拿不到合法源，本针钉「没编」。
+  check('§30 第一件·浮字只两处挂载：出餐＝松手那一口的自有克数（挂在 lv- 那一行的父节点 .gavecell 上，字面就是屏上那个数），卖断＝抓按钮由活转死那一次现成的 rowNote 串（note），两处都在已有分支里、不加新判定；这一层零金额算式（出餐金额与连对加成按 ⊘ 回报，不在 UI 侧另算钱或新造计数器）',
+    /showFloats\(app, \[\{ in: document\.getElementById\(`lv-\$\{g\.cust\}-\$\{g\.cat\}`\)\?\.parentElement, text: `\$\{gave\} 克` \}\]\);/.test(mainC30)
+      && /if \(fxOn\(\) && wasAlive && gb\.disabled\) fx\.push\(\{ in: gb\.parentElement, text: note \}\);/.test(mainC30)
+      && n30(/showFloats\(/g, mainC30) === 2
+      && /\.gavecell, \.grabrow \{ position: relative; \}/.test(css30)
+      && !/cents|Cents|流水|价|元/.test(feedC30),
+    `挂载点 ${n30(/showFloats\(/g, mainC30)}/2｜feedfx 里钱字面 ${/cents|元/.test(feedC30) ? '有' : '无'}`);
+
+  // 5) 消散与降级两条：动效自己摘自己（不留计时器），总闸只在营业屏那一格放行——降级屏连节点都不生成。
+  check('§30 第一件·不留计时器也不留空壳：气泡跑完摘 .on 并清空文本、浮字跑完摘节点，两处都挂 onanimationend（全文恰好 2 处）；总闸 fxOn = 营业屏 && !reduceMotion()，调用点 6 处全在闸后，闸外零节点生成（单上「节流不许糊屏」在降级屏与低配机两处的落点）',
+    /el\.onanimationend = \(\) => \{ el\.classList\.remove\('on'\); el\.textContent = '';\s*\};/.test(feedC30)
+      && /el\.onanimationend = \(\) => el\.remove\(\);/.test(feedC30)
+      && n30(/onanimationend/g, feedC30) === 2
+      && !/setTimeout|setInterval|setImmediate|requestAnimationFrame/.test(feedC30)
+      && /const fxOn = \(\) => phase === 'weigh' && !reduceMotion\(\);/.test(mainC30)
+      && n30(/fxOn\(\)/g, mainC30) === 6,
+    `onanimationend ${n30(/onanimationend/g, feedC30)}｜fxOn() ${n30(/fxOn\(\)/g, mainC30)}`);
+
+  // 6) 单上「按住连加是现成功能，本批只许在它外面加呈现」——三根防删针照旧在场，整百 tick 挂在封顶那一次判定之后。
+  const iBefore = mainC30.indexOf('const before = orderTotal(cust);');
+  const iClamp = mainC30.indexOf('gramsBy[cust][cat] = Math.min(ceiling, Math.max(0, next));');
+  const iTick = mainC30.indexOf('if (Math.floor(after / TICK_EVERY) !== Math.floor(before / TICK_EVERY)) weighTick();');
+  check('§30 第二件·连加本体一根没动（HOLD_DELAY = 150、60 + 120 × min(1, …) 曲线、分段 5/1/20 逐字在场），整百 tick 排在 addGrams 末尾的封顶之后、读同一枚总克数：先夹再响，被封顶挡掉那一截（before === after）天然不响，不另立第二处判定',
+    /const HOLD_DELAY = 150;/.test(mainC30)
+      && /return 60 \+ 120 \* Math\.min\(1, \(held - HOLD_DELAY\) \/ 1000\);/.test(mainC30)
+      && /const TAP_GRAMS = 5;/.test(mainC30) && /const FINE_GRAMS = 1;/.test(mainC30) && /const FINE_GAP = 20;/.test(mainC30)
+      && /const TICK_EVERY = 100;/.test(mainC30)
+      && iBefore >= 0 && iClamp > iBefore && iTick > iClamp,
+    `顺序 before ${iBefore} → 封顶 ${iClamp} → tick ${iTick}`);
+
+  // 7) 进度轨与判定同源（预检 F8 的教训：一处一个口径＝同屏不一致）。带沿就是已签的两个比例，别处再写一遍就是第四口径。
+  //    「进带」这一枚 class 也一样：卡片模板里算一次 ok，.ordercard 与 .scale 两格都读它——
+  //    只靠 refreshOrder 事后补挂的话，换屏/读档重绘那一刻秤面反色会带着另两处（描边转青绿、色带点亮）错位。
+  check('§30 第二件·色带与「进带」判定读同一枚常量：FULL_SHARE = 0.98 与 OVER_SHARE = 1.1 各声明一次，剥掉注释后 main.js 全文 0.98 与 1.1 各只剩这一枚字面（判定式与 CSS 都不再抄数）；--band / --band2 由两枚常量除以纯几何 TRACK_SPAN = 1.25 算出，TRACK_SPAN 只决定尺子画多长、不参与任何判定；进带位在 orderCard 模板里算一次（gave > 0 && gave / want >= FULL_SHARE 全文只出现这一处），.ordercard 与 .scale 两枚 class 都吃同一个 ok',
+    /const FULL_SHARE = 0\.98;/.test(mainC30) && /const OVER_SHARE = 1\.1;/.test(mainC30)
+      && n30(/0\.98/g, mainC30) === 1 && n30(/(?<![\d.])1\.1(?![\d])/g, mainC30) === 1
+      && /const enough = want > 0 && total \/ want >= FULL_SHARE;/.test(mainC30)
+      && n30(/gave > 0 && gave \/ want >= FULL_SHARE/g, card30) === 1
+      && /const ok = gave > 0 && gave \/ want >= FULL_SHARE;/.test(card30)
+      && /class="panel ordercard\$\{ok \? ' ok' : ''\}"/.test(card30)
+      && /class="scale\$\{ok \? ' ok' : ''\}"/.test(card30)
+      && /Number\(g\[l\.cat\] \|\| 0\) >= l\.grams \* OVER_SHARE/.test(mainC30)
+      && /--band:\$\{\(FULL_SHARE \/ TRACK_SPAN \* 100\)\.toFixed\(2\)\}%;--band2:\$\{\(OVER_SHARE \/ TRACK_SPAN \* 100\)\.toFixed\(2\)\}%/.test(mainRaw30)
+      && /const TRACK_SPAN = 1\.25;/.test(mainC30) && !/0\.98|(?<![\d.])1\.1(?![\d])/.test(rule30('.weigauge')),
+    `0.98 字面 ${n30(/0\.98/g, mainC30)} 处｜1.1 字面 ${n30(/(?<![\d.])1\.1(?![\d])/g, mainC30)} 处｜模板内进带式 ${n30(/gave > 0 && gave \/ want >= FULL_SHARE/g, card30)} 处`);
+
+  // 8) 松手顿帧：单上写「≤150ms 的定格 + 回弹」，这里钉在 150ms 顶格；两条挂点共用同一支 settleBubble，判据是「这一口真落了克没有」。
+  check('§30 第二件·顿帧 150ms 顶格且只动 transform：.grambub.settle 那一格逐字在场，@keyframes fxSettle 的属性名只有 transform（不掺 opacity，更不碰 width / left——动几何就会顶开秤面读数）；抓菜与捏出两条挂点共用 settleBubble（全文 3 处＝定义 1 + 调用 2），捏出那一支的判据是 orderTotal 前后不等，不新造触发条件',
+    /\.grambub\.settle \{ animation: fxSettle 150ms ease-out 1; \}/.test(css30)
+      && kfProps('fxSettle').join() === 'transform'
+      && /settleBubble\(g\.cust\)/.test(mainC30)
+      && /if \(fxOn\(\) && orderTotal\(p\.cust\) !== p\.total0\) settleBubble\(p\.cust\);/.test(mainC30)
+      && n30(/settleBubble\(/g, mainC30) === 3,
+    `fxSettle 属性[${kfProps('fxSettle').join(' ')}]｜settleBubble ${n30(/settleBubble\(/g, mainC30)} 处`);
+
+  // 9) 动效只用 transform / opacity（单上与 STYLE-FLATPLUS 共有的纪律：动几何会顶开读数、动颜色会绕开色板）。
+  check('§30·动效属性面：三套关键帧 fxBub / fxFloatUp / fxSettle 改写的属性只有 opacity 与 transform，位移一律 translate3d（走合成层，不触发布局）',
+    kfProps('fxBub').join() === 'opacity,transform' && kfProps('fxFloatUp').join() === 'opacity,transform'
+      && kfProps('fxSettle').join() === 'transform'
+      && ['fxBub', 'fxFloatUp', 'fxSettle'].every(n => {
+        const m = css30.match(new RegExp('@keyframes ' + n + ' \\{([\\s\\S]*?)\\n\\}'));
+        return m && !/\b(width|height|left|top|margin|padding|color|background|box-shadow|filter)\s*:/.test(m[1]);
+      }),
+    `fxBub[${kfProps('fxBub').join(' ')}]｜fxFloatUp[${kfProps('fxFloatUp').join(' ')}]｜fxSettle[${kfProps('fxSettle').join(' ')}]`);
+
+  // 10) 硬约束·色板零改动 + 面板语言照旧 + 一张新图都没生成（单上「画不动先回报，不许生成新图顶上」）。
+  const root30 = (css30.match(/:root \{[\s\S]*?\n\}/) || [''])[0];
+  const PAL30 = [['--cream', '#fbf3e4'], ['--ink', '#1b2a4a'], ['--tomato', '#e24b33'],
+    ['--mustard', '#f2b233'], ['--teal', '#2e9e8f'], ['--paper', '#fffaf0']];
+  const pal30Bad = PAL30.filter(([k, v]) => !root30.includes(`${k}: ${v};`));
+  const hex30Bad = NEWRULES.filter(sel => /#[0-9a-fA-F]{3,8}/.test(rule30(sel)));
+  const url30Bad = NEWRULES.filter(sel => /url\(/.test(rule30(sel)));
+  const skin30Bad = ['.bub', '.grambub', '.weigauge', '.env'].filter(sel => !/border: 2px solid var\(--ink\)/.test(rule30(sel)));
+  check('硬约束·色板零改动 + 面板语言照旧 + 零新美术：六枚已签变量逐字在场，本批 17 条新规则块里零个十六进制色值、零个 url(...)（刻度线走 repeating-linear-gradient、泡尖走 border 三角、气泡与信封都是 var(--…)），四块新牌面全是 2px 墨线、信封沿用 4px 硬边偏移阴影；这一层零 <img> 零背景图 ⇒ 三件都没生成新素材',
+    pal30Bad.length === 0 && hex30Bad.length === 0 && url30Bad.length === 0 && skin30Bad.length === 0
+      && /box-shadow: 4px 4px 0 var\(--ink-2\)/.test(rule30('.env'))
+      && !/<img|url\(/.test(feedC30)
+      && !/<img|background-image/.test(envList30),
+    `缺格[${pal30Bad.map(p => p[0]).join(' ') || '无'}]｜带新色[${hex30Bad.join(' ') || '无'}]｜带 url[${url30Bad.join(' ') || '无'}]｜不合规[${skin30Bad.join(' ') || '无'}]`);
+
+  // 11) 硬约束·SAVE_VERSION 与存档结构不动：信封三态只活在一格会话变量里，新一天归零，绝不落盘。
+  const saveFlow30 = cut30('function saveFlow() {', '\nfunction restoreFlow');
+  const restoreFlow30 = cut30('function restoreFlow() {', '\n// 每一天的前段草稿从引擎当前值起');
+  const KEYSET = 'guiju-m1-audio guiju-m1-flow guiju-m1-intro guiju-m1-phase guiju-m1-save';
+  const keySet30 = [...new Set(files.flatMap(f => readFileSync(f, 'utf8').match(/guiju-m1[a-z-]*/g) || []))].sort().join(' ');
+  check('硬约束·SAVE_VERSION 仍是 v4.9.3-cal.2，已读态一个字不进档：envState 只在 main.js 里活（6 处＝声明 1 / 信封表读 3 / 点选写 1 / 新一天归零 1），saveFlow 与 restoreFlow 两段的键名单逐字未动（…scalePick 收尾，两段里 env 字样零命中）；localStorage 写入点仍只有 PHASE_KEY 与 FLOW_KEY 两处，src 全仓的存档键集合还是已签那五枚，envKey 只是会话内的表键',
+    SAVE_VERSION === 'v4.9.3-cal.2' && keySet30 === KEYSET
+      && n30(/localStorage\.setItem\(/g, mainRaw30) === 2
+      && !/env/i.test(saveFlow30) && !/env/i.test(restoreFlow30)
+      && /prepPick, wakePick, packingPick, flavorPick, additivePick, tastingPick, scalePick,/.test(saveFlow30)
+      && /let envState = \{\};/.test(mainC30) && n30(/envState/g, mainC30) === 6
+      && /envState = \{\};/.test(cut30('function newDay()', '\nfunction '))
+      && !/localStorage|sessionStorage/.test(feedC30)
+      && envKey(3, 5) === '3:5',
+    `键集合[${keySet30}]｜setItem ${n30(/localStorage\.setItem\(/g, mainRaw30)}`);
+
+  // 12) 第三件·压平置后只动屏上读序：纯函数 + 输入数组不被改写（引擎那份 comments 是账，呈现层不碰）。
+  const marks30 = ['read', undefined, 'read', 'open'];
+  const frozen30 = [...marks30];
+  const pool30 = Object.values(COMMENT_POOLS).flat();
+  check('§30 第三件·置后不动引擎数组、标题不改写正文：envOrder(["read",空,"read","open"]) ⇒ [1,3,0,2]（未读在前、两组各保持先来顺序），输入逐字不变；全未读＝原序、全已读＝原序（稳定不跳）；台词池 51 句每一句的标题都是正文的前缀且 ≤20 字（截的是显示行，正文一个字没改），首句不成话的「还行吧。」整条上标题而不是截半截',
+    envOrder(marks30).join(',') === '1,3,0,2' && marks30.join('|') === frozen30.join('|')
+      && envOrder([undefined, undefined]).join(',') === '0,1'
+      && envOrder(['read', 'read', 'read']).join(',') === '0,1,2'
+      && pool30.length === 51
+      && pool30.every(s => { const t = envelopeTitle(s); return t.length > 0 && t.length <= 20 && s.startsWith(t); })
+      && envelopeTitle('还行吧。') === '还行吧。',
+    `读序[${envOrder(marks30).join(',')}]｜池 ${pool30.length} 句｜越界标题 ${pool30.filter(s => { const t = envelopeTitle(s); return !(t.length > 0 && t.length <= 20 && s.startsWith(t)); }).length} 句`);
+
+  // 13) 第三件·只换壳子不动内容：底部按钮与流程顺序照旧、正文仍走已签的 .comment / .hot 两层皮、旧拼法零残留。
+  check('§30 第三件·壳子换了内容不换：夜晚屏底部三颗按钮逐字还是 next / quit / sellout 那一串（顺序也没动），空状态那句批H 文案原样在场，正文一格没改写（esc(c.text) + class="envbody comment" 与 .hot 沿用现成皮），旧那套 t.comments.map 直出 div 的拼法零残留；信封是 <button>（键盘与读屏走现成焦点导航），挂载点全文唯一一处 data-act="env"，置后不靠 sort／reverse',
+    (night30.match(/data-act="[a-z]+"/g) || []).join(' ') === 'data-act="next" data-act="quit" data-act="sellout"'
+      && night30.includes('今晚没人说话。摊布明儿还得洗。')
+      && !/t\.comments\.map\(/.test(mainRaw30)
+      && !/\.sort\(|\.reverse\(/.test(envList30)
+      && /<span class="envbody comment\$\{c\.kind === 'hot' \? ' hot' : ''\}"\$\{open \? '' : ' hidden'\}>\$\{esc\(c\.text\)\}<\/span>/.test(mainRaw30)
+      && n30(/data-act="env"/g, mainRaw30) === 1
+      && /<button class="env\$/.test(mainRaw30)
+      && /\.envbody\[hidden\] \{ display: none; \}/.test(css30)
+      && /case 'env': return toggleEnv\(d\.n\);/.test(mainC30),
+    `尾部[${(night30.match(/data-act="[a-z]+"/g) || []).join(' ')}]｜env 挂载点 ${n30(/data-act="env"/g, mainRaw30)} 处`);
+
+  // 14) 一桌一泡是结构保证（每卡一个槽位），且装饰层不进读屏、不吃点击。
+  check('§30 第一件·一桌一泡靠结构、不靠计数：#bub- 槽位只在 orderCard 里生成（全文一处），每张卡一个，feedfx 按 `#bub-` + 顾客号取那一格；气泡与进度轨都 aria-hidden（读数交给秤面大字与 .dual 那行），浮字与气泡都 pointer-events: none（单上「不许堆叠遮住操作区」——浮层绝不吞点击）',
+    n30(/id="bub-/g, mainRaw30) === 1
+      && /<span class="bub" id="bub-\$\{o\.customerId\}" aria-hidden="true"><\/span>/.test(mainRaw30)
+      && /class="weigauge" id="wg-\$\{o\.customerId\}" style="\$\{gaugeVars\(o\.customerId, gave\)\}" aria-hidden="true">/.test(mainRaw30)
+      && n30(/aria-hidden="true"/g, card30) === 2
+      && /pointer-events: none/.test(rule30('.float')) && /pointer-events: none/.test(rule30('.bub'))
+      && /root\.querySelector\('#bub-' \+ c\.cust\)/.test(feedC30),
+    `bub 槽位 ${n30(/id="bub-/g, mainRaw30)} 处｜卡片内 aria-hidden ${n30(/aria-hidden="true"/g, card30)} 处`);
+
+  // 15) 硬约束·骨不动（护栏照播报模块那一版）：feedfx 只从 src/data 读现成池，借不到引擎也就改不动引擎。
+  const feedUsers = files.filter(f => /feedfx|showBubbles|showFloats|orderSay|praiseSay|grumbleSay|rushSay|envKey|envOrder|envelopeTitle|BUBBLE_MAX|FLOAT_MAX|takeBubbles|takeFloats|visibleBubbles|visibleFloats/
+    .test(readFileSync(f, 'utf8'))).map(rel30).sort();
+  const feedImports = feedRaw30.match(/^import .*$/gm) || [];
+  check('§30·硬约束·骨不动：src/ui/feedfx.js 的两条 import 全部来自 src/data（台词池与品类名，只读），零条来自 src/engine，全文不叫 state / localStorage / SAVE_VERSION、不掷随机、不建计时器；引用点只有 ui/main.js 一处，src/engine 与 src/data 对它全盲 ⇒ 它拿不到账，也就动不了账',
+    feedImports.length === 2 && feedImports.every(s => /from '\.\.\/data\//.test(s))
+      && !/from '\.\.\/engine\//.test(feedRaw30)
+      && !/\bMath\.random\b|\bDate\.now\b|setTimeout|setInterval|\bstate\b|localStorage|SAVE_VERSION/.test(feedC30)
+      && feedUsers.join(' ') === 'ui/feedfx.js ui/main.js',
+    `引用点[${feedUsers.join(' ')}]｜import[${feedImports.map(s => (s.match(/'([^']+)'/) || [])[1]).join(' ')}]`);
+
+  // 16) 整百那一声音的取材（单上「复用现成音效池，回报写明挑了哪件；不许新录、不许外找」）：挑点按那一件 tap-A-softclick。
+  check('§30 第二件·整百 tick 复用现成音效不新录：weighTick = sfx(\'tap\') 一支挂在 audio.js（素材还是已签的 tap-A-softclick，Kenney click_002），RATE 表里没有多出一个 tick 键、SFX_FILES 名单没多一件、GENERIC_YIELD 仍是已签那八件；main.js 里 sfx(\'tap\') 仍零处、tapEdge() 仍一处 ⇒ 裁定 d619ed6「通用点按只剩一个入口」那根针照旧成立。不选 coin 的理由进回报：那一件的挂载语义是「单笔收款」，秤上过一格没有钱进出',
+    /^export const weighTick = \(\) => sfx\('tap'\);$/m.test(audio30)
+      && !/tick\s*:/.test(audio30)
+      && /const GENERIC_YIELD = new Set\(\['exact', 'pop', 'error', 'stamp', 'level', 'paper', 'cash', 'coin'\]\);/.test(audio30)
+      && n30(/sfx\('tap'\)/g, mainC30) === 0 && n30(/tapEdge\(\)/g, mainC30) === 1
+      && n30(/weighTick/g, mainC30) === 2,
+    `weighTick 声明 1｜main 引用 ${n30(/weighTick/g, mainC30)}（import + 调用）`);
+
+  // 17) 降弹窗范围照单：常规反馈走气泡/浮字，屏上没有新增模态；特殊事件弹层与常客拍点的呈现一个字没动。
+  check('§30 第一件·降弹窗只降「常规反馈」这一档：main.js 全文 class="overlay 仍只 1 处（eventOverlay 那一层，单上写「特殊事件与常客拍点保持现版呈现，不许动」），本批没造第二层模态、没往 document 里插 div；常规反馈的出口是气泡 3 处挂载 + 浮字 2 处挂载',
+    n30(/class="overlay/g, mainRaw30) === 1
+      && /function eventOverlay\(\)/.test(mainC30)
+      && n30(/showBubbles\(/g, mainC30) === 3
+      && !/createElement\('div'\)|insertAdjacentHTML/.test(mainC30 + feedC30),
+    `overlay ${n30(/class="overlay/g, mainRaw30)}｜气泡挂载 ${n30(/showBubbles\(/g, mainC30)}｜浮字挂载 ${n30(/showFloats\(/g, mainC30)}`);
+
+  // 18) 两屏逐类覆盖（§25 同一把尺：少一个类＝真机上一块没样式的哑文本）。
+  // 尾部带 `-` 的那一枚是插值前缀（class="ava ava-${顾客号}" 剥掉 ${…} 剩下的半截），不是类名，样式在 .ava 那一格。
+  const cls30 = seg => [...new Set((seg.match(/class="([^"]*)"/g) || []).map(x => x.slice(7, -1))
+    .flatMap(s => s.replace(/\$\{[^}]*\}/g, ' ').split(/\s+/)).filter(x => x && !x.endsWith('-')))];
+  const used30 = [...cls30(card30), ...cls30(envList30)];
+  const miss30 = used30.filter(x => !has30(x));
+  check('§30 验收·两张屏用到的每个类都在 theme.css 里：ordercard / bub / gramrow / grambub / weigauge / band / mark / env / envt / envbody 一枚不缺，正文皮 comment 与 hot、浮字皮 float 与 num 也在场（缺一个类就是一块没样式的哑文本）',
+    miss30.length === 0 && ['ordercard', 'bub', 'gramrow', 'grambub', 'weigauge', 'band', 'mark',
+      'env', 'envt', 'envbody', 'comment', 'hot', 'float', 'num'].every(has30),
+    `用[${used30.sort().join(' ')}]｜缺[${miss30.join(' ') || '无'}]`);
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
