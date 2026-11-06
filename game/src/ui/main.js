@@ -18,7 +18,9 @@ import { evalCondition } from '../engine/dsl.js';
 import { EVENTS } from '../data/events.js';
 import { armAudio, sfx, tapEdge, weighTick, isMuted, setMuted, motionCue, setBoil, playVoice, advanceVoice, stopVoice } from './audio.js';
 // 特殊事件配音的挂载表（挂载单 voice-qc-mount-20261105）：本文件只问「这一段该出声的是哪几句」，出声全在 audio.js。
-import { voiceIntroLines, voiceResultLines } from '../data/voice.js';
+// 全覆盖批（挂载单 voice-qc-mount-full-20261106）在同一张表里加了日常事件出场句、结果句的原文集合与常客句：
+// resultTexts 管「两处引擎落点合成一个查找集合」，voiceRegularLines 管「这行灰字对到哪一句」。
+import { voiceIntroLines, voiceResultLines, resultTexts, voiceRegularLines } from '../data/voice.js';
 // 开场动画（task-opening-cinematic-20261102）：只借两个入口——新档首播、以及「我的」页重看。
 // 整层挂 body、不 import 引擎，撤掉 = 删这一行 + act 里两处 + me() 里那颗按钮 + theme.css 那一块。
 import { introShouldPlay, showIntro } from './intro.js';
@@ -526,6 +528,10 @@ function newDay() {
   beginDay(state);                          // 第 1 步：晨间结转
   syncProdPicks();
   preEvent = morningPreEvent(state, rng);   // 第 2 步：晨间情报（采购前公布，无分支）
+  // 情报条配音（全覆盖单挂载口径「挂 newDay 抽取点」）：抽中才播、当天只播一次。
+  // 刻意不挂采购屏那张面板的渲染处——那一块随每次交互重绘（选品、滑杆、切屏都重画），挂上去就重播（盘点 §6.2）。
+  // 出声与出声成败都不挡 go('morning')：音频只负责出声，画面照原时序走。
+  if (preEvent) playVoice(voiceIntroLines(preEvent.id, state));
   saveGame(state);
   return go('morning');
 }
@@ -617,6 +623,10 @@ function openShop() {
     orders = drawHandOrders(state, rng);                       // 第 7 步的亲手单先亮单子
     gramsBy = Object.fromEntries(orders.map(o => [o.customerId, Object.fromEntries(o.lines.map(l => [l.cat, 0]))]));
     okRef = {};
+    // 晨间配音（全覆盖单「晨间类事件挂晨间抽卡处的新挂点」，形状照 afterEvening 一模一样的那条 §6.1）：
+    // 写在 !orders.length 守卫里面 ⇒ 与「回来不重抽」同一条命，刷新/切后台回来不重播出场句，也别挪到守卫外面。
+    // 常客拍点句并进同一次 playVoice：那一支进来先 stopVoice，分两次调用会把前一段掐掉，并成一队才按「事件在前、常客在后」逐句播。
+    playVoice([...voiceIntroLines(pendingEvent ? pendingEvent.id : null, state), ...regularVoiceLines()]);
   }
   saveGame(state);                                       // 定版已落地：刷新/切后台回来不该退回定价页
   return go('weigh');
@@ -975,8 +985,9 @@ function cook() {
 function afterEvening() {
   if (pendingEvent) return go(phase);        // 已经抽出来了，重复点「打烊」不再二次抽卡
   pendingEvent = eveningDraw(state, rng);  // 第 10 步抽取
-  // 事件出场＝配音出场（挂载单 voice-qc-mount-20261105 第一条：按序号逐句播）。九条目标事件全是 timing:'evening'，
-  // 晨间没有挂载对象，所以挂载点只有这一处。出声与出声成败都不挡这一句 go：正文和选项照原时序渲染，音频只负责出声。
+  // 事件出场＝配音出场（挂载单 voice-qc-mount-20261105 第一条：按序号逐句播）。11-05 那批九条目标事件全是 timing:'evening'，
+  // 当时晨间没有挂载对象；全覆盖批（e2a6293）把三条晨间事件挂到了 openShop 的抽卡点，两处读同一张 VOICE_INTRO。
+  // 出声与出声成败都不挡这一句 go：正文和选项照原时序渲染，音频只负责出声。
   if (pendingEvent) { sfx('pop'); playVoice(voiceIntroLines(pendingEvent.id, state)); return go(phase); }   // 停在弹层等玩家选（接入单 594b908：弹出走独立的 pop）
   return finishNight(null);
 }
@@ -987,6 +998,9 @@ function resolvePending(choice) {
   stopVoice();   // 卡片一落定，这一段对白就收：扩写演完落回原选择点，出场句不许越过玩家的点选往后播
   if (ev.timing === 'morning') {
     resolveChoice(state, ev, choice);      // 第 6 步当场入账
+    // 结果句的晨间那一支（全覆盖单 §6.3：在 resolveChoice 之后、saveGame 之前取一次 today 的两处原文落点认句）。
+    // 认不出＝当没这句；出声与否都不改 go(phase) 的时序。
+    playVoice(voiceResultLines(ev.id, resultTexts(state)));
     saveGame(state);
     return go(phase);
   }
@@ -998,10 +1012,11 @@ function finishNight(choice, ev = pendingEvent) {
   const res = nightClose(state, rng, ev || null, choice ?? null);
   pendingEvent = null;
   saveGame(state);
-  // 检查两条的结果句（vo_insp_*/vo_insp2_* 的 02 起）挂在这里：认的是 inspection.js 刚写进 today.notes 的那句判定原文，
-  // 判哪一档就播哪一句（挂载单「按结果原文落点挂，不许顺序乱播」）。其余七条没有结果句，这一步天然为空。
-  const judge = res && res.evening ? res.evening.choice.judgment : null;
-  if (judge) playVoice(voiceResultLines(judge.id, state.today.notes));
+  // 结果句挂在选择落地之后（挂载单「按结果原文落点挂，不许顺序乱播」）。11-05 那批只有检查两条有结果句，
+  // 键取的是 inspection.js 刚写进 today.notes 的判定原文；全覆盖批把查找集合扩成 notes + forcedComments（§6.3），
+  // 键改从 choice.event.id 取——两条检查事件的 judgment.id 本来就是同一个 id，行为一字未变，日常事件因此才认得到句。
+  const evening = res && res.evening ? res.evening.choice : null;
+  if (evening) playVoice(voiceResultLines(evening.event.id, resultTexts(state)));
   return go('night');
 }
 
@@ -1769,6 +1784,20 @@ function regularChatter(o) {
   const line = slot >= 0 ? regularLine(o.customerId, state.RegularStory[slot]) : null;
   if (!line) return '';
   return `<p class="muted" style="margin:6px 0 0">${esc(line)}</p>`;
+}
+
+// 常客拍点句的配音（全覆盖单「挂常客拍点文本落点，按拍序播」）：取的是同一批文本——regularChatter 往卡片里
+// 写的那一行灰字，就是 voice.js 那张表的键，认的是原文而不是拍次序号。
+// 落点选在 openShop 抽单那一刻（上面那一队），不选 orderCard 的渲染处：卡片每次交互都重绘（抓菜、滑杆、切屏都重画），
+// 挂渲染点同一句一天里能重播几十遍，与情报条那条「挂抽取点不挂渲染点」同一个理由（盘点 §6.2）。
+function regularVoiceLines() {
+  const out = [];
+  for (const o of orders) {
+    const slot = REGULAR_SLOTS.indexOf(o.customerId);
+    if (slot < 0) continue;                                  // c04 毕老师那条线正文留空：没有文本落点，也就没有出声
+    out.push(...voiceRegularLines(o.customerId, regularLine(o.customerId, state.RegularStory[slot])));
+  }
+  return out;
 }
 
 // 进度轨的三条线全是现成的数：带沿 = 已签的两个比例（足称 0.98 / 该捏回 1.1），

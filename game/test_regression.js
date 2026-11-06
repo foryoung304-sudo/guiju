@@ -32,7 +32,7 @@ import { COMMENT_POOLS } from './src/data/comments.js';
 import { WIND_ROWS } from './src/data/wind.js';
 import { windCard, windBandIndex } from './src/ui/wind.js';
 import { WEATHER_TALK, weatherTalk, catDeviation } from './src/data/weather-talk.js';
-import { VOICE_INTRO, VOICE_RESULT, voiceIntroLines, voiceResultLines } from './src/data/voice.js';
+import { VOICE_INTRO, VOICE_RESULT, VOICE_REGULAR, voiceIntroLines, voiceResultLines, resultTexts, voiceRegularLines } from './src/data/voice.js';
 import { BROADCAST_KINDS, BROADCAST_POOL, broadcastLine, inoutTotals } from './src/ui/settle-broadcast.js';
 import { mergeSelloutNames } from './src/ui/sellout.js';
 import { BUBBLE_MAX, FLOAT_MAX, takeBubbles, takeFloats, orderSay, praiseSay, grumbleSay, rushSay, envKey, envOrder, envelopeTitle, isSameSay } from './src/ui/feedfx.js';
@@ -3376,20 +3376,32 @@ for (const seed of [SEED, 7979, 36832]) {
 // 每事件挂载表在场、静音时零播、缺文件时事件可完整走完。三件事各钉一根，外加分支与判定两处对位。
 // 与 §22 音频包同一套钉法：引用与文件成对、sha 逐件对账；画面与听感归店主真机（本层进不了 node 的 WebAudio）。
 {
-  const scriptRaw = readFileSync(join(HERE, '..', 'voice-events-script-20261104.md'), 'utf8');
+  const scriptRaw = readFileSync(join(HERE, '..', 'voice-events-script-20261104.md'), 'utf8')
+    + readFileSync(join(HERE, '..', 'voice-full-script-20261106.md'), 'utf8');   // 两份冻结稿：11-05 批 49 句 + 11-06 全覆盖批 67 句
   const introNames = Object.values(VOICE_INTRO).flatMap(l => l.map(x => x.f));
   const resultNames = Object.values(VOICE_RESULT).flatMap(m => m.map(x => x.f));
-  const tableNames = [...introNames, ...resultNames];
+  const regularNames = Object.values(VOICE_REGULAR).flatMap(m => m.map(x => x.f));
+  const tableNames = [...introNames, ...resultNames, ...regularNames];
   const scriptNames = [...new Set(scriptRaw.match(/vo_[a-z0-9]+_\d\d/g) || [])];
   const asc = ls => ls.map(l => +String(l.f).slice(-2)).every((n, i, a) => i === 0 || n > a[i - 1]);
-  check('挂载表在场且与冻结稿逐名对齐：九事件 49 句（出场 41 + 结果 8），与稿面「文件」列双向零差、零重名，每个事件内部严格照稿面序号升序',
-    Object.keys(VOICE_INTRO).length === 9 && tableNames.length === 49 && new Set(tableNames).size === 49
-    && scriptNames.length === 49 && tableNames.every(f => scriptNames.includes(f)) && scriptNames.every(f => tableNames.includes(f))
-    && Object.values(VOICE_INTRO).every(asc) && Object.values(VOICE_RESULT).every(asc),
-    `表 ${tableNames.length}｜稿 ${scriptNames.length}｜差集 ${(tableNames.length + scriptNames.length) - 2 * tableNames.filter(f => scriptNames.includes(f)).length}`);
+  // 18 句 ★新写结果句不挂：冻结稿里带 ★ 的那 18 句，数据里一句都没有原文可认（对应选项的 open[] 只有数值效果），
+  // 而单上写死「文本对上哪句播哪句，不许按固定顺序猜」⇒ 只能静默。这张名单是留痕闸门：
+  // Orange 往 events.js 补了原文、或改了挂载口径之后，名单与表若没同步变动，本针当场翻红（登记见总报「待裁」）。
+  const UNMOUNTED = ['vo_fine_05', 'vo_fine_06', 'vo_early_02', 'vo_tab_04', 'vo_tab_05', 'vo_banquet_02', 'vo_banquet_03',
+    'vo_complaint_03', 'vo_pot_02', 'vo_pot_03', 'vo_reserve_02', 'vo_reserve_03', 'vo_change_03', 'vo_chess_03', 'vo_chess_04',
+    'vo_spoon_02', 'vo_spoon_03', 'vo_monthly_03'];
+  check('挂载表在场且与两份冻结稿逐名对齐（49 + 67 = 116 句）：表内 98 句 = 出场 69（27 个事件）+ 结果 14 + 常客 15；'
+    + '稿里有而表里没有的 18 句逐名等于「无原文锚点」名单，零重名、每个事件内部严格照稿面序号升序',
+    Object.keys(VOICE_INTRO).length === 27 && tableNames.length === 98 && new Set(tableNames).size === 98
+    && scriptNames.length === 116 && tableNames.every(f => scriptNames.includes(f))
+    && UNMOUNTED.length === 18 && new Set(UNMOUNTED).size === 18
+    && scriptNames.filter(f => !tableNames.includes(f)).sort().join() === [...UNMOUNTED].sort().join()
+    && Object.values(VOICE_INTRO).every(asc) && Object.values(VOICE_RESULT).every(asc) && Object.values(VOICE_REGULAR).every(asc),
+    `表 ${tableNames.length}（出场 ${introNames.length}／结果 ${resultNames.length}／常客 ${regularNames.length}）｜稿 ${scriptNames.length}｜无锚点 ${scriptNames.filter(f => !tableNames.includes(f)).length}`);
 
-  // 成品对账：转码包的字节就是交付物，逐件 sha 进台账。补录的 vo_poach_02 到位那天本针必翻红——
-  // 那是留痕闸门不是故障：Orange 给的新件 sha 进表、才算「挂载完成」，谁都不许悄悄换文件。
+  // 成品对账：转码包的字节就是交付物，逐件 sha 进台账（11-05 批 48 件 + 11-06 批 66 件 = 114 件）。
+  // 这一根是留痕闸门不是故障：谁换了文件、谁在包没到的句子上提前挂了名，这里当场翻红。
+  // 补录件到位（vo_poach_02 于 11-06 到货）走的就是这条路：新 sha 进表才算挂完，表里的占号行一字未动。
   const VOICE_SHA = {
     'vo_buyout_01': '035a3f2a739f549c275caa0ebe47828433ab338a7d262f5a31ed8533f9796bd1',
     'vo_buyout_02': '94075b589974f2ded866ae171c236171f011797355c5eb960a013f65133cf8b9',
@@ -3439,6 +3451,73 @@ for (const seed of [SEED, 7979, 36832]) {
     'vo_return_03': 'cfc38d80d32da6108c66f73ec412809e6a59a98f46b37771dcdea9e82d865c13',
     'vo_return_04': 'f23e04bfc9faf1ca33f9dd66078fa4b1ac282a57b83b5b30fe6ff5a35f2edd14',
     'vo_return_05': '61c6961200c88012629028d07fed04887b96e1ce0d99e6ff3180b54195cae226',
+    // ── 11-06 全覆盖批 66 件（voice-full-pack-20261106.zip，Orange 转码后逐件 sha；单上 335.6 s / 约 3.1 MB）──
+    'vo_banquet_01': 'c769a2d9c80406e80aed7b6fd79666ad7055b0e05d35b4f0f8bf0e0a6a84418c',
+    'vo_banquet_02': 'ed377c117a01c6599f5cae0ebb01482351491ae91c5179abd931286be1abf3c7',
+    'vo_banquet_03': '13c85069835d3dd8c6908cd75dca3dc8e4aae63d37dfcb69f12ad4a83389d2eb',
+    'vo_blogger_01': '7010b88d46ea30d1768ef690787da7d44d5a47315903afd03114a4cbe0d44703',
+    'vo_c01_01': '0781104c1ec174162c72cfe589c269c51b3654d6d20d52f9369b893460d77990',
+    'vo_c01_02': 'd5ae6a30b6ca60b03dbc2cdb40242179deddeeae94810c734aa3f509eb38f3dc',
+    'vo_c01_03': '5562e14be3faf95d4977d35ea0f50969b814450741b17e25b90173451722c0dd',
+    'vo_c01_04': '695ccb9703136ecc2360b5fec6290e98d0429d8aa33e44f0d7d53a1191910dba',
+    'vo_c01_05': 'ea6852f385fe991bb6ed975a5535e8165ca06aba14373c845f7b0850ad15f62a',
+    'vo_c02_01': 'ce08107f0ae4ca4889e44e966e0e13470bc9f0bf3709260efd2506292d6c74ef',
+    'vo_c02_02': '2d48bd30da64e73666a4eb7aefc7bd20b48da34f7b946d6897f12e3d9cb6f04e',
+    'vo_c02_03': '879b57d714e9a83c1caba2bbd41bc6a3b9b275eb60d26dd0b5dd151828035a1e',
+    'vo_c02_04': '56907f1a4ac235fd1984c6c8849d8387fedfcb088ec2534b3b0c94852e9d6600',
+    'vo_c02_05': '9dd88fbc59dc6a21d557e40a9f1da52c950e5210a7a6b5fcac7fe977fcef43c5',
+    'vo_c03_01': 'af9b1e7c4893e2432b76d79718577d10c336fffcabe35ca8ec495ccdaccab992',
+    'vo_c03_02': '14366505e24dc4fa7e3eb9d5eb2f2ead1fab2f883ff9401ecea297c55bd95171',
+    'vo_c03_03': 'ca3bdaa16a5f330631857f34482f5f94fde7df167a23a4e9345fae3141bcf77f',
+    'vo_c03_04': 'd57bfb228121b76ac79e8970167c54481a0e193065a21eba88c397a1f95ebbd7',
+    'vo_c03_05': '5a2efcdc490b6a77da4e84d81e9c4a169c7118f52f6e9abb79ae390cbbd0b538',
+    'vo_canteen_01': '6d1f554632381445549865a8667eb166accf477f9b51e5fba092ce32f3030e49',
+    'vo_change_01': '3417b34732f5f2fc51486b387e41a448d7197e84fce9a483eb011056e9517305',
+    'vo_change_02': '5c2eca255d6233780625bde2ef0500401a1e3ca371195ff8a7f40e9c5eab9f51',
+    'vo_change_03': 'eb3f8f69f788b7b64cf5a1fc6089aa604b7eb4e1f851cba18c8668148893e643',
+    'vo_change_04': '1993e1d1a5995202aa5d63cb8a1fae7bfa57932a270a656ae702c50d18c88100',
+    'vo_chess_01': '108ebb82525cec33646bd95bf07e3396ccf6161b4621eddc93a88065081595d3',
+    'vo_chess_02': 'a195578b22af34a62875b7a6dfd0346b4df73d110f6bb7d972a3be29572a2a17',
+    'vo_chess_03': '94a514eeb43f035bfe2fdc7270e7e2690f334bda0b050a3093ffee3c67dedb07',
+    'vo_chess_04': '2d71fa12f314b7058c1a4788e78f9f7473e2d0c82d0af2db50e334c67a16f629',
+    'vo_complaint_01': 'c72a53bc7ee46cf265eaae0c2b444f6477038e668dcb92a13051e62b115d2eb8',
+    'vo_complaint_02': '8f264d1e68b2ca1b3bcef28a4f5a0cd4f97765298552e61b2e08933b4ec50df7',
+    'vo_complaint_03': 'c9f65db4b6f61b30b1b70d0110bad7dc4d77ae248a617241e7624e982d421876',
+    'vo_early_01': 'c6b4320349971d3f0039dfd2a887c9fc3280eb7f749d26fbb01df2db26355f0b',
+    'vo_early_02': 'd676cd7e01303122a9e2403d2990100d9e6229781811415eb5fa77c131adb144',
+    'vo_early_03': '99e6f583b61fe706aad934176b1c9c62933f33e925802c6e996298d8931c8c15',
+    'vo_field_01': '9b2cf8b23757377ef94b39eb04be64958845e3513f7a1e3939d87a02ab6fd7c5',
+    'vo_fine_01': 'e9c54c92dbdb890211a1839e8f47154d8d45d2765df1eec57fe9099745774810',
+    'vo_fine_02': '59b184032e97822e6d0109201262986a2803da85d599dba85a6e49bae5d70cc3',
+    'vo_fine_03': 'b48357de0d158de453cfb536d1f0f5e44754bf7b9299ce75d43987959c81a1d0',
+    'vo_fine_04': '56faafed05c0299a767a79a2164b923e7d981083cf2c5612a6a89e355c8c2fd9',
+    'vo_fine_05': '0dc43be02fe2a1c958d01294ac2b31853e7b7db80599ce74b7c20bc7bd346f27',
+    'vo_fine_06': 'a8964ec8fa9a1c71b4cc196d66f1c4ccf255980d880af82aa1108bc49e30b18f',
+    'vo_laoli_01': '0e91edbe326cd3ebd18fa7a21be2ff243920fb84dcb8b71b952a62a631e4a210',
+    'vo_laoli_02': 'b1795d16693c2204fd3b04b645a13bcc8a6062014c3ef75af8dddd30d558ae79',
+    'vo_laoli_03': 'edc6cd1acb092fef9492f92420ffdda5747197aa7e65d11e45e98de9a50125ad',
+    'vo_laoli_04': '93ddb8c3e7d4df0688de4c8964cec71e17e25ec81016b876c315f9bdd352ab57',
+    'vo_monthly_01': '18523a3b91354ab221342b3f8d5ffab015fd3463b8ed2ede87610f15d6c67429',
+    'vo_monthly_03': 'bfc36472249599cb1681d4eb40085165f0ac07d7aa2cd73e83c6fa3b28f5c320',
+    'vo_monthly_04': '2efb6d21dbca8a7c422fea6ad7d3158bc8471aa15ce44efef004caf9da2228b8',
+    'vo_poach_02': '1b477f4d237bf8958aa6f9c8ccdc5a0baed626b0cee136bc0b499832674f51a3',
+    'vo_pot_01': '773006168e3c93afebc1f47d515c0a3b41a5d3de87f7f5a1b0173190037a52ad',
+    'vo_pot_02': 'facab133d30567e61de847553f4f280bd3de2896c422d5f57bff8cac58567c97',
+    'vo_pot_03': '1a1e5974591ddedc759739fa44f6bedb214c93c8df0ab95c69bff7fe7ba5beef',
+    'vo_priceup_01': '940dff4553aa67a5d430b1c78bf482147182e68d8b025bfce89e637a732b75b9',
+    'vo_reserve_01': 'd4e2898b5ff540ada589d2438c592577878c541f15edf28f41e1cfe8df72e9b7',
+    'vo_reserve_02': '4c50b11943ab266a1903c5187dd0dd874a0161f8801f847eeb03c62c545d1c8d',
+    'vo_reserve_03': 'f47e80297b21c3e46fd8937add562b15a17f68591acb6d3755e36e75d3fe5092',
+    'vo_spoon_01': '903f0a4d52a8ef86ea2d2955a856e2480ffdc7e4ce7c9dd67fdffe8c5cefc3f2',
+    'vo_spoon_02': '7fa735860a3c2f14b946eb70788c8fdec650d633d1044690f638fa652650b961',
+    'vo_spoon_03': '769dd906679a2b9068820870d2923894f802f5a3b967f22ba30951c36fe6d149',
+    'vo_stockout_01': 'c53d610e7edd4f24ce3691a74f9c306bc385bd4453e8276b09f0542db864da1a',
+    'vo_tab_01': '246ebb42be77e8569841c1ba8aa930c2eb7bcaac421a92ba9ad00d73d4f2a048',
+    'vo_tab_03': '1361f848ab73552ba088289cb89611bdaaf7d93de5222c750a2640a6ea55cb3a',
+    'vo_tab_04': '4f94da046a93e77a417f81e647ea8edd732f15c580a3b23765c75d7b19bed75a',
+    'vo_tab_05': '6e03f9935d870ce2b9b33bb315ed91724aef36592f7644325af5b1bf21bca650',
+    'vo_tag_01': '53faed2313312b1da7aa7fbfd10513112f40e809af951d22f5fd46d35e986d1b',
+    'vo_tag_02': 'e3abae1e9823a4c5965d7e0c3b62559148b0286fedfa75345f5d452b0be04d1a',
   };
   const packDir = join(HERE, 'public/audio');
   const onDisk = readdirSync(packDir).filter(f => /^vo_[a-z0-9]+_\d\d\.ogg$/.test(f)).map(f => f.replace('.ogg', ''));
@@ -3447,11 +3526,16 @@ for (const seed of [SEED, 7979, 36832]) {
     return !statSync(p, { throwIfNoEntry: false }) || createHash('sha256').update(readFileSync(p)).digest('hex') !== VOICE_SHA[f];
   });
   const packBytes = onDisk.reduce((s, f) => s + statSync(join(packDir, `${f}.ogg`)).size, 0);
-  const notTableed = onDisk.filter(f => !tableNames.includes(f));
-  check('转码包逐件对账：仓内 vo_ 件与表内句名一一对应，sha 逐件对上转交包（补录句到位当天本针翻红＝留痕闸门，新 sha 进表才算挂完）；包体合计对上单上 1.8 MB',
-    shaBad.length === 0 && notTableed.length === 0 && Object.keys(VOICE_SHA).length === 48 && onDisk.length === 48
-    && packBytes > 1.7e6 && packBytes < 1.9e6,
-    `48/48 sha 齐（对不上 ${shaBad.length}）｜未挂载的多余件 ${notTableed.length}｜包体 ${(packBytes / 1048576).toFixed(2)} MB`);
+  const oldBatch = new Set(readFileSync(join(HERE, '..', 'voice-events-script-20261104.md'), 'utf8').match(/vo_[a-z0-9]+_\d\d/g) || []);
+  const batchBytes = onDisk.filter(f => !oldBatch.has(f)).reduce((s, f) => s + statSync(join(packDir, `${f}.ogg`)).size, 0);
+  const unmountedOnDisk = onDisk.filter(f => !tableNames.includes(f)).sort();     // 盘上有、表里没 ＝ 那 18 句无锚点的 ★新写句
+  const missingOnDisk = tableNames.filter(f => !onDisk.includes(f)).sort();       // 表里占号、盘上没件 ＝ 两句待重录
+  check('转码包逐件对账：仓内 114 件（48 + 66）sha 逐件对上两份转交包，盘上多出的 18 件逐名等于无锚点名单、'
+    + '表里占号而没件的正是待重录两句（vo_monthly_02 / vo_tab_02）；包体 11-06 本批对上单上「约 3.1 MB / 335.6 s」',
+    shaBad.length === 0 && Object.keys(VOICE_SHA).length === 114 && onDisk.length === 114
+    && unmountedOnDisk.join() === [...UNMOUNTED].sort().join() && missingOnDisk.join() === 'vo_monthly_02,vo_tab_02'
+    && batchBytes > 3.3e6 && batchBytes < 3.4e6 && packBytes > 5.0e6 && packBytes < 5.1e6,
+    `114/114 sha 齐（对不上 ${shaBad.length}）｜未挂载 ${unmountedOnDisk.length}｜占号缺件 [${missingOnDisk.join(' ')}]｜本批 ${(batchBytes / 1048576).toFixed(2)} MiB｜全批 ${(packBytes / 1048576).toFixed(2)} MiB`);
 
   // 分支对位：直接跑挂载表那个函数（与 main.js 卡片挂载那一刻调的是同一支），拿 Rep 三档验赢档/中档/输档
   const WIN = voiceIntroLines('evt_s_return', { Rep: 60 }), MID = voiceIntroLines('evt_s_return', { Rep: 35 }), LOSE = voiceIntroLines('evt_s_return', { Rep: 20 });
@@ -3463,7 +3547,8 @@ for (const seed of [SEED, 7979, 36832]) {
     `赢 ${WIN.length} 句｜中 ${MID.length} 句｜输 ${LOSE.length} 句｜其余六条无条件句组不受 Rep 影响`);
 
   const inspSrc = readFileSync(join(HERE, 'src/engine/inspection.js'), 'utf8');
-  const notePair = Object.entries(VOICE_RESULT).flatMap(([id, ms]) => ms.map(m => [id, m]));
+  const inspIds = ['evt_s_insp', 'evt_s_insp2'];
+  const notePair = Object.entries(VOICE_RESULT).filter(([id]) => inspIds.includes(id)).flatMap(([id, ms]) => ms.map(m => [id, m]));
   const orphanNote = notePair.filter(([, m]) => !inspSrc.includes(`note(state, '${m.note}')`));
   const dupTarget = resultNames.filter((f, i) => resultNames.indexOf(f) !== i);
   check('检查两条的结果句与 inspection.js 一一对应（按结果原文落点挂，不许顺序乱播）：八条键名逐字命中引擎的 note 原文、各指向唯一一句、句号全部 ≥02；出场只 01',
@@ -3502,15 +3587,71 @@ for (const seed of [SEED, 7979, 36832]) {
 
   const pv = (mainSrc.match(/playVoice\(/g) || []).length, av = (mainSrc.match(/advanceVoice\(/g) || []).length,
     sv = (mainSrc.match(/stopVoice\(/g) || []).length, vi = (mainSrc.match(/voiceIntroLines\(/g) || []).length,
-    vr = (mainSrc.match(/voiceResultLines\(/g) || []).length;
-  check('挂载点逐处对上单上口径：出场一处（打烊抽到卡那一刻按序号播）、结果一处（判定落地才播）、点按推进一处、落定收声一处；'
-    + '推进排在 act 之前，王老板线入场那一下让位给动画不吃词',
-    pv === 2 && av === 1 && sv === 1 && vi === 1 && vr === 1
-    && mainSrc.includes("playVoice(voiceIntroLines(pendingEvent.id, state))")
-    && mainSrc.includes('playVoice(voiceResultLines(judge.id, state.today.notes))')
-    && mainSrc.indexOf("advanceVoice()") < mainSrc.indexOf('if (host) act(host)')
+    vr = (mainSrc.match(/voiceResultLines\(/g) || []).length, vrl = (mainSrc.match(/voiceRegularLines\(/g) || []).length;
+  check('挂载点逐处对上全覆盖单的口径（e2a6293）：出场三处（晚间弹层／晨间抽卡／newDay 情报抽取）＋结果两处（晨间当场、晚间结算前）'
+    + '＋常客一处并进晨间那一队；点按推进仍一处、落定收声仍一处；推进排在 act 之前，王老板线入场那一下让位给动画不吃词',
+    pv === 5 && av === 1 && sv === 1 && vi === 3 && vr === 2 && vrl === 1
+    && mainSrc.includes('playVoice(voiceIntroLines(pendingEvent.id, state))')
+    && mainSrc.includes('playVoice(voiceIntroLines(preEvent.id, state))')
+    && mainSrc.includes('playVoice(voiceResultLines(ev.id, resultTexts(state)))')
+    && mainSrc.includes('playVoice(voiceResultLines(evening.event.id, resultTexts(state)))')
+    && !mainSrc.includes('voiceResultLines(judge.id')
+    && mainSrc.indexOf('advanceVoice()') < mainSrc.indexOf('if (host) act(host)')
     && /if \(!\(skip && !skip\.classList\.contains\('fx-done'\)\)\) advanceVoice\(\);/.test(mainSrc),
-    `playVoice ${pv}｜advanceVoice ${av}｜stopVoice ${sv}｜表读取 ${vi}+${vr}`);
+    `playVoice ${pv}｜advanceVoice ${av}｜stopVoice ${sv}｜表读取 ${vi}+${vr}+${vrl}`);
+
+  // 回归针④「情报条同日不重播」：四句只可能从 newDay 的抽取点出声；随每次交互重绘的那张采购屏面板里一个 playVoice 都没有。
+  const newDayAt = mainSrc.indexOf('function newDay()');
+  const preAt = mainSrc.indexOf('preEvent = morningPreEvent(state, rng)');
+  const intelMount = mainSrc.slice(preAt, mainSrc.indexOf('saveGame(state);', preAt));
+  const intelPanel = mainRaw.slice(mainRaw.indexOf('<h3>晨间情报</h3>'), mainRaw.indexOf('<h3>晨间情报</h3>') + 600);
+  check('情报条同日不重播（单上「挂 newDay 抽取点、抽中才播、重渲染/重进页面不重播」）：playVoice 紧跟 morningPreEvent 且落在 newDay 体内，'
+    + '采购屏那张情报面板零出声调用；四条 timing 全是 morning_pre，另两处挂载点按 timing 分池，永远读不到这四行',
+    newDayAt >= 0 && preAt > newDayAt && /playVoice\(voiceIntroLines\(preEvent\.id, state\)\)/.test(intelMount)
+    && intelPanel.length >= 600 && !/playVoice/.test(intelPanel)
+    && ['evt_d_011', 'evt_d_stockout', 'evt_d_041', 'evt_d_042']
+      .every(id => EVENT_BY_ID[id].timing === 'morning_pre' && voiceIntroLines(id, {}).length === 1),
+    `抽取点到出声 ${intelMount.indexOf('playVoice')} 字内｜面板里 playVoice ${(intelPanel.match(/playVoice/g) || []).length} 处`);
+
+  // 晨间那一处必须与「回来不重抽」同一条命（盘点 §6.1）：挂在 !orders.length 守卫里面，挪到外面就当场翻红。
+  const guardAt = mainSrc.indexOf('if (!orders.length)');
+  const guardBody = mainSrc.slice(guardAt, mainSrc.indexOf('saveGame(state);', guardAt));
+  const morningQueue = 'playVoice([...voiceIntroLines(pendingEvent ? pendingEvent.id : null, state), ...regularVoiceLines()])';
+  const queueMounts = (mainSrc.match(/playVoice\(\[\.\.\.voiceIntroLines/g) || []).length;
+  check('晨间出场句与「回来不重抽」同一条命（§6.1）：并队那一处写在 openShop 的 !orders.length 守卫里面、且全仓只有这一处；'
+    + '常客拍点句走同一支 playVoice 排队尾，分两次调用会被后一次 stopVoice 掐掉前一段',
+    guardAt >= 0 && guardBody.includes(morningQueue) && queueMounts === 1
+    && guardBody.indexOf(morningQueue) > guardBody.indexOf('drawHandOrders(state, rng)'),
+    `守卫内 ${guardBody.includes(morningQueue) ? 1 : 0} 处｜全仓并队 ${queueMounts} 处`);
+
+  // 日常结果句那一半（§6.3）：键必须逐字命中 events.js 的原文落点；18 句无锚点的 ★新写句一个都不许挂。
+  const textSinks = new Set();
+  const walkOps = v => {
+    if (Array.isArray(v)) { v.forEach(walkOps); return; }
+    if (v && typeof v === 'object') for (const [k, val] of Object.entries(v)) {
+      if ((k === 'forcedComment' || k === 'dayNote') && typeof val === 'string') textSinks.add(val); else walkOps(val);
+    }
+  };
+  for (const e of EVENTS) { walkOps(e.open || []); (e.actions || []).forEach(a => walkOps(a.open || [])); }
+  const dailyPair = Object.entries(VOICE_RESULT).filter(([id]) => !inspIds.includes(id)).flatMap(([id, ms]) => ms.map(m => [id, m]));
+  const dailyBad = dailyPair.filter(([, m]) => !textSinks.has(m.note));
+  const merged = resultTexts({ today: { notes: ['n1'], forcedComments: ['f1'] } });
+  check('日常事件的结果句同样只认原文：六条键逐字命中 events.js 的 forcedComment 原文（notes 那一头另两条检查事件已由 inspection.js 对上）；'
+    + '查找集合 = notes + forcedComments 合并，resultTexts 只读不写；无锚点的 18 句不在任何一行里＝没有按选项顺序猜档的口子',
+    dailyPair.length === 6 && dailyBad.length === 0
+    && merged.join() === 'n1,f1' && resultTexts({}).length === 0 && resultTexts(undefined).length === 0
+    && UNMOUNTED.every(f => !resultNames.includes(f)),
+    `6/6 原文对上（键名漂了 ${dailyBad.length} 条）｜合并集合取数 ${merged.join('+')}｜无锚点 18 句在场外`);
+
+  // 常客表（全覆盖单第五节 15 句）：认的是 customers.js 那行灰字本身，双向零差；留空的线不出声。
+  const regPair = Object.entries(VOICE_REGULAR).flatMap(([id, ms]) => ms.map(m => [id, m]));
+  const regBad = regPair.filter(([id, m]) => !(REGULAR_LINES[id] || []).includes(m.note));
+  const regUnvoiced = Object.entries(REGULAR_LINES).flatMap(([id, ls]) => ls.map(l => [id, l])).filter(([id, l]) => !voiceRegularLines(id, l).length);
+  check('常客 15 句认原文不认拍次：VOICE_REGULAR 每一个键逐字等于 customers.js 里那一行灰字，正文每一行也各对上唯一一句（双向零差）；'
+    + '留空的 c04 没有行也就没有出声，同一位同一天只有一句（拍次推进在打烊后第 12 步）',
+    regPair.length === 15 && regBad.length === 0 && regUnvoiced.length === 0 && !VOICE_REGULAR.c04
+    && regPair.every(([id, m]) => voiceRegularLines(id, m.note).join() === m.f),
+    `15 句成对（表外键 ${regBad.length}｜正文无句 ${regUnvoiced.length}）｜c04 行数 ${(VOICE_REGULAR.c04 || []).length}`);
 
   const voiceSrc = readFileSync(join(HERE, 'src/data/voice.js'), 'utf8');
   const voiceCode = stripComments(voiceSrc);
@@ -3520,14 +3661,17 @@ for (const seed of [SEED, 7979, 36832]) {
     && /evalCondition\(l\.when, state\)/.test(voiceCode),
     `import ${(voiceSrc.match(/from '([^']+)'/) || [, ''])[1]}｜写字段 0｜随机 0`);
 
-  // 浏览器那一层跑不进回归回路，源码针只钉形状；三段实际走位交给仓里这个可复跑探针（垫最小形状的 localStorage/document/AudioContext/fetch）
+  // 浏览器那一层跑不进回归回路，源码针只钉形状；实际走位交给仓里这个可复跑探针（垫最小形状的 localStorage/document/AudioContext/fetch）
   const probeSrc = readFileSync(join(HERE, 'probe-voice-mount.js'), 'utf8');
-  check('挂载层走查件在仓可复跑（node probe-voice-mount.js）：①缺文件跳句 ②点按推进 ③静音零播三段齐备，且探针不 import 引擎',
+  check('挂载层走查件在仓可复跑（node probe-voice-mount.js）：四段齐备——①逐句播＋缺文件跳句（poach_02 补录件到货即自动接成五句、表里占号行一字未动，'
+    + 'tab／monthly 各跳过待重录的 02）②点按推进 ③全覆盖三处新挂载（晨间并队／结果句认原文／常客认原文不认序号）④静音零播；探针不 import 引擎，四段全绿才 exit 0',
     statSync(join(HERE, 'probe-voice-mount.js')).isFile()
-    && probeSrc.includes('vo_poach_01 → vo_poach_03 → vo_poach_04 → vo_poach_05')
+    && probeSrc.includes("seqPoach === 'vo_poach_01 → vo_poach_02 → vo_poach_03 → vo_poach_04 → vo_poach_05'")
+    && probeSrc.includes("seqTab === 'vo_tab_01 → vo_tab_03'") && probeSrc.includes("seqMonthly === 'vo_monthly_01'")
     && /advanceVoice\(\)/.test(probeSrc) && /setMuted\(true\)/.test(probeSrc)
+    && /process\.exit\(c1 && c2 && c3a && c3b && c3c && c4 \? 0 : 1\)/.test(probeSrc)
     && !/from '\.\/src\/engine/.test(probeSrc),
-    'probe-voice-mount.js 在场（三段判语全绿才 exit 0）');
+    'probe-voice-mount.js 在场（四段判语全绿才 exit 0）');
 }
 
 // ── §28 排版批 task-ui-polish-20261105（Orange `71ab432`，店主 2026-11-05 批「嫁接法」）───────
