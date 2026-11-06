@@ -4165,6 +4165,69 @@ for (const seed of [SEED, 7979, 36832]) {
     `envt 模板处 ${n31(/class="envt"/g, mainRaw31)}｜env 挂载 ${n31(/data-act="env"/g, mainRaw31)}`);
 }
 
+// ── §32 UI 小修单 task-ui-fix-20261106 第四项（Orange `0953e30` + 对照样本 `145282a`；店主真机截图）晨间弹层底页灰空 ──
+// 现场读数（delta §八十四 五）：弹层那一刻 #app 只有 hud + overlay 两个孩子，.panel / .ordercard / img.scene 各 0 枚，
+// innerHTML 长 722 字节（同日不弹事件的同一屏实测 10677）⇒ 底页不是「还没画」，是「一个节点都没建」。
+// 根因唯一一处：weigh() 原先在 pendingEvent 为真时 `return hud() + eventOverlay()`，整屏换掉出餐站；
+// 遮罩本身没问题（fixed inset:0 + rgba(27,42,74,.55) + z-index:20，与晚间那一层同一枚），
+// 所以对照样本里只有晨间灰空——settle() 在预检反馈 F6（0366bd6）已改成「先排账、弹层追加」。这里同一味：底页先落再弹。
+// 针面三条：① 旧那支整屏替换零残留且 overlay 门禁全文两屏同规格；② 遮罩那几行逐字没动、没新造第二层模态；
+// ③ 行为级把 weigh() 的模板体原样交给 Function（与 §31 row 同一手法）：事件在弹时底页与弹层同屏共存，
+//    且把末尾那层 overlay 剥掉之后，底页 HTML 与不弹事件时逐字节同一串——修的是「有没有底页」，不是「底页长什么样」。
+{
+  const mainRaw32 = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const cssRaw32 = readFileSync(join(HERE, 'src/ui/theme.css'), 'utf8');
+  const s32 = mainRaw32.indexOf('  weigh() {');
+  const weigh32 = mainRaw32.slice(s32, mainRaw32.indexOf('\n  },', s32));
+  const n32 = (re, s) => (s.match(re) || []).length;
+  const seen32 = (hay, needle) => hay.split(needle).length - 1;
+
+  // 1) 旧拼法一根不留；overlay 这一枚门禁现在出摊 / 结算两屏同规格（全文 2 处），底下那行字符串仍排在前、弹层追加在后。
+  check('§32 第四项·整屏替换那支零残留，门禁与晚间同规格：weigh() 段里 `if (pendingEvent) return hud() + eventOverlay()` 一处不剩，'
+      + '`const overlay = pendingEvent ? eventOverlay() : \'\'` 全文两处（出摊 + 结算），weigh() 段内 sceneImg 的下标在 ${overlay} 之前'
+      + '（底页字符串先落、弹层末尾追加），段尾逐字是 </div>${overlay}',
+    weigh32.includes('if (pendingEvent) return hud() + eventOverlay();') === false
+      && n32(/const overlay = pendingEvent \? eventOverlay\(\) : '';/g, mainRaw32) === 2
+      && weigh32.indexOf("sceneImg('weighing'") > -1 && weigh32.indexOf('sceneImg(\'weighing\'') < weigh32.indexOf('${overlay}')
+      && /<button class="go" style="margin-top:14px" data-act="cook">下锅 · 开卖<\/button>\s*\n\s*<\/div>\$\{overlay\}`;/.test(weigh32),
+    `门禁 ${n32(/const overlay = pendingEvent \? eventOverlay\(\) : '';/g, mainRaw32)} 处｜段尾 ${/\$\{overlay\}`;/.test(weigh32)}`);
+
+  // 2) 遮罩一格没改：不透明度与层级仍是各弹层现行那一枚（单上「属遮罩不透明就按其余弹层对齐」这一档不适用，也就没动它），
+  //    事件弹层仍是全文唯一一层 overlay——没有为了让底页露出来新造半透明壳子。
+  check('§32 第四项·遮罩与层级按现行口径原样：.overlay 那一行逐字仍是 fixed + inset:0 + rgba(27, 42, 74, .55) + z-index:20，'
+      + 'main.js 里 class="overlay 仍只 eventOverlay 那一处（没新造第二层模态、没把灰底换个颜色糊过去）',
+    cssRaw32.includes('  position: fixed; inset: 0; background: rgba(27, 42, 74, .55);')
+      && /z-index: 20/.test(cssRaw32.slice(cssRaw32.indexOf('.overlay {'), cssRaw32.indexOf('.event {')))
+      && n32(/class="overlay /g, mainRaw32) === 1,
+    `overlay 层 ${n32(/class="overlay /g, mainRaw32)} 处`);
+
+  // 3) 行为级：把 weigh() 模板体交出来跑（桩只替四个外部件：hud / sceneImg / orderCard / eventOverlay，形状照 main.js:65 与 1846）。
+  const body32 = weigh32.slice(weigh32.indexOf('{') + 1);   // weigh32 已切在段尾分号，末尾那个 } 不在段内，不能再按 lastIndexOf 收
+  const stubHud = () => '<div class="hud">顶栏</div>';
+  const stubScene = (file, alt, cls) => `<img class="scene${cls ? ' ' + cls : ''}" src="./img/${file}.webp" />`;
+  const stubCard = o => `<div class="ordercard" id="oc-${o.customerId}">单</div>`;
+  const stubOv = () => '<div class="overlay fx-bad"><div class="event">事件卡</div></div>';
+  let weighFn32 = null, err32 = '';
+  try {
+    weighFn32 = new Function('hud', 'sceneImg', 'orders', 'state', 'orderCard', 'pendingEvent', 'eventOverlay', 'GRAMS_PER_JIN', body32);
+  } catch (e) { err32 = String((e && e.message) || e); }
+  const ORD32 = [{ customerId: 'c_a' }, { customerId: 'c_b' }, { customerId: 'c_c' }];
+  const run32 = pend => weighFn32
+    ? weighFn32(stubHud, stubScene, ORD32, { blanchOn: false }, stubCard, pend, stubOv, 250) : '<渲染器未建成>';
+  const withEv32 = run32({ id: 'evt_d_002' });
+  const noEv32 = run32(null);
+  const cut32 = withEv32.indexOf('<div class="overlay');
+  check('§32 第四项·弹层那一刻底页在场：出摊页事件在弹时，同一串 HTML 里 hud + img.scene hero + panel accent + 三张亲手单与 overlay 五样齐在，'
+      + '且 overlay 排在最后（顶栏之下不再是空面）；再把末尾那层遮罩整截剥掉，剩下的底页与「今天没抽到事件」那一屏逐字节同一串——'
+      + '改的只有「底页建不建」，底页长什么样一个字节没动；不弹事件时零 overlay，一像素如旧',
+    weighFn32 !== null && cut32 > 0
+      && ['class="hud"', 'class="scene hero"', 'class="panel accent"', 'data-act="cook"'].every(k => withEv32.includes(k))
+      && seen32(withEv32, 'class="ordercard"') === 3 && seen32(withEv32, 'class="overlay') === 1
+      && withEv32.slice(0, cut32) === noEv32
+      && !noEv32.includes('class="overlay') && seen32(noEv32, 'class="ordercard"') === 3,
+    `渲染器 ${err32 || 'OK'}｜overlay 下标 ${cut32}｜剥遮罩后等同 ${withEv32.slice(0, cut32) === noEv32}`);
+}
+
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
 // 而开学周是"全线 ×1.1 + 品类系数偏肉（MB1.3/MT1.2）"；附录 D.5 的 2.5 元/碗 锚点按固定品类占比算，不含这两项。
 function bowlMarginYuan(tier, priceTierId, weatherId, semesterDay) {

@@ -1234,7 +1234,11 @@ const VIEWS = {
   },
 
   weigh() {
-    if (pendingEvent) return hud() + eventOverlay();
+    // 小修单 task-ui-fix-20261106 第四项：晨间这一弹原先整屏换掉出餐站，底页（场景图 + 亲手单）一个节点都没建，
+    // .55 墨蓝遮罩直接压到奶油 body 上（theme.css:20/470），blend 出来就是店主截图里「顶栏之下大半屏平灰空面」。
+    // 晚间那一支在预检反馈 F6（0366bd6）已改成「先把账排在屏上、弹层作覆盖层追加」，所以对照样本只晨间灰空。这里同一味：
+    // 底页先落，弹层追加。遮罩本身一个字没动（不透明度与层级与各弹层现行口径本来就同一枚），也不是把灰底换个颜色。
+    const overlay = pendingEvent ? eventOverlay() : '';
     return hud() + `${sceneImg('weighing', '出餐站过称', 'hero')}
       <div class="panel accent">
       <div class="row"><h2>出餐站 · 亲手单 ${orders.length} 单</h2>
@@ -1242,7 +1246,7 @@ const VIEWS = {
       <p class="muted">先亮单子，再过称。轻点一下添一小撮，一下几克写在单子右边；想多要点就按住不松，松手定格；抓多了捏出一点。这一屏只用克，一碗标准 ${GRAMS_PER_JIN} 克，秤上是多少就收多少。${state.blanchOn ? '过完称，碗下烫锅。' : ''}</p>
       <div class="stack" style="margin-top:10px">${orders.map(orderCard).join('')}</div>
       <button class="go" style="margin-top:14px" data-act="cook">下锅 · 开卖</button>
-    </div>`;
+    </div>${overlay}`;
   },
 
   // 批H（工单 task-ui-polish-20261105 第 7 条）：结算屏改三段——① 净利大字最先并放大，② 紧随一条藏青播报行，
