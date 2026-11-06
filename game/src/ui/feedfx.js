@@ -88,6 +88,14 @@ export function envelopeTitle(text) {
   return one.length > TITLE_MAX ? one.slice(0, TITLE_MAX) : one;
 }
 
+// 「标题这一行和正文是不是同一句」的判据（小修单 task-ui-fix-20261106 第一项）：
+// 归一 = 去首尾空白 + 去尾部句末标点，两边都归一后逐字全等才算重复。标点集合与上面 envelopeTitle
+// 切首句用的是同一枚（再加 ASCII 的 . ! ?），两处口径不许分家——标题本来就是从正文里切出来的，
+// 差异常常就是那一个句号。判的是显示用的那一行，正文本体一个字没动。
+const TAIL_PUNCT = /[。！？；…,.!?]+$/;
+export const isSameSay = (title, body) => String(title).trim().replace(TAIL_PUNCT, '').trim()
+  === String(body).trim().replace(TAIL_PUNCT, '').trim();
+
 // 「已读压平置后」的读序：纯函数，输入每条留言当前的态，输出该按哪个下标顺序画。
 // 排序只发生在这一张显示用的索引表上，引擎那份 comments 数组一个字的顺序都没动。
 export function envOrder(states) {

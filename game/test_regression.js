@@ -35,7 +35,7 @@ import { WEATHER_TALK, weatherTalk, catDeviation } from './src/data/weather-talk
 import { VOICE_INTRO, VOICE_RESULT, voiceIntroLines, voiceResultLines } from './src/data/voice.js';
 import { BROADCAST_KINDS, BROADCAST_POOL, broadcastLine, inoutTotals } from './src/ui/settle-broadcast.js';
 import { mergeSelloutNames } from './src/ui/sellout.js';
-import { BUBBLE_MAX, FLOAT_MAX, takeBubbles, takeFloats, orderSay, praiseSay, grumbleSay, rushSay, envKey, envOrder, envelopeTitle } from './src/ui/feedfx.js';
+import { BUBBLE_MAX, FLOAT_MAX, takeBubbles, takeFloats, orderSay, praiseSay, grumbleSay, rushSay, envKey, envOrder, envelopeTitle, isSameSay } from './src/ui/feedfx.js';
 import { morningRivals, priceWarReprice, sharesAndS, tallySuppression, rivalPriceCoef, previewShare } from './src/engine/competition.js';
 import { applyShadow, computeQ } from './src/engine/shadow.js';
 import { makeRng } from './src/engine/rng.js';
@@ -4089,6 +4089,80 @@ for (const seed of [SEED, 7979, 36832]) {
     miss30.length === 0 && ['ordercard', 'bub', 'gramrow', 'grambub', 'weigauge', 'band', 'mark',
       'env', 'envt', 'envbody', 'comment', 'hot', 'float', 'num'].every(has30),
     `用[${used30.sort().join(' ')}]｜缺[${miss30.join(' ') || '无'}]`);
+}
+
+// ── §31 UI 小修单 task-ui-fix-20261106 第一项（Orange `f9ed233`；口径店主已批）夜晚留言展开态去重 ──────
+// 走查实证（公网现版两局同形）：留言点开后同一句出现两遍——标题行一遍、下方内框正文再一遍，短留言两者只差句末标点。
+// 单上口径逐条钉死：① 判重在渲染层；② 归一 = 去首尾空白与尾标点，全等才叫重复；③ 重复 ⇒ 展开态只留正文那一份（标题行不渲染）；
+// ④ 正文长于标题的长留言维持标题 + 正文原样，不许误伤；⑤ 信封视觉不做，现有卡片折叠形态（封口 / 压平两态的标题行）一字不动。
+// 加针按单上原话办：一短一长两条留言，断言短留言展开态那句话只出现一次、长留言标题与正文都在。
+// 渲染器不另抄一份逻辑——把 main.js 里 row 那一段函数体原样交给 Function，只从外面喂它闭包拿到的四样（c / i / envState / key），
+// 所以模板一改、这一组针就跟着改；仓里没有 DOM 库（devDeps 只有 vite），故 DOM 真值的复验走浏览器读数，写在 delta §八十四。
+{
+  const mainRaw31 = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const feedRaw31 = readFileSync(join(HERE, 'src/ui/feedfx.js'), 'utf8');
+  const cssRaw31 = readFileSync(join(HERE, 'src/ui/theme.css'), 'utf8');
+  const cut31 = (a, b) => { const i = mainRaw31.indexOf(a); return mainRaw31.slice(i, mainRaw31.indexOf(b, i)); };
+  const envList31 = cut31('function envList(comments) {', '\nfunction toggleEnv');
+  const HEAD31 = 'const row = (c, i) => {';
+  const rowStart = envList31.indexOf(HEAD31);
+  const rowBody = envList31.slice(rowStart + HEAD31.length, envList31.indexOf('\n  };', rowStart));
+  const key31 = i => envKey(7, i);                       // 表键与画面同一个函数，第 7 天只是不让它撞上真存档
+  const esc31 = s => String(s);                          // 恒等转义：下面第一条针先钉住台词池 51 句零个 HTML 待转义字符
+  let row31 = null, err31 = '';
+  try { row31 = new Function('c', 'i', 'envState', 'key', 'esc', 'envelopeTitle', 'isSameSay', rowBody); }
+  catch (e) { err31 = String((e && e.message) || e); }
+  const draw31 = (text, st) => row31 ? row31({ text }, 0, { '7:0': st }, key31, esc31, envelopeTitle, isSameSay) : '<渲染器未建成>';
+  const seen31 = (hay, needle) => hay.split(needle).length - 1;
+  const n31 = (re, s) => (s.match(re) || []).length;
+  const pool31 = Object.values(COMMENT_POOLS).flat();
+  const SHORT31 = '还行吧。';                                    // 短：首句不成话 ⇒ 批I 已签取法把整条放上标题 ⇒ 标题逐字 = 正文
+  const LONG31 = '有人把你家价目牌拍下来发群里了，配文就俩字：良心。';   // 长：标题只是正文前 20 字 ⇒ 两者不相等 ⇒ 两处都留
+  const dup31 = pool31.filter(s => isSameSay(envelopeTitle(s), s));
+  const kept31 = pool31.filter(s => !isSameSay(envelopeTitle(s), s));
+  const bad31 = [];
+  for (const s of pool31) {
+    const t = envelopeTitle(s), html = draw31(s, 'open');
+    if (isSameSay(t, s)) {
+      if (seen31(html, 'class="envt"') !== 0 || seen31(html, t) !== 1) bad31.push('展开态仍重复[' + s + ']');
+    } else if (seen31(html, 'class="envt"') !== 1 || seen31(html, t) !== 2 || seen31(html, s) !== 1) bad31.push('长留言被误伤[' + s + ']');
+    for (const st of [undefined, 'read']) {   // 封口与压平：正文藏着，屏上只有标题那一行 ⇒ 去重在这两格一个像素都不许动
+      const h = draw31(s, st);
+      if (seen31(h, 'class="envt"') !== 1 || !h.includes(`class="envbody comment" hidden`) && !h.includes(`class="envbody comment hot" hidden`)) {
+        bad31.push(`${st === 'read' ? '压平' : '封口'}态标题行或藏法被改动[${s}]`);
+      }
+    }
+  }
+
+  // 1) 判据本身（归一 = 去首尾空白与尾标点，两边都归一）：标点集合与 envelopeTitle 切首句同一枚，两处口径不许分家。
+  check('§31 第一项·判重口径逐字钉住：归一只去首尾空白与尾部句末标点（与标题切分同一枚集合），全等才算重复；台词池 51 句零个 HTML 待转义字符（恒等 esc 与屏上等价），按这条口径 48 句单句留言判为重复、3 句判不重复——那 3 句的标题都是正文的严格短前缀（两句式那一条切在第一句句末、超长那两条被 TITLE_MAX 收到 20 字），去重不许把话吃掉',
+    feedRaw31.includes('const TAIL_PUNCT = /[。！？；…,.!?]+$/;')
+      && /export const isSameSay = \(title, body\) => String\(title\)\.trim\(\)\.replace\(TAIL_PUNCT, ''\)\.trim\(\)/.test(feedRaw31)
+      && /=== String\(body\)\.trim\(\)\.replace\(TAIL_PUNCT, ''\)\.trim\(\);/.test(feedRaw31)
+      && pool31.length === 51 && pool31.every(s => !/[<>&"']/.test(s))
+      && dup31.length === 48 && kept31.length === 3
+      && kept31.every(s => { const t = envelopeTitle(s); return t.length < s.length && s.startsWith(t); })
+      && isSameSay(envelopeTitle(SHORT31), SHORT31) && !isSameSay(envelopeTitle(LONG31), LONG31),
+    `池 51｜重复 ${dup31.length}｜不重复 ${kept31.length}[${kept31.map(s => envelopeTitle(s).length + '/' + s.length).join(' ')}]`);
+
+  // 2) 单上加针原话（一短一长，展开态）：短的那句屏上只剩一份，长的那句标题与正文都在。渲染器就是文件里那一段模板。
+  check('§31 第一项·加针原样办：短留言「还行吧。」展开态里标题 span 零枚、那句话只出现一次（去重前是两次）；长留言「有人把你家价目牌……」展开态标题一枚 + 正文一枚，标题在（它同时是正文的前 20 字，所以数到两次），正文一字不多。台词池 51 句 × 展开 / 封口 / 压平三态逐句过这一条，一句不漏',
+    !!row31 && seen31(draw31(SHORT31, 'open'), 'class="envt"') === 0
+      && seen31(draw31(SHORT31, 'open'), envelopeTitle(SHORT31)) === 1
+      && seen31(draw31(LONG31, 'open'), 'class="envt"') === 1
+      && seen31(draw31(LONG31, 'open'), envelopeTitle(LONG31)) === 2
+      && seen31(draw31(LONG31, 'open'), LONG31) === 1
+      && bad31.length === 0,
+    `渲染器[${row31 ? '取自 main.js 那一行模板' : '建不起来:' + err31}]｜越界[${bad31.slice(0, 3).join(' ') || '无'}]`);
+
+  // 3) 只动展开态那一个 span：门禁写死「open 且判重」才撤标题行，正文那一格（已签的 .comment 皮与 hidden 藏法）与两条 CSS 规则一字未动。
+  check('§31 第一项·范围只有标题那一行：门禁式子逐字是 open && isSameSay(say, c.text) ? 空 : <span class="envt">…（open 为假必出标题 ⇒ 封口 / 压平两态的标题行结构上没被碰），class="envt" 全文仍一处、正文一格仍走批I 已签的那一枚 envbody comment + hidden 拼法、data-act="env" 挂载点仍一处，.envt 与 .envbody[hidden] 两条规则块照旧',
+    /\$\{open && isSameSay\(say, c\.text\) \? '' : `<span class="envt">\$\{esc\(say\)\}<\/span>`\}/.test(mainRaw31)
+      && n31(/class="envt"/g, mainRaw31) === 1
+      && /<span class="envbody comment\$\{c\.kind === 'hot' \? ' hot' : ''\}"\$\{open \? '' : ' hidden'\}>\$\{esc\(c\.text\)\}<\/span>/.test(mainRaw31)
+      && n31(/data-act="env"/g, mainRaw31) === 1
+      && /\.envt \{/.test(cssRaw31) && /\.envbody\[hidden\] \{ display: none; \}/.test(cssRaw31),
+    `envt 模板处 ${n31(/class="envt"/g, mainRaw31)}｜env 挂载 ${n31(/data-act="env"/g, mainRaw31)}`);
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，

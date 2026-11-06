@@ -29,7 +29,7 @@ import { broadcastLine, inoutTotals } from './settle-broadcast.js';
 import { mergeSelloutNames } from './sellout.js';
 // 营业屏气泡 / 金色浮字 / 夜晚信封（视觉批 I，工单 task-ui-visual-20261105）：文案与上限都在 feedfx.js 那一层，
 // 它零引擎 import、不写 state、不掷随机、不留计时器（撤掉 = 删这一行 + 下面调用点 + theme.css 那两块）。
-import { orderSay, praiseSay, grumbleSay, rushSay, showBubbles, showFloats, envKey, envOrder, envelopeTitle } from './feedfx.js';
+import { orderSay, praiseSay, grumbleSay, rushSay, showBubbles, showFloats, envKey, envOrder, envelopeTitle, isSameSay } from './feedfx.js';
 import { drawHandOrders, GRAMS_PER_JIN, stockGrams, gramsCeilingFor } from '../engine/weigh.js';
 import { judgeBlanch, blanchValueAt } from '../engine/blanch.js';
 import { regularLine, REGULAR_SLOTS } from '../data/customers.js';
@@ -1055,8 +1055,12 @@ function envList(comments) {
   const row = (c, i) => {
     const st = envState[key(i)];
     const open = st === 'open';
+    const say = envelopeTitle(c.text);
+    // 小修单 task-ui-fix-20261106 第一项：展开态里标题与正文归一后全等 ⇒ 标题行不再渲染，只留正文那一份。
+    // 判重只发生在 open 这一格——封口与压平两态正文是藏着的，屏上只有标题那一行，本来就只有一份。
+    // 正文长于标题的长留言两者不相等，标题 + 正文原样照旧（判据是 feedfx 的 isSameSay，这里不另立口径）。
     return `<button class="env${open ? ' open' : st === 'read' ? ' read' : ''}" data-act="env" data-n="${i}">
-      <span class="envt">${esc(envelopeTitle(c.text))}</span>
+      ${open && isSameSay(say, c.text) ? '' : `<span class="envt">${esc(say)}</span>`}
       <span class="envbody comment${c.kind === 'hot' ? ' hot' : ''}"${open ? '' : ' hidden'}>${esc(c.text)}</span></button>`;
   };
   const idx = envOrder(comments.map((_, i) => envState[key(i)]));
