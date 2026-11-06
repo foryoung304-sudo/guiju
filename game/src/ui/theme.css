@@ -471,7 +471,9 @@ td.r, th.r { text-align: right; }
   display: flex; align-items: flex-end; justify-content: center; z-index: 20; padding: 10px;
 }
 .event { background: var(--paper); border: 2px solid var(--ink); box-shadow: 6px 6px 0 var(--ink); max-width: 500px; width: 100%; }
-.event .art { width: 100%; aspect-ratio: 5 / 2; object-fit: cover; object-position: center; border-bottom: 2px solid var(--ink); background: var(--cream-2); display: block; }
+/* 工单 task-art-slot-43-20261106 §一：图槽 5:2 → 4:3（店主已裁「图槽改高」，B 档 18 张按 4:3 出）。
+   .dual .art（山寨对开）不在本单口径里，仍是 5:4。 */
+.event .art { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; object-position: center; border-bottom: 2px solid var(--ink); background: var(--cream-2); display: block; }
 .event .body { padding: 12px; }
 .event .who { background: var(--tomato); color: var(--paper); display: inline-block; padding: 2px 10px; font-size: 12px; letter-spacing: .08em; }
 .event .text { margin: 8px 0 12px; font-size: 14px; line-height: 1.75; }
@@ -720,9 +722,10 @@ td.r, th.r { text-align: right; }
    人物与现钞在画面下半（约 45%–73% 高），取景窗下移到 62% 即落在「脸 + 数钱的手」上。图与数都不动。 */
 .scene.settle { object-position: center 62%; }
 
-/* 情报条里的配图：事件素材已按 5:2 定好取景，这里同比例，免得再裁一次把人脸切掉。 */
+/* 情报条里的配图：与弹层图槽同比例（工单 task-art-slot-43-20261106 §一一起改到 4:3），
+   两处同比例才不会「弹层完整、情报条又裁一刀」。 */
 .inlineart {
-  width: 100%; aspect-ratio: 5 / 2; object-fit: cover; object-position: center;
+  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; object-position: center;
   border: 2px solid var(--ink); margin-bottom: 8px; background: var(--cream-2); display: block;
 }
 

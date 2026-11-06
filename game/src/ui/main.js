@@ -43,13 +43,18 @@ const TIER_CELL = { 1: 'tl', 2: 'tr', 3: 'bl', 6: 'br' };
 // 事件配图（实测反馈 §二.3）：牌面/告示纸留白，字由 UI 排。
 // 补图批（大任务单第二段）：18 行逐行落位——王老板组五条共用他的形象图（三个取景窗 + 两张同图变体），
 // 其余九条各一张独立构图剪影。回落件从此只给未来新增的行兜底，现役行不再共用一张图。
+// 工单 task-art-slot-43-20261106 §三：B 档 18 张 4:3 成品到手，九行把专用剪影换成成图、九行从兜底件里提出来，
+// 剪影件就此退场（兜底件 event-silhouette.svg 留着）。A 档九行仍是 5:2，进 4:3 槽由 cover 居中裁——裁切验单见工单 §二。
 const EVENT_ART = {
   evt_d_001: 'event-zhaodama.webp', evt_d_002: 'event-002.webp', evt_d_011: 'event-011.webp', evt_d_031: 'event-031.webp',
   evt_s_pricewar: 'event-wang-pricewar.webp', evt_s_poach: 'event-wang-poach.webp', evt_s_return: 'event-wang-return.webp',
   evt_s_copycat: 'event-wang-copycat.webp', evt_s_buyout: 'event-wang-buyout.webp',
-  evt_d_021: 'event-sil-register.svg', evt_s_insp: 'event-sil-insp.svg', evt_s_insp2: 'event-sil-insp2.svg',
-  evt_s_promo: 'event-sil-promo.svg', evt_s_flag: 'event-sil-flag.svg', evt_d_stockout: 'event-sil-stockout.svg',
-  evt_d_complaint: 'event-sil-complaint.svg', evt_d_pot: 'event-sil-pot.svg', evt_d_blogger: 'event-sil-blogger.svg'
+  evt_d_021: 'event-tag.webp', evt_s_insp: 'event-insp.webp', evt_s_insp2: 'event-insp2.webp',
+  evt_s_promo: 'event-promo.webp', evt_s_flag: 'event-flag.webp', evt_d_stockout: 'event-stockout.webp',
+  evt_d_complaint: 'event-complaint.webp', evt_d_pot: 'event-pot.webp', evt_d_blogger: 'event-blogger.webp',
+  evt_d_041: 'event-canteen.webp', evt_d_042: 'event-field.webp', evt_d_043: 'event-reserve.webp',
+  evt_d_044: 'event-change.webp', evt_d_045: 'event-chess.webp', evt_d_046: 'event-spoon.webp',
+  evt_d_051: 'event-early.webp', evt_d_052: 'event-laoli.webp', evt_d_053: 'event-monthly.webp'
 };
 // 预检反馈 F9（0366bd6）：没有配图的事件行原先一律回落 chenshi 立绘（一张 900×1800 的竖构图），
 // 于是「夜晚连着两单同一张图」「情报卡只见下半身」（F10）都成了它的表现。四张成品图是 5:2 横构图，
