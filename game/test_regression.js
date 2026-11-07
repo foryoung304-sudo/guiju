@@ -3384,20 +3384,20 @@ for (const seed of [SEED, 7979, 36832]) {
   const tableNames = [...introNames, ...resultNames, ...regularNames];
   const scriptNames = [...new Set(scriptRaw.match(/vo_[a-z0-9]+_\d\d/g) || [])];
   const asc = ls => ls.map(l => +String(l.f).slice(-2)).every((n, i, a) => i === 0 || n > a[i - 1]);
-  // 18 句 ★新写结果句不挂：冻结稿里带 ★ 的那 18 句，数据里一句都没有原文可认（对应选项的 open[] 只有数值效果），
-  // 而单上写死「文本对上哪句播哪句，不许按固定顺序猜」⇒ 只能静默。这张名单是留痕闸门：
-  // Orange 往 events.js 补了原文、或改了挂载口径之后，名单与表若没同步变动，本针当场翻红（登记见总报「待裁」）。
-  const UNMOUNTED = ['vo_fine_05', 'vo_fine_06', 'vo_early_02', 'vo_tab_04', 'vo_tab_05', 'vo_banquet_02', 'vo_banquet_03',
+  // 18 句 ★新写结果句走的是「事件＋选项」键（补遗 ruling-voice-mount-addendum-20261106 §一）：这一类选项在数据里没有结果原文，
+  // 键就取玩家点下的 action id——同样是「播的必须是你选的那句」，禁的是与选择无关的顺序轮播。这张名单是留痕闸门：
+  // 冻结稿里带 ★ 且标注了「（选项「X」）」的行，必须逐名等于表里的 pick 行，多一名少一名、或谁被改回顺序猜播，本针当场翻红。
+  const CHOICE_KEYED = ['vo_fine_05', 'vo_fine_06', 'vo_early_02', 'vo_tab_04', 'vo_tab_05', 'vo_banquet_02', 'vo_banquet_03',
     'vo_complaint_03', 'vo_pot_02', 'vo_pot_03', 'vo_reserve_02', 'vo_reserve_03', 'vo_change_03', 'vo_chess_03', 'vo_chess_04',
     'vo_spoon_02', 'vo_spoon_03', 'vo_monthly_03'];
-  check('挂载表在场且与两份冻结稿逐名对齐（49 + 67 = 116 句）：表内 98 句 = 出场 69（27 个事件）+ 结果 14 + 常客 15；'
-    + '稿里有而表里没有的 18 句逐名等于「无原文锚点」名单，零重名、每个事件内部严格照稿面序号升序',
-    Object.keys(VOICE_INTRO).length === 27 && tableNames.length === 98 && new Set(tableNames).size === 98
+  check('挂载表在场且与两份冻结稿逐名对齐（49 + 67 = 116 句）：表内 116 句 = 出场 69（27 个事件）+ 结果 32（原文认 14 + 选项键认 18）+ 常客 15；'
+    + '稿里带 ★ 的 18 句逐名等于选项键名单、表外零句、零重名，每个事件内部严格照稿面序号升序',
+    Object.keys(VOICE_INTRO).length === 27 && tableNames.length === 116 && new Set(tableNames).size === 116
     && scriptNames.length === 116 && tableNames.every(f => scriptNames.includes(f))
-    && UNMOUNTED.length === 18 && new Set(UNMOUNTED).size === 18
-    && scriptNames.filter(f => !tableNames.includes(f)).sort().join() === [...UNMOUNTED].sort().join()
+    && CHOICE_KEYED.length === 18 && new Set(CHOICE_KEYED).size === 18
+    && scriptNames.filter(f => !tableNames.includes(f)).length === 0
     && Object.values(VOICE_INTRO).every(asc) && Object.values(VOICE_RESULT).every(asc) && Object.values(VOICE_REGULAR).every(asc),
-    `表 ${tableNames.length}（出场 ${introNames.length}／结果 ${resultNames.length}／常客 ${regularNames.length}）｜稿 ${scriptNames.length}｜无锚点 ${scriptNames.filter(f => !tableNames.includes(f)).length}`);
+    `表 ${tableNames.length}（出场 ${introNames.length}／结果 ${resultNames.length}／常客 ${regularNames.length}）｜稿 ${scriptNames.length}｜表外 ${scriptNames.filter(f => !tableNames.includes(f)).length}`);
 
   // 成品对账：转码包的字节就是交付物，逐件 sha 进台账（11-05 批 48 件 + 11-06 批 66 件 = 114 件）。
   // 这一根是留痕闸门不是故障：谁换了文件、谁在包没到的句子上提前挂了名，这里当场翻红。
@@ -3528,14 +3528,14 @@ for (const seed of [SEED, 7979, 36832]) {
   const packBytes = onDisk.reduce((s, f) => s + statSync(join(packDir, `${f}.ogg`)).size, 0);
   const oldBatch = new Set(readFileSync(join(HERE, '..', 'voice-events-script-20261104.md'), 'utf8').match(/vo_[a-z0-9]+_\d\d/g) || []);
   const batchBytes = onDisk.filter(f => !oldBatch.has(f)).reduce((s, f) => s + statSync(join(packDir, `${f}.ogg`)).size, 0);
-  const unmountedOnDisk = onDisk.filter(f => !tableNames.includes(f)).sort();     // 盘上有、表里没 ＝ 那 18 句无锚点的 ★新写句
+  const unmountedOnDisk = onDisk.filter(f => !tableNames.includes(f)).sort();     // 盘上有、表里没 ＝ 补遗 §一 落地后应为零（18 句改选项键，全部进表）
   const missingOnDisk = tableNames.filter(f => !onDisk.includes(f)).sort();       // 表里占号、盘上没件 ＝ 两句待重录
-  check('转码包逐件对账：仓内 114 件（48 + 66）sha 逐件对上两份转交包，盘上多出的 18 件逐名等于无锚点名单、'
-    + '表里占号而没件的正是待重录两句（vo_monthly_02 / vo_tab_02）；包体 11-06 本批对上单上「约 3.1 MB / 335.6 s」',
+  check('转码包逐件对账：仓内 114 件（48 + 66）sha 逐件对上两份转交包，表内 116 名＝这 114 件 ＋ 待重录占号 2 句，盘上没有表外件（★18 句按补遗 §一 全部进表）；'
+    + '包体 11-06 本批对上单上「约 3.1 MB / 335.6 s」',
     shaBad.length === 0 && Object.keys(VOICE_SHA).length === 114 && onDisk.length === 114
-    && unmountedOnDisk.join() === [...UNMOUNTED].sort().join() && missingOnDisk.join() === 'vo_monthly_02,vo_tab_02'
+    && unmountedOnDisk.length === 0 && missingOnDisk.join() === 'vo_monthly_02,vo_tab_02'
     && batchBytes > 3.3e6 && batchBytes < 3.4e6 && packBytes > 5.0e6 && packBytes < 5.1e6,
-    `114/114 sha 齐（对不上 ${shaBad.length}）｜未挂载 ${unmountedOnDisk.length}｜占号缺件 [${missingOnDisk.join(' ')}]｜本批 ${(batchBytes / 1048576).toFixed(2)} MiB｜全批 ${(packBytes / 1048576).toFixed(2)} MiB`);
+    `114/114 sha 齐（对不上 ${shaBad.length}）｜表外件 ${unmountedOnDisk.length}｜占号缺件 [${missingOnDisk.join(' ')}]｜本批 ${(batchBytes / 1048576).toFixed(2)} MiB｜全批 ${(packBytes / 1048576).toFixed(2)} MiB`);
 
   // 分支对位：直接跑挂载表那个函数（与 main.js 卡片挂载那一刻调的是同一支），拿 Rep 三档验赢档/中档/输档
   const WIN = voiceIntroLines('evt_s_return', { Rep: 60 }), MID = voiceIntroLines('evt_s_return', { Rep: 35 }), LOSE = voiceIntroLines('evt_s_return', { Rep: 20 });
@@ -3593,8 +3593,8 @@ for (const seed of [SEED, 7979, 36832]) {
     pv === 5 && av === 1 && sv === 1 && vi === 3 && vr === 2 && vrl === 1
     && mainSrc.includes('playVoice(voiceIntroLines(pendingEvent.id, state))')
     && mainSrc.includes('playVoice(voiceIntroLines(preEvent.id, state))')
-    && mainSrc.includes('playVoice(voiceResultLines(ev.id, resultTexts(state)))')
-    && mainSrc.includes('playVoice(voiceResultLines(evening.event.id, resultTexts(state)))')
+    && mainSrc.includes('playVoice(voiceResultLines(ev.id, resultTexts(state), picked.action ? picked.action.id : null))')
+    && mainSrc.includes('playVoice(voiceResultLines(evening.event.id, resultTexts(state), evening.action ? evening.action.id : null))')
     && !mainSrc.includes('voiceResultLines(judge.id')
     && mainSrc.indexOf('advanceVoice()') < mainSrc.indexOf('if (host) act(host)')
     && /if \(!\(skip && !skip\.classList\.contains\('fx-done'\)\)\) advanceVoice\(\);/.test(mainSrc),
@@ -3633,15 +3633,38 @@ for (const seed of [SEED, 7979, 36832]) {
     }
   };
   for (const e of EVENTS) { walkOps(e.open || []); (e.actions || []).forEach(a => walkOps(a.open || [])); }
-  const dailyPair = Object.entries(VOICE_RESULT).filter(([id]) => !inspIds.includes(id)).flatMap(([id, ms]) => ms.map(m => [id, m]));
-  const dailyBad = dailyPair.filter(([, m]) => !textSinks.has(m.note));
+  const dailyNote = Object.entries(VOICE_RESULT).filter(([id]) => !inspIds.includes(id))
+    .flatMap(([id, ms]) => ms.filter(m => m.note).map(m => [id, m]));
+  const dailyBad = dailyNote.filter(([, m]) => !textSinks.has(m.note));
   const merged = resultTexts({ today: { notes: ['n1'], forcedComments: ['f1'] } });
-  check('日常事件的结果句同样只认原文：六条键逐字命中 events.js 的 forcedComment 原文（notes 那一头另两条检查事件已由 inspection.js 对上）；'
-    + '查找集合 = notes + forcedComments 合并，resultTexts 只读不写；无锚点的 18 句不在任何一行里＝没有按选项顺序猜档的口子',
-    dailyPair.length === 6 && dailyBad.length === 0
-    && merged.join() === 'n1,f1' && resultTexts({}).length === 0 && resultTexts(undefined).length === 0
-    && UNMOUNTED.every(f => !resultNames.includes(f)),
-    `6/6 原文对上（键名漂了 ${dailyBad.length} 条）｜合并集合取数 ${merged.join('+')}｜无锚点 18 句在场外`);
+  check('日常事件的原文结果句一字未改（补遗 §一「有原文的维持原文认句」）：六条键逐字命中 events.js 的 forcedComment 原文'
+    + '（notes 那一头另两条检查事件已由 inspection.js 对上）；查找集合 = notes + forcedComments 合并，resultTexts 只读不写',
+    dailyNote.length === 6 && dailyBad.length === 0 && Object.values(VOICE_RESULT).flat().filter(m => m.note).length === 14
+    && merged.join() === 'n1,f1' && resultTexts({}).length === 0 && resultTexts(undefined).length === 0,
+    `6/6 原文对上（键名漂了 ${dailyBad.length} 条）｜合并集合取数 ${merged.join('+')}｜全表 note 行 ${Object.values(VOICE_RESULT).flat().filter(m => m.note).length}`);
+
+  // 补遗 §一（80392eb）：18 句 ★新写结果句改按「事件＋选项」键。判据照单上那三句——
+  // 每行键都要落在真实选项路径上（该事件确有这个 action、冻结稿 ★ 行的「（选项「X」）」标注与 action.label 对得上）、正选播对句、错选不播此句。
+  const starRows = [...scriptRaw.matchAll(/^\| (vo_[a-z0-9]+_\d\d) \|[^|]*\|[^|]*?★（选项「(.+?)」/gm)].map(x => ({ f: x[1], label: x[2] }));
+  const pickRows = Object.entries(VOICE_RESULT).flatMap(([id, ms]) => ms.filter(m => m.pick).map(m => [id, m]));
+  const pickBad = [];
+  for (const s of starRows) {
+    const hit = pickRows.filter(([, m]) => m.f === s.f);
+    if (hit.length !== 1) { pickBad.push(`${s.f}=${hit.length}行`); continue; }
+    const [id, m] = hit[0];
+    const acts = (EVENT_BY_ID[id] && EVENT_BY_ID[id].actions) || [];
+    const a = acts.find(x => x.id === m.pick);
+    if (!a) { pickBad.push(`${id}/${m.pick} 无这一支选项`); continue; }
+    if (a.label !== s.label && !a.label.startsWith(s.label)) pickBad.push(`${s.f} 标注「${s.label}」≠选项「${a.label}」`);
+    if (!voiceResultLines(id, [], m.pick).includes(s.f)) pickBad.push(`${id}/${m.pick} 正选不播`);
+    if (acts.filter(x => x.id !== m.pick).some(x => voiceResultLines(id, [], x.pick).includes(s.f))) pickBad.push(`${id}/${m.pick} 错选也播`);
+  }
+  check('18 句 ★结果句按「事件＋选项」键挂（补遗 §一，口径补正而非变通）：每行的 pick 都是该事件真实存在的 action id、且逐行对得上冻结稿 ★ 行的选项标注；'
+    + '正选出声、选同事件其他选项不出这一句；pick 行只认玩家点下的 id，表里没有任何按序号轮播的口子',
+    starRows.length === 18 && pickRows.length === 18 && pickBad.length === 0
+    && pickRows.map(([, m]) => m.f).sort().join() === [...CHOICE_KEYED].sort().join()
+    && CHOICE_KEYED.every(f => resultNames.includes(f)),
+    `18/18 键在真实路径上（越界 ${pickBad.length}：${pickBad.slice(0, 3).join(' ')}）｜错选零播`);
 
   // 常客表（全覆盖单第五节 15 句）：认的是 customers.js 那行灰字本身，双向零差；留空的线不出声。
   const regPair = Object.entries(VOICE_REGULAR).flatMap(([id, ms]) => ms.map(m => [id, m]));

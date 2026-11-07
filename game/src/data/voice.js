@@ -7,7 +7,9 @@
 // 所以补录的 vo_poach_02 到位那天不必改这张表：它在表里占着 02 的位置，文件没到就自动被跳过（01→03→04→05）。
 // ⇒ 2026-11-06 全覆盖批到货，这一条机制第一次被验证：表里 02 那一行一字未动，文件进仓那天自动接成 01→02→03→04→05。
 // 全覆盖批（挂载单 voice-qc-mount-full-20261106.md，Orange 签入 e2a6293）在本表里加三张：
-// VOICE_INTRO 加 14 条日常事件 + 4 条晨间情报的出场句；VOICE_RESULT 加六条有原文锚点的结果句；VOICE_REGULAR 是新的一张常客表。
+// VOICE_INTRO 加 14 条日常事件 + 4 条晨间情报的出场句；VOICE_RESULT 加有原文锚点的六行；VOICE_REGULAR 是新的一张常客表。
+// 补遗 ruling-voice-mount-addendum-20261106 §一：VOICE_RESULT 再增「事件＋选项」键的 18 行（那 18 个选项在数据里没有结果文字），
+// 挂载点仍是结算那一拍，只是多喂一个玩家点下的 action id；有原文的照旧认原文，一字未改。
 // 纪律照旧：这一层依旧纯选择——不含数值、不碰 actions/暗线/随机流/DOM，两带（sweep / m3）因此必须继续逐字节等于 r16。
 import { evalCondition } from '../engine/dsl.js';
 
@@ -151,12 +153,19 @@ export const VOICE_RESULT = {
     { note: '抽查未过：罚款 100 当场入账。', f: 'vo_insp2_03' },
     { note: '抽查未过、罚款没凑齐：严队长摆摆手，明天客人少些。', f: 'vo_insp2_04' },
   ],
-  // ── 配音全覆盖批的结果句：只登记「引擎里确有这句原文」的六条 ──────────────────────────
-  // 键 = events.js 那条选项 open[] 里的 forcedComment 原文（逐字，引号种类照数据），落点见 main.js 两支调用。
-  // 冻结稿里另外 18 句带 ★ 的新写结果句，数据里没有任何一句原文可认（那些选项的 open[] 只有数值），
-  // 按单上「不许按固定顺序猜」就不挂——已在总报里登记为待裁，Orange 补原文或改口径那天，照下面的形加行即可。
+  // ── 配音全覆盖批的结果句，两种键法并存（补遗 ruling-voice-mount-addendum-20261106 §一）──────────
+  // note 键＝引擎确有这句原文：逐字取 events.js 那条选项 open[] 里的 forcedComment（引号种类照数据），落点见 main.js 两支调用。
+  // pick 键＝这类选项在数据里本就没有结果文字（选完只结算数值），键改取「事件 id ＋该选项的 action id」——
+  //   它同样保证「播的那句就是玩家选的那句」，与认原文同义；键对位以冻结稿 ★ 行的「（选项「X」…）」标注为准。
+  //   禁的是与选择无关的顺序轮播：同事件选别的选项，这一行永远不出声。
+  // 查找集合与出声时机都不变：仍是 resolveChoice / nightClose 落地之后那一拍。
+  evt_d_002: [
+    { pick: 'fine', f: 'vo_fine_05' },        // 选项「罚款 150」（现金 −150）
+    { pick: 'rectify', f: 'vo_fine_06' },     // 选项「免费整改」（当天客流打六折）
+  ],
   evt_d_051: [
-    { note: '他耸耸肩排到队尾去了，倒也没走。', f: 'vo_early_03' },                 // 选项「排队都一样」
+    { pick: 'serve_first', f: 'vo_early_02' },                       // 选项「先给他们下」（当天客流 +15%）
+    { note: '他耸耸肩排到队尾去了，倒也没走。', f: 'vo_early_03' },   // 选项「排队都一样」
   ],
   evt_d_052: [
     // 这两句录的是引号里老李的原话，数据里落的是「旁白＋引语」整条 forcedComment：键按整条认，出声只有引号那一截。
@@ -165,12 +174,39 @@ export const VOICE_RESULT = {
   ],
   evt_d_complaint: [
     { note: '他收了东西，走的时候说了句"下回注意点"。', f: 'vo_complaint_02' },      // 选项「赔礼道歉」
+    { pick: 'deny', f: 'vo_complaint_03' },                                          // 选项「硬扛不认」（次日客流 ×0.92）
   ],
   evt_d_044: [
+    { pick: 'make_up', f: 'vo_change_03' },                                          // 选项「补给他」（现金 −5）
     { note: '他数了数，又数了数，不好意思地把钱收回去了。', f: 'vo_change_04' },      // 选项「请他看价目牌」
   ],
   evt_d_053: [
+    { pick: 'treat', f: 'vo_monthly_03' },                                           // 选项「这碗算我的」（现金 −12）
     { note: '赵大妈把碗一放：「行，你有规矩。」——听不出是夸还是损。', f: 'vo_monthly_04' },   // 选项「规矩不能动」
+  ],
+  evt_d_001: [
+    { pick: 'record', f: 'vo_tab_04' },        // 选项「记账」（现金 −54）
+    { pick: 'settle_now', f: 'vo_tab_05' },    // 选项「当场要钱」（次日客流 ×0.85）
+  ],
+  evt_d_031: [
+    { pick: 'accept', f: 'vo_banquet_02' },    // 选项「接单」（订金 + 预订 15 碗）
+    { pick: 'refuse', f: 'vo_banquet_03' },    // 选项「接不下」（无效果）
+  ],
+  evt_d_pot: [
+    { pick: 'patch', f: 'vo_pot_02' },         // 选项「花钱补锅」（现金 −180）
+    { pick: 'improvise', f: 'vo_pot_03' },     // 选项「拿盆将就」（次日汤量减半）
+  ],
+  evt_d_043: [
+    { pick: 'accept', f: 'vo_reserve_02' },    // 选项「留八碗」（订金 + 预订 8 碗）
+    { pick: 'refuse', f: 'vo_reserve_03' },    // 选项「接不下」（无效果）
+  ],
+  evt_d_045: [
+    { pick: 'allow', f: 'vo_chess_03' },       // 选项「由他摆」（次日客流 ×1.10）
+    { pick: 'ask_move', f: 'vo_chess_04' },    // 选项「劝他挪挪」（无效果）
+  ],
+  evt_d_046: [
+    { pick: 'buy_new', f: 'vo_spoon_02' },     // 选项「买把新的」（现金 −12）
+    { pick: 'sanitize', f: 'vo_spoon_03' },    // 选项「消毒将就」（无现金效果）
   ],
 };
 
@@ -207,11 +243,13 @@ export function voiceIntroLines(id, state) {
   return lines.filter(l => !l.when || evalCondition(l.when, state)).map(l => l.f);
 }
 
-// 判定落地之后该出声的结果句：只在今天那条判定原文里认，认不出就当没这句（不许报错、不许猜档）
-export function voiceResultLines(id, notes) {
+// 判定／选项落地之后该出声的结果句。两种键法（补遗 §一）：note 行只在今天那条原文里认，认不出就当没这句；
+// pick 行认的是玩家实际点下的那个 action id，同事件选别的选项永远不出声。两条都不许报错、都不许猜档。
+export function voiceResultLines(id, notes, pick) {
   const map = VOICE_RESULT[id];
-  if (!map || !Array.isArray(notes)) return [];
-  return map.filter(m => notes.includes(m.note)).map(m => m.f);
+  if (!map) return [];
+  const texts = Array.isArray(notes) ? notes : [];
+  return map.filter(m => m.pick ? m.pick === pick : texts.includes(m.note)).map(m => m.f);
 }
 
 // 结果句的查找集合（全覆盖单 6.3：notes + forcedComments 合并原文）。两个数组都是引擎现成落点——

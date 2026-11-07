@@ -997,10 +997,11 @@ function resolvePending(choice) {
   pendingEvent = null;
   stopVoice();   // 卡片一落定，这一段对白就收：扩写演完落回原选择点，出场句不许越过玩家的点选往后播
   if (ev.timing === 'morning') {
-    resolveChoice(state, ev, choice);      // 第 6 步当场入账
+    const picked = resolveChoice(state, ev, choice);   // 第 6 步当场入账
     // 结果句的晨间那一支（全覆盖单 §6.3：在 resolveChoice 之后、saveGame 之前取一次 today 的两处原文落点认句）。
+    // 补遗 §一：同一拍再认「玩家实际点下的那个选项」——没原文可认的那一类（★18 句）就以 action id 为键，两条键法共用这一处调用。
     // 认不出＝当没这句；出声与否都不改 go(phase) 的时序。
-    playVoice(voiceResultLines(ev.id, resultTexts(state)));
+    playVoice(voiceResultLines(ev.id, resultTexts(state), picked.action ? picked.action.id : null));
     saveGame(state);
     return go(phase);
   }
@@ -1015,8 +1016,9 @@ function finishNight(choice, ev = pendingEvent) {
   // 结果句挂在选择落地之后（挂载单「按结果原文落点挂，不许顺序乱播」）。11-05 那批只有检查两条有结果句，
   // 键取的是 inspection.js 刚写进 today.notes 的判定原文；全覆盖批把查找集合扩成 notes + forcedComments（§6.3），
   // 键改从 choice.event.id 取——两条检查事件的 judgment.id 本来就是同一个 id，行为一字未变，日常事件因此才认得到句。
+  // 补遗 §一：第三个参数是玩家点下的选项 id，专吃「选完没有结果文字」那一类（★18 句），同事件选别的选项不出声。
   const evening = res && res.evening ? res.evening.choice : null;
-  if (evening) playVoice(voiceResultLines(evening.event.id, resultTexts(state)));
+  if (evening) playVoice(voiceResultLines(evening.event.id, resultTexts(state), evening.action ? evening.action.id : null));
   return go('night');
 }
 
