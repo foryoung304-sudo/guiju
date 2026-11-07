@@ -336,8 +336,8 @@ function render() {
     // 货架重挂出来的格子必然是读得出数的（值是从草稿写回去的）：上一轮「认不出」跟着这一格一起作废
     if (el.validity && !el.validity.badInput) qtyBad.delete(el.dataset.qty);
     draft[el.dataset.qty] = clean;
-    el.addEventListener('input', () => setQty(el));
-    el.addEventListener('change', () => setQty(el));   // 同一支判据的兜底：打字与输入法那一路上控件里可能还是空串，值到失焦那一刻才定下来，定了再对一次
+    el.addEventListener('input', () => setQty(el, false));
+    el.addEventListener('change', () => setQty(el, true));   // 失焦那一刻才是收敛：手打的短小数（4.95）留到这一刻才对平
   });
   // 称重手感（spec-weighing-feel）：按住抓菜、松手定格、轻点一撮、捏出减量；滑杆整屏删除
   app.querySelectorAll('[data-grab]').forEach(el => {
@@ -385,14 +385,16 @@ function syncDraftFromInputs() {
   return bad;
 }
 
-// 复现单 236307a 线索一之三：控件上的字与真正入篮的那个数必须是同一个数。
-// 浏览器递回来的值可以带 float32 尾巴（走查读到 4.900000095367432 / 3.0999999046325684 这类）：草稿按 round01 走、
-// 屏上却留着长串，原来只在失焦（change）那一下回写，打字与滚轮那一路上玩家看到的数根本没进篮子。
-// 判据用「屏上的数 ≠ 入篮的数」而不是「字符串不一样」：正打着的「4.」读成 4、与草稿相等，不去动它（不许把小数点吃掉）。
-function setQty(el) {
+// 复现单 236307a 线索一之三 → 裁定单 2bca4d4 §二：控件上的字与真正入篮的那个数最终必须是同一个数，但收敛的时机分开。
+// 浏览器递回来的值可以带 float32 尾巴（走查读到 4.900000095367432 / 3.0999999046325684 这类），草稿按 round01 走、
+// 屏上却留着长串 —— 尾巴一律带一串小数（三位起），人手打的短小数（4.95 这种）不是尾巴，不许在打字途中被改掉。
+// 所以打字那一路只清尾巴；失焦/入篮那一刻（settle）才把「还在框里的短小数」对平到 0.1 网格上的那个数。
+// 判据用「数不相等」而不是「字符串不相等」：正打着的「4.」读成 4、与草稿相等，不去动它（不许把小数点吃掉）。
+function setQty(el, settle) {
   const bad = commitOneQty(el);
   const clean = draft[el.dataset.qty];
-  if (!bad && el.value !== '' && Number(el.value) !== clean) el.value = String(clean);
+  const tail = (el.value.split('.')[1] || '').length > 2;
+  if (!bad && el.value !== '' && Number(el.value) !== clean && (settle || tail)) el.value = String(clean);
   commitOneQty(el);
   return refreshForecast();
 }

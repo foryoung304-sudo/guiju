@@ -2346,7 +2346,7 @@ for (const seed of [SEED, 7979, 36832]) {
     /el\.validity\?\.badInput/.test(mainCode) && /const bad = !!el\.validity\?\.badInput/.test(mainCode)
     && (mainCode.match(/validity\?\.badInput/g) || []).length === 1
     && /classList\.toggle\('bad', bad\)/.test(mainCode)
-    && /function setQty\(el\) \{\s*const bad = commitOneQty\(el\);/.test(mainCode)
+    && /function setQty\(el, settle\) \{\s*const bad = commitOneQty\(el\);/.test(mainCode)
     && /if \(syncDraftFromInputs\(\)\) \{ sfx\('error'\); return refreshForecast\(\); \}/.test(mainCode),
     '驳回走原地重绘、不走 go（重绘会把那行字洗成 0，玩家看不见错在哪一格）；setQty 里不再自己另写一次草稿；接入单 594b908 在这一格补了被拒声，驳回路径本身一字未动');
   // 复现单 repro-playtest-20261107（236307a）线索一：三条都只动「屏上那几个字」，数值本体与结算一字未动
@@ -2356,11 +2356,12 @@ for (const seed of [SEED, 7979, 36832]) {
     && /预计能出<\/div><div class="v num">\$\{can\} 碗/.test(mainCode)
     && !/const gap = need - f\.capped;/.test(mainCode),
     '走查读到「差 0.029232665123752 碗」的那一行：capped 落在需求侧时是小数，原样进句子就是把浮点摆上货架');
-  check('打字那一路上「屏上的数」与「入篮的数」是同一个数：setQty 只剩一条口径，判据是 Number(屏上) ≠ 草稿',
-    /if \(!bad && el\.value !== '' && Number\(el\.value\) !== clean\) el\.value = String\(clean\);/.test(mainCode)
-    && !/setQty\(el, (true|false)\)/.test(mainCode)
-    && (mainCode.match(/el\.addEventListener\('(?:input|change)', \(\) => setQty\(el\)\)/g) || []).length === 2,
-    'float32 尾巴（4.900000095367432 这类）由浏览器递进来，原来只在失焦那一下回写、打字与滚轮那一路就一直是脏数；用「数不相等」而不是「字符串不相等」判，正在打的「4.」不动它');
+  check('打字那一路只清浮点尾巴（小数三位起），手打的短小数不在输入途中改写；收敛只在失焦那一刻（change → settle=true）',
+    /const tail = \(el\.value\.split\('\.'\)\[1\] \|\| ''\)\.length > 2;/.test(mainCode)
+    && /if \(!bad && el\.value !== '' && Number\(el\.value\) !== clean && \(settle \|\| tail\)\) el\.value = String\(clean\);/.test(mainCode)
+    && /addEventListener\('input', \(\) => setQty\(el, false\)\)/.test(mainCode)
+    && /addEventListener\('change', \(\) => setQty\(el, true\)\)/.test(mainCode),
+    '裁定单 2bca4d4 §二：上一版把 4.95 这种手打数也在打字途中收成了 5，过了；尾巴一律带三位以上小数，人手打的不超过两位');
   check('六个分类抬头的碗数与卡底小计随篮子重算：只改文字与描边，不换节点；认不出数那一屏照旧不摆半个数',
     /syncShelfForecast\(f\);/.test(mainCode)
     && (mainCode.match(/data-fc-bowls/g) || []).length === 2
