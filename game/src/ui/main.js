@@ -336,8 +336,8 @@ function render() {
     // 货架重挂出来的格子必然是读得出数的（值是从草稿写回去的）：上一轮「认不出」跟着这一格一起作废
     if (el.validity && !el.validity.badInput) qtyBad.delete(el.dataset.qty);
     draft[el.dataset.qty] = clean;
-    el.addEventListener('input', () => setQty(el, false));
-    el.addEventListener('change', () => setQty(el, true));
+    el.addEventListener('input', () => setQty(el));
+    el.addEventListener('change', () => setQty(el));   // 同一支判据的兜底：打字与输入法那一路上控件里可能还是空串，值到失焦那一刻才定下来，定了再对一次
   });
   // 称重手感（spec-weighing-feel）：按住抓菜、松手定格、轻点一撮、捏出减量；滑杆整屏删除
   app.querySelectorAll('[data-grab]').forEach(el => {
@@ -385,10 +385,14 @@ function syncDraftFromInputs() {
   return bad;
 }
 
-function setQty(el, normalize) {
+// 复现单 236307a 线索一之三：控件上的字与真正入篮的那个数必须是同一个数。
+// 浏览器递回来的值可以带 float32 尾巴（走查读到 4.900000095367432 / 3.0999999046325684 这类）：草稿按 round01 走、
+// 屏上却留着长串，原来只在失焦（change）那一下回写，打字与滚轮那一路上玩家看到的数根本没进篮子。
+// 判据用「屏上的数 ≠ 入篮的数」而不是「字符串不一样」：正打着的「4.」读成 4、与草稿相等，不去动它（不许把小数点吃掉）。
+function setQty(el) {
   const bad = commitOneQty(el);
   const clean = draft[el.dataset.qty];
-  if (!bad && normalize && el.value !== '' && el.value !== String(clean)) el.value = String(clean);
+  if (!bad && el.value !== '' && Number(el.value) !== clean) el.value = String(clean);
   commitOneQty(el);
   return refreshForecast();
 }
@@ -413,7 +417,28 @@ function refreshForecast() {
     const html = marketFootHtml(f);
     if (foot.innerHTML !== html) foot.innerHTML = html;
   }
+  syncShelfForecast(f);
   return f;
+}
+
+// 复现单 236307a 线索一之二：六个分类抬头的「试算今天能出」和卡底「小计」都在上面两个容器之外，
+// 只有整屏重绘才跟着换算式走 —— 打字调数量时，抬头说 1 碗、吸底条说 2 碗（走查记的是 11 与 16）。
+// 这里只改文字与「在用」那一圈描边，不换节点：换节点会把正在打字的那一格连同光标一起换掉（预检必修④那条教训）。
+function syncShelfForecast(f) {
+  if (qtyBad.size) return;   // 驳回态：抬头那一眼跟着整块换掉的驳回话走，不摆半个算式配套的数
+  const bowls = f.capped.toFixed(0);
+  app.querySelectorAll('[data-fc-bowls]').forEach(el => { el.textContent = bowls; });
+  for (const el of app.querySelectorAll('input[data-qty]')) {
+    const sku = el.closest('.sku');
+    if (!sku) continue;
+    const q = draft[el.dataset.qty] || 0;
+    sku.classList.toggle('on', q > 0);
+    const sub = sku.querySelector('.subtotal b');
+    if (sub) {
+      const line = f.plan.lines.find(l => l.sku === el.dataset.qty);
+      sub.textContent = y(line ? line.cost : 0);
+    }
+  }
 }
 
 let pressedBtn = null;     // 这一只手按住的那个按钮（只在按下到抬起之间有意义）
@@ -1451,7 +1476,7 @@ function shelfRow(cat, forecast) {
   // 于是「买 12 份卖 11 碗却报卖断」看起来就是 bug。T 进市场汤底行，也算得清那碗数从哪儿被封顶。
   const soupT = cat === 'SP' ? ` · 每碗耗 ${state.today.scenario.T} 份` : '';
   return `<div class="panel"><div class="row shelfhead"><h3>${CAT[cat].name}${cat === 'SP' ? '（份）' : '（斤）'}</h3>
-      <span class="muted">柜里 ${have}${cat === 'SP' ? ' 份' : ''}${soupT} · 试算今天能出 ${forecast.capped.toFixed(0)} 碗</span>${delist}</div>
+      <span class="muted">柜里 ${have}${cat === 'SP' ? ' 份' : ''}${soupT} · 试算今天能出 <span data-fc-bowls>${forecast.capped.toFixed(0)}</span> 碗</span>${delist}</div>
     <div class="shelf">${list.map(s => skuCard(cat, s, forecast)).join('')}${absent ? absentCard(cat) : ''}</div></div>`;
 }
 
@@ -1511,14 +1536,17 @@ function footStrip(f) {
 
 // 实测问题 #3：附录 C 的 capped = min(需求侧估计, 这一篮能出)，只印一个数会让玩家以为「今天就只有这么多生意」。
 // 需求侧与可供侧同时摆出来，缺口就是明天该多买多少——两个数都是引擎算好的公开项，界面不另立口径
+// 复现单 236307a 线索一：差额必须是「屏上那两个数相减」，不是那两个数底下的浮点相减。
+// capped 落在需求侧时是小数（min 的第一项就是 estBowls + 试吃加碗），原样进句子就成「差 0.029232665123752 碗」。
 function forecastBar(f) {
   const need = Math.round(f.estBowls);
-  const gap = need - f.capped;
+  const can = Number(f.capped.toFixed(0));
+  const gap = need - can;
   return `<div class="forecast"><div class="k">试算（只看明账）${f.lowConfidence ? ' <span class="low">头一天没有昨日实卖，客流侧按开业基础量估</span>' : ''}</div>
     <div class="grid3" style="margin-top:8px">
       <div><div class="k">按今天客流要</div><div class="v num">${need} 碗</div></div>
       <div><div class="k">这一篮只够出</div><div class="v num">${Math.round(f.supplyBowls)} 碗</div></div>
-      <div><div class="k">预计能出</div><div class="v num">${f.capped.toFixed(0)} 碗</div></div>
+      <div><div class="k">预计能出</div><div class="v num">${can} 碗</div></div>
       <div><div class="k">预计流水</div><div class="v num">${y(f.estRevenueCents)}</div></div>
       <div><div class="k">预计净额</div><div class="v num">${y(f.estNetCents)}</div></div>
       <div><div class="k">这一篮</div><div class="v num">${y(f.plan.total)}</div></div>
