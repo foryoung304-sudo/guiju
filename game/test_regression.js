@@ -2368,6 +2368,16 @@ for (const seed of [SEED, 7979, 36832]) {
     && /function syncShelfForecast\(f\) \{\s*if \(qtyBad\.size\) return;/.test(mainCode)
     && /sku\.classList\.toggle\('on', q > 0\)/.test(mainCode),
     '抬头与卡底在 #marketDetail / #marketFoot 两个容器之外，原先只有整屏重绘才跟着换（走查读到抬头 1 碗、吸底条 2 碗）；换节点会把正在打字那一格连同光标一起换掉（预检必修④）');
+  const sf36 = mainCode.slice(mainCode.indexOf('function syncShelfForecast'), mainCode.indexOf('let pressedBtn'));
+  check('± 步进的两枚目标值随此刻框里的数一起刷（裁定单 44905ca §一）：算式与 skuCard 模板逐字同一条、源值同走草稿口径；handler 仍只认 data-value，两种修法只选一不叠加',
+    /const step = Number\(el\.step\) \|\| 0\.5;/.test(sf36)
+    && /pm\[0\]\.dataset\.value = String\(round01\(Math\.max\(0, q - step\)\)\);/.test(sf36)
+    && /pm\[1\]\.dataset\.value = String\(round01\(q \+ step\)\);/.test(sf36)
+    && /if \(pm\.length === 2\) \{/.test(sf36)
+    && sf36.indexOf("querySelectorAll('input[data-qty]')") < sf36.indexOf('pm[0].dataset.value')
+    && (mainCode.match(/data-value="\$\{round01\(Math\.max\(0, q - step\)\)\}"/g) || []).length === 1
+    && /case 'setqty': draft\[d\.qty\] = round01\(Number\(d\.value\) \|\| 0\); return go\('market'\);/.test(mainCode),
+    '空篮手打 7.4 再点「＋」原本落 0.5（陈旧目标值把刚打的数静默销毁、量买错）；步进落值的取整仍只有 handler 那一句，与入篮同一条 round01——改属性就不再改 handler');
   check('认不出数的那一屏只有一个口径：试算与吸底条整块换成驳回话，不摆「少算那一格的合计」；首挂与实时刷新共用同两支',
     /const marketDetailHtml = f => \(qtyBad\.size \? badBasketPanel\(\) : forecastBar\(f\) \+ buyPanel\(f\)\)/.test(mainCode)
     && /const marketFootHtml = f => \(qtyBad\.size \? badBasketStrip\(\) : footStrip\(f\)\)/.test(mainCode)

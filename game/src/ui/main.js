@@ -435,6 +435,16 @@ function syncShelfForecast(f) {
     if (!sku) continue;
     const q = draft[el.dataset.qty] || 0;
     sku.classList.toggle('on', q > 0);
+    // 裁定单 44905ca §一：步进那两枚按钮要落的目标值也是上一次整屏重绘烤进模板的，打字那一路不跟着动 ——
+    // 空篮里手打 7.4 再点「＋」，落进篮子的是陈旧值算出的 0.5，玩家刚打的那个数被静默销毁、量直接买错。
+    // 这里只把两枚属性刷成「此刻重绘会烤出来的那两枚」：源值走草稿（= 控件实数经 commitOneQty 的 round01，与模板的 q 同一口径），
+    // 算式与 skuCard 逐字同一条，handler 那一句一字不动（两种修法只许选一：改属性就不改 handler）。
+    const step = Number(el.step) || 0.5;
+    const pm = sku.querySelectorAll('button[data-act="setqty"]');
+    if (pm.length === 2) {
+      pm[0].dataset.value = String(round01(Math.max(0, q - step)));
+      pm[1].dataset.value = String(round01(q + step));
+    }
     const sub = sku.querySelector('.subtotal b');
     if (sub) {
       const line = f.plan.lines.find(l => l.sku === el.dataset.qty);
