@@ -3482,7 +3482,7 @@ for (const seed of [SEED, 7979, 36832]) {
     'vo_return_05': '61c6961200c88012629028d07fed04887b96e1ce0d99e6ff3180b54195cae226',
     // ── 11-06 全覆盖批 + 11-08 改写批（42 句更新/入仓：41 句同名替换为人物开口版 + vo_tab_02 到货入仓；vo_banquet_02 挂起留旧版、vo_monthly_02 挂起仍占号）──
     'vo_banquet_01': '1725bf19dbc91a369543eb2a594c7e236ef03b47eea2fb9b26883b63d0cfa731',
-    'vo_banquet_02': 'ed377c117a01c6599f5cae0ebb01482351491ae91c5179abd931286be1abf3c7',
+    'vo_banquet_02': '78b255731cc18ae47033c5ddd2008ffce4c3cb5c9eda1cf91f212ea05152fe39',
     'vo_banquet_03': '08419f790d79663f93720ee07396574787b2266e7dfba267046b9869cab439fe',
     'vo_blogger_01': '48c2b9aab123767cfe3d36b1c4e77900ef85035fbe3524e28ece5f5792b0452c',
     'vo_c01_01': '0781104c1ec174162c72cfe589c269c51b3654d6d20d52f9369b893460d77990',
@@ -3527,6 +3527,7 @@ for (const seed of [SEED, 7979, 36832]) {
     'vo_laoli_03': 'edc6cd1acb092fef9492f92420ffdda5747197aa7e65d11e45e98de9a50125ad',
     'vo_laoli_04': '93ddb8c3e7d4df0688de4c8964cec71e17e25ec81016b876c315f9bdd352ab57',
     'vo_monthly_01': 'efd6546d44df4b2c9dcebfbe9a9110c9dd5d29b22453f1773849c0d26de0ec96',
+    'vo_monthly_02': 'ab9d1d5e17cebb79a79209b600f4cddbc03242fa10c0099a38fdf45d6435f53c',
     'vo_monthly_03': 'bfc36472249599cb1681d4eb40085165f0ac07d7aa2cd73e83c6fa3b28f5c320',
     'vo_monthly_04': '8dfaa9c544a982d9a7a748999aa54d1dddf7b5d4342ede3db1f71104c1370ec5',
     'vo_poach_02': '1b477f4d237bf8958aa6f9c8ccdc5a0baed626b0cee136bc0b499832674f51a3',
@@ -3559,13 +3560,13 @@ for (const seed of [SEED, 7979, 36832]) {
   const oldBatch = new Set(readFileSync(join(HERE, '..', 'voice-events-script-20261104.md'), 'utf8').match(/vo_[a-z0-9]+_\d\d/g) || []);
   const batchBytes = onDisk.filter(f => !oldBatch.has(f)).reduce((s, f) => s + statSync(join(packDir, `${f}.ogg`)).size, 0);
   const unmountedOnDisk = onDisk.filter(f => !tableNames.includes(f)).sort();     // 盘上有、表里没 ＝ 补遗 §一 落地后应为零（18 句改选项键，全部进表）
-  const missingOnDisk = tableNames.filter(f => !onDisk.includes(f)).sort();       // 表里占号、盘上没件 ＝ 待重录挂起（vo_monthly_02）
-  check('转码包逐件对账：仓内 115 件（48 + 66 + 1）sha 逐件对上转交包与改写单，表内 116 名＝这 115 件 ＋ 待重录占号 1 句，盘上没有表外件（★18 句按补遗 §一 全部进表）；'
-    + '包体对账（11-08 改写包 42 件同名替换＋vo_tab_02 解禁到货）',
-    shaBad.length === 0 && Object.keys(VOICE_SHA).length === 115 && onDisk.length === 115
-    && unmountedOnDisk.length === 0 && missingOnDisk.join() === 'vo_monthly_02'
-    && batchBytes > 3.2e6 && batchBytes < 3.3e6 && packBytes > 5.0e6 && packBytes < 5.1e6,
-    `115/115 sha 齐（对不上 ${shaBad.length}）｜表外件 ${unmountedOnDisk.length}｜占号缺件 [${missingOnDisk.join(' ')}]｜本批 ${(batchBytes / 1048576).toFixed(2)} MiB｜全批 ${(packBytes / 1048576).toFixed(2)} MiB`);
+  const missingOnDisk = tableNames.filter(f => !onDisk.includes(f)).sort();       // 表里占号、盘上没件 ＝ 销清（0 缺件）
+  check('转码包逐件对账：仓内 116 件全量齐备，sha 逐件对上转交包与改写补录单，表内 116 名＝盘上 116 件（占号销清、缺件 0），盘上没有表外件（★18 句按补遗 §一 全部进表）；'
+    + '包体对账（11-08 改写包 42 件＋补录 2 句全量齐备）',
+    shaBad.length === 0 && Object.keys(VOICE_SHA).length === 116 && onDisk.length === 116
+    && unmountedOnDisk.length === 0 && missingOnDisk.length === 0
+    && batchBytes > 3.3e6 && batchBytes < 3.4e6 && packBytes > 5.0e6 && packBytes < 5.1e6,
+    `116/116 sha 齐（对不上 ${shaBad.length}）｜表外件 ${unmountedOnDisk.length}｜占号缺件 [${missingOnDisk.join(' ')}]｜本批 ${(batchBytes / 1048576).toFixed(2)} MiB｜全批 ${(packBytes / 1048576).toFixed(2)} MiB`);
 
   // 分支对位：直接跑挂载表那个函数（与 main.js 卡片挂载那一刻调的是同一支），拿 Rep 三档验赢档/中档/输档
   const WIN = voiceIntroLines('evt_s_return', { Rep: 60 }), MID = voiceIntroLines('evt_s_return', { Rep: 35 }), LOSE = voiceIntroLines('evt_s_return', { Rep: 20 });
