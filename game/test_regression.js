@@ -3428,9 +3428,9 @@ for (const seed of [SEED, 7979, 36832]) {
     && Object.values(VOICE_INTRO).every(asc) && Object.values(VOICE_RESULT).every(asc) && Object.values(VOICE_REGULAR).every(asc),
     `表 ${tableNames.length}（出场 ${introNames.length}／结果 ${resultNames.length}／常客 ${regularNames.length}）｜稿 ${scriptNames.length}｜表外 ${scriptNames.filter(f => !tableNames.includes(f)).length}`);
 
-  // 成品对账：转码包的字节就是交付物，逐件 sha 进台账（11-05 批 48 件 + 11-06 批 66 件 = 114 件）。
+  // 成品对账：转码包的字节就是交付物，逐件 sha 进台账（11-05 批 48 件 + 11-06 批 66 件 + 11-08 批 vo_tab_02 到货 = 115 件；42 件人物开口版改写件同名替换）。
   // 这一根是留痕闸门不是故障：谁换了文件、谁在包没到的句子上提前挂了名，这里当场翻红。
-  // 补录件到位（vo_poach_02 于 11-06 到货）走的就是这条路：新 sha 进表才算挂完，表里的占号行一字未动。
+  // 补录件到位（vo_poach_02 于 11-06 到货，vo_tab_02 于 11-08 到货）走的就是这条路：新 sha 进表才算挂完，表里的占号行一字未动。
   const VOICE_SHA = {
     'vo_buyout_01': '035a3f2a739f549c275caa0ebe47828433ab338a7d262f5a31ed8533f9796bd1',
     'vo_buyout_02': '94075b589974f2ded866ae171c236171f011797355c5eb960a013f65133cf8b9',
@@ -3480,11 +3480,11 @@ for (const seed of [SEED, 7979, 36832]) {
     'vo_return_03': 'cfc38d80d32da6108c66f73ec412809e6a59a98f46b37771dcdea9e82d865c13',
     'vo_return_04': 'f23e04bfc9faf1ca33f9dd66078fa4b1ac282a57b83b5b30fe6ff5a35f2edd14',
     'vo_return_05': '61c6961200c88012629028d07fed04887b96e1ce0d99e6ff3180b54195cae226',
-    // ── 11-06 全覆盖批 66 件（voice-full-pack-20261106.zip，Orange 转码后逐件 sha；单上 335.6 s / 约 3.1 MB）──
-    'vo_banquet_01': 'c769a2d9c80406e80aed7b6fd79666ad7055b0e05d35b4f0f8bf0e0a6a84418c',
+    // ── 11-06 全覆盖批 + 11-08 改写批（42 句更新/入仓：41 句同名替换为人物开口版 + vo_tab_02 到货入仓；vo_banquet_02 挂起留旧版、vo_monthly_02 挂起仍占号）──
+    'vo_banquet_01': '1725bf19dbc91a369543eb2a594c7e236ef03b47eea2fb9b26883b63d0cfa731',
     'vo_banquet_02': 'ed377c117a01c6599f5cae0ebb01482351491ae91c5179abd931286be1abf3c7',
-    'vo_banquet_03': '13c85069835d3dd8c6908cd75dca3dc8e4aae63d37dfcb69f12ad4a83389d2eb',
-    'vo_blogger_01': '7010b88d46ea30d1768ef690787da7d44d5a47315903afd03114a4cbe0d44703',
+    'vo_banquet_03': '08419f790d79663f93720ee07396574787b2266e7dfba267046b9869cab439fe',
+    'vo_blogger_01': '48c2b9aab123767cfe3d36b1c4e77900ef85035fbe3524e28ece5f5792b0452c',
     'vo_c01_01': '0781104c1ec174162c72cfe589c269c51b3654d6d20d52f9369b893460d77990',
     'vo_c01_02': 'd5ae6a30b6ca60b03dbc2cdb40242179deddeeae94810c734aa3f509eb38f3dc',
     'vo_c01_03': '5562e14be3faf95d4977d35ea0f50969b814450741b17e25b90173451722c0dd',
@@ -3500,53 +3500,54 @@ for (const seed of [SEED, 7979, 36832]) {
     'vo_c03_03': 'ca3bdaa16a5f330631857f34482f5f94fde7df167a23a4e9345fae3141bcf77f',
     'vo_c03_04': 'd57bfb228121b76ac79e8970167c54481a0e193065a21eba88c397a1f95ebbd7',
     'vo_c03_05': '5a2efcdc490b6a77da4e84d81e9c4a169c7118f52f6e9abb79ae390cbbd0b538',
-    'vo_canteen_01': '6d1f554632381445549865a8667eb166accf477f9b51e5fba092ce32f3030e49',
-    'vo_change_01': '3417b34732f5f2fc51486b387e41a448d7197e84fce9a483eb011056e9517305',
-    'vo_change_02': '5c2eca255d6233780625bde2ef0500401a1e3ca371195ff8a7f40e9c5eab9f51',
-    'vo_change_03': 'eb3f8f69f788b7b64cf5a1fc6089aa604b7eb4e1f851cba18c8668148893e643',
-    'vo_change_04': '1993e1d1a5995202aa5d63cb8a1fae7bfa57932a270a656ae702c50d18c88100',
-    'vo_chess_01': '108ebb82525cec33646bd95bf07e3396ccf6161b4621eddc93a88065081595d3',
-    'vo_chess_02': 'a195578b22af34a62875b7a6dfd0346b4df73d110f6bb7d972a3be29572a2a17',
-    'vo_chess_03': '94a514eeb43f035bfe2fdc7270e7e2690f334bda0b050a3093ffee3c67dedb07',
-    'vo_chess_04': '2d71fa12f314b7058c1a4788e78f9f7473e2d0c82d0af2db50e334c67a16f629',
-    'vo_complaint_01': 'c72a53bc7ee46cf265eaae0c2b444f6477038e668dcb92a13051e62b115d2eb8',
-    'vo_complaint_02': '8f264d1e68b2ca1b3bcef28a4f5a0cd4f97765298552e61b2e08933b4ec50df7',
-    'vo_complaint_03': 'c9f65db4b6f61b30b1b70d0110bad7dc4d77ae248a617241e7624e982d421876',
-    'vo_early_01': 'c6b4320349971d3f0039dfd2a887c9fc3280eb7f749d26fbb01df2db26355f0b',
-    'vo_early_02': 'd676cd7e01303122a9e2403d2990100d9e6229781811415eb5fa77c131adb144',
-    'vo_early_03': '99e6f583b61fe706aad934176b1c9c62933f33e925802c6e996298d8931c8c15',
-    'vo_field_01': '9b2cf8b23757377ef94b39eb04be64958845e3513f7a1e3939d87a02ab6fd7c5',
-    'vo_fine_01': 'e9c54c92dbdb890211a1839e8f47154d8d45d2765df1eec57fe9099745774810',
+    'vo_canteen_01': '3184beaa224f3ac4ea688338f37b4dad03d48c791936bf88cab2993797a6e081',
+    'vo_change_01': '57bb398ca48fe9d593e0d3bdfe195bc87b9cca4e6ffef296f21fd47f036a38e8',
+    'vo_change_02': '3ba4fa905161f83d8554500bcbea2a21d603cc4a88e1652618dafd98bbee19d0',
+    'vo_change_03': 'a508aac7408269147b544451e1b5b8e6d8d61fa4863f065672de4b44f2148754',
+    'vo_change_04': '756bb0afd90fb5687f5cc3060c94a2122aefa0c908cabbce789655792c721846',
+    'vo_chess_01': '301c0f39e259b9945bb4b03351ccdac567dbe683c5af1b36c28ba453d28df847',
+    'vo_chess_02': '9d379b9b8a42fd753e8036f209dd1b1d48a5b5c1015e76f9ff483ca09221ac0d',
+    'vo_chess_03': '26f3e5c6710ad9ab64c33b7f77e1cf2967ad6c78847599a5d47849302455a2ec',
+    'vo_chess_04': '639a8728cef08c2e13f96f914d0ec4fed62d10b35689d0adc5b9666df75bee37',
+    'vo_complaint_01': '56ead1acdf989e4165985804280300d06a76370c177e0bf6d8f26717e2e8a291',
+    'vo_complaint_02': '04cce635f9d69d773a703269f40cf8d5475a650cb481df4595c151e0184c4cfe',
+    'vo_complaint_03': '711037974806ef316572ad1f7ccef07e53591f77468f8a0c0a26e386c8277f9b',
+    'vo_early_01': '39464f3de47cf9ca3e1d6f00c4ec9238d79a07f74060f8ffe2b4068d81df7d3f',
+    'vo_early_02': 'fc198e70c96f9d59bdb29de73a6d447212deb9fb74f21d0a3d571460cb42359f',
+    'vo_early_03': 'c86e6d9632b7070eb354cabf29789f94eca851d2a891020a6ac45bac51ea76fa',
+    'vo_field_01': 'cb99d46fa9c02c2e66f97a3940db6845112502be3bafea5027bbc2198144f2bf',
+    'vo_fine_01': '830f74a3dc390c108fa9be278da60486958a0546e23a627a6770b786defa2853',
     'vo_fine_02': '59b184032e97822e6d0109201262986a2803da85d599dba85a6e49bae5d70cc3',
     'vo_fine_03': 'b48357de0d158de453cfb536d1f0f5e44754bf7b9299ce75d43987959c81a1d0',
     'vo_fine_04': '56faafed05c0299a767a79a2164b923e7d981083cf2c5612a6a89e355c8c2fd9',
-    'vo_fine_05': '0dc43be02fe2a1c958d01294ac2b31853e7b7db80599ce74b7c20bc7bd346f27',
-    'vo_fine_06': 'a8964ec8fa9a1c71b4cc196d66f1c4ccf255980d880af82aa1108bc49e30b18f',
-    'vo_laoli_01': '0e91edbe326cd3ebd18fa7a21be2ff243920fb84dcb8b71b952a62a631e4a210',
+    'vo_fine_05': '67f06fd8ad1c7d467a4298b046d9217d7ebbcf07d9fa4867adb576980499b39d',
+    'vo_fine_06': 'f985d98aefc60344e6901708c56e8aa6dc7c2d1c481678426e2008e8dc6b36a7',
+    'vo_laoli_01': '19ee6ea3bbc27ed9518621e18a7ad915c6dda866e09c459ccd6562822939b366',
     'vo_laoli_02': 'b1795d16693c2204fd3b04b645a13bcc8a6062014c3ef75af8dddd30d558ae79',
     'vo_laoli_03': 'edc6cd1acb092fef9492f92420ffdda5747197aa7e65d11e45e98de9a50125ad',
     'vo_laoli_04': '93ddb8c3e7d4df0688de4c8964cec71e17e25ec81016b876c315f9bdd352ab57',
-    'vo_monthly_01': '18523a3b91354ab221342b3f8d5ffab015fd3463b8ed2ede87610f15d6c67429',
+    'vo_monthly_01': 'efd6546d44df4b2c9dcebfbe9a9110c9dd5d29b22453f1773849c0d26de0ec96',
     'vo_monthly_03': 'bfc36472249599cb1681d4eb40085165f0ac07d7aa2cd73e83c6fa3b28f5c320',
-    'vo_monthly_04': '2efb6d21dbca8a7c422fea6ad7d3158bc8471aa15ce44efef004caf9da2228b8',
+    'vo_monthly_04': '8dfaa9c544a982d9a7a748999aa54d1dddf7b5d4342ede3db1f71104c1370ec5',
     'vo_poach_02': '1b477f4d237bf8958aa6f9c8ccdc5a0baed626b0cee136bc0b499832674f51a3',
-    'vo_pot_01': '773006168e3c93afebc1f47d515c0a3b41a5d3de87f7f5a1b0173190037a52ad',
-    'vo_pot_02': 'facab133d30567e61de847553f4f280bd3de2896c422d5f57bff8cac58567c97',
-    'vo_pot_03': '1a1e5974591ddedc759739fa44f6bedb214c93c8df0ab95c69bff7fe7ba5beef',
-    'vo_priceup_01': '940dff4553aa67a5d430b1c78bf482147182e68d8b025bfce89e637a732b75b9',
-    'vo_reserve_01': 'd4e2898b5ff540ada589d2438c592577878c541f15edf28f41e1cfe8df72e9b7',
+    'vo_pot_01': '5c92772b82402358eed8591dfb6e6e603c96b85e01cc66b38cef641ab64ab58d',
+    'vo_pot_02': 'c55480f7388e15946ca45b75cddf588b6dacdc45cae9f330aa0efd5cde9dc5af',
+    'vo_pot_03': '485abf7440ec241d8622560ec9a401d09138df400d97722cd26681f88580a888',
+    'vo_priceup_01': 'becb395c0ec1f8c502d8089b8e8fea5b32b91c494b5c2cf616ebc6138d3ca291',
+    'vo_reserve_01': '14131fb76ef2cd65f6baa262fda062b12df6bbbfc38c2a4f5a59d1bd2f6e88d1',
     'vo_reserve_02': '4c50b11943ab266a1903c5187dd0dd874a0161f8801f847eeb03c62c545d1c8d',
-    'vo_reserve_03': 'f47e80297b21c3e46fd8937add562b15a17f68591acb6d3755e36e75d3fe5092',
-    'vo_spoon_01': '903f0a4d52a8ef86ea2d2955a856e2480ffdc7e4ce7c9dd67fdffe8c5cefc3f2',
-    'vo_spoon_02': '7fa735860a3c2f14b946eb70788c8fdec650d633d1044690f638fa652650b961',
-    'vo_spoon_03': '769dd906679a2b9068820870d2923894f802f5a3b967f22ba30951c36fe6d149',
-    'vo_stockout_01': 'c53d610e7edd4f24ce3691a74f9c306bc385bd4453e8276b09f0542db864da1a',
-    'vo_tab_01': '246ebb42be77e8569841c1ba8aa930c2eb7bcaac421a92ba9ad00d73d4f2a048',
-    'vo_tab_03': '1361f848ab73552ba088289cb89611bdaaf7d93de5222c750a2640a6ea55cb3a',
-    'vo_tab_04': '4f94da046a93e77a417f81e647ea8edd732f15c580a3b23765c75d7b19bed75a',
-    'vo_tab_05': '6e03f9935d870ce2b9b33bb315ed91724aef36592f7644325af5b1bf21bca650',
-    'vo_tag_01': '53faed2313312b1da7aa7fbfd10513112f40e809af951d22f5fd46d35e986d1b',
-    'vo_tag_02': 'e3abae1e9823a4c5965d7e0c3b62559148b0286fedfa75345f5d452b0be04d1a',
+    'vo_reserve_03': 'caeda136b941ed7024bdd4024f1d3c9d5e384b3244f39250b8bc838c025bb705',
+    'vo_spoon_01': '8eb234bd9a101b8b1befb7ca1aba0e63ce2a2ec49e477a74bcdd6910d2d085d7',
+    'vo_spoon_02': '855afcb297863da6816b204064427f7c89dca733f0fd6645ce649518dd1e3bbf',
+    'vo_spoon_03': '0c5aa017d6692b6ba29feaedd09d61612abc17d7f44ed031fddab5d78c7b9e64',
+    'vo_stockout_01': '477e7c1221ac7909674cf34f8b4f04de7a871065b5a37e64b50a02765ca00e6b',
+    'vo_tab_01': 'a88d47a25c508a2e2cac23b57d0ae248508a483dc9de33b28f4df84051debe1f',
+    'vo_tab_02': '7fccc94e77225ddf2be4c89e5b87fce21b4ee899f447790ae4f97e567a7de963',
+    'vo_tab_03': '613417226ffc8d45803682520bd9c008d0ee4c44ed4d07686bc4ed16a852f012',
+    'vo_tab_04': 'a80f722efed2d28dac995fdf7296f4a309aa11fcc27dc53ed7ac19bbd84eb9d8',
+    'vo_tab_05': '74a26dbef0dbbf513dc4fc2b76b39bbc6cc7a0c17782eac234a557b21c9dce15',
+    'vo_tag_01': '989d3c73571a308098285ec57075d7af32a4e9039f87928febe283fb3f71fe14',
+    'vo_tag_02': '8ba905153b3b9a6de2ec5bd5c4352aa96dd72b78322d3efc06d13f3517c34c2b',
   };
   const packDir = join(HERE, 'public/audio');
   const onDisk = readdirSync(packDir).filter(f => /^vo_[a-z0-9]+_\d\d\.ogg$/.test(f)).map(f => f.replace('.ogg', ''));
@@ -3558,13 +3559,13 @@ for (const seed of [SEED, 7979, 36832]) {
   const oldBatch = new Set(readFileSync(join(HERE, '..', 'voice-events-script-20261104.md'), 'utf8').match(/vo_[a-z0-9]+_\d\d/g) || []);
   const batchBytes = onDisk.filter(f => !oldBatch.has(f)).reduce((s, f) => s + statSync(join(packDir, `${f}.ogg`)).size, 0);
   const unmountedOnDisk = onDisk.filter(f => !tableNames.includes(f)).sort();     // 盘上有、表里没 ＝ 补遗 §一 落地后应为零（18 句改选项键，全部进表）
-  const missingOnDisk = tableNames.filter(f => !onDisk.includes(f)).sort();       // 表里占号、盘上没件 ＝ 两句待重录
-  check('转码包逐件对账：仓内 114 件（48 + 66）sha 逐件对上两份转交包，表内 116 名＝这 114 件 ＋ 待重录占号 2 句，盘上没有表外件（★18 句按补遗 §一 全部进表）；'
-    + '包体 11-06 本批对上单上「约 3.1 MB / 335.6 s」',
-    shaBad.length === 0 && Object.keys(VOICE_SHA).length === 114 && onDisk.length === 114
-    && unmountedOnDisk.length === 0 && missingOnDisk.join() === 'vo_monthly_02,vo_tab_02'
-    && batchBytes > 3.3e6 && batchBytes < 3.4e6 && packBytes > 5.0e6 && packBytes < 5.1e6,
-    `114/114 sha 齐（对不上 ${shaBad.length}）｜表外件 ${unmountedOnDisk.length}｜占号缺件 [${missingOnDisk.join(' ')}]｜本批 ${(batchBytes / 1048576).toFixed(2)} MiB｜全批 ${(packBytes / 1048576).toFixed(2)} MiB`);
+  const missingOnDisk = tableNames.filter(f => !onDisk.includes(f)).sort();       // 表里占号、盘上没件 ＝ 待重录挂起（vo_monthly_02）
+  check('转码包逐件对账：仓内 115 件（48 + 66 + 1）sha 逐件对上转交包与改写单，表内 116 名＝这 115 件 ＋ 待重录占号 1 句，盘上没有表外件（★18 句按补遗 §一 全部进表）；'
+    + '包体对账（11-08 改写包 42 件同名替换＋vo_tab_02 解禁到货）',
+    shaBad.length === 0 && Object.keys(VOICE_SHA).length === 115 && onDisk.length === 115
+    && unmountedOnDisk.length === 0 && missingOnDisk.join() === 'vo_monthly_02'
+    && batchBytes > 3.2e6 && batchBytes < 3.3e6 && packBytes > 5.0e6 && packBytes < 5.1e6,
+    `115/115 sha 齐（对不上 ${shaBad.length}）｜表外件 ${unmountedOnDisk.length}｜占号缺件 [${missingOnDisk.join(' ')}]｜本批 ${(batchBytes / 1048576).toFixed(2)} MiB｜全批 ${(packBytes / 1048576).toFixed(2)} MiB`);
 
   // 分支对位：直接跑挂载表那个函数（与 main.js 卡片挂载那一刻调的是同一支），拿 Rep 三档验赢档/中档/输档
   const WIN = voiceIntroLines('evt_s_return', { Rep: 60 }), MID = voiceIntroLines('evt_s_return', { Rep: 35 }), LOSE = voiceIntroLines('evt_s_return', { Rep: 20 });
