@@ -4424,6 +4424,171 @@ for (const seed of [SEED, 7979, 36832]) {
     `渲染器 ${err32 || 'OK'}｜overlay 下标 ${cut32}｜剥遮罩后等同 ${withEv32.slice(0, cut32) === noEv32}`);
 }
 
+// ── §33 施工单 task-weigh-swipe-cancel-20261108（Orange `c407067`；店主 2026-11-08 拍板）称重滑屏误触 ──────
+// 现场是首个圈外玩家真机试玩公网版原话：「下锅煮菜加克重的时候，我只是往下划一下，就一直点住加」。
+// 单上钉死的三条：手势判别只作用于连加的启停、已落秤面的克数不回滚、曲线与防删针逐字不动。
+// 手法照 §31 / §32 那一味：把称重连加那一段源码原样交给 Function 跑，桩只替外部件（定时器 / 指针事件 / addGrams / 呈现层），
+// 于是 ① 与 ② 读的是这一段真跑出来的克数，不是正则里的字面。
+// 共用范围先数过：全文 setInterval 只有 tickGrab / tickPinch 这两处连加时钟，没有第三处在用，也没有共用 helper，
+// 所以按单上「仅称重一处则就地修」就地修在同一模块的启停两头（抓菜与捏出同一判据）。
+{
+  const mainRaw33 = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const s33 = mainRaw33.indexOf('const HOLD_DELAY = 150;');
+  const e33 = mainRaw33.indexOf('\nfunction addGrams(', s33);
+  const holdSrc33 = s33 > 0 && e33 > s33 ? mainRaw33.slice(s33, e33) : '';
+  const pieces33 = ['function startGrab', 'function tickGrab', 'function stopGrab',
+    'function startPinch', 'function tickPinch', 'function stopPinch', 'function swipeHold',
+    "document.addEventListener('pointermove', swipeHold, true)", 'const SWIPE_CANCEL_PX'];
+  const missing33 = pieces33.filter(p => !holdSrc33.includes(p));
+  const px33 = Number((holdSrc33.match(/const SWIPE_CANCEL_PX = (\d+);/) || [])[1] || -1);
+  const bind33 = (re) => (mainRaw33.match(re) || []).length;
+
+  // 一整个世界：目标 250 克那一单、initial 克起步；时钟一格 16 毫秒，与浏览器 setInterval 那一跳同规格
+  function holdWorld33(initial = 0) {
+    const orders = [{ customerId: 'c1', lines: [{ cat: 'T', grams: 250 }] }];
+    const gramsBy = { c1: { T: initial } };
+    const listeners = {};
+    let clock = 0, tickFn = null, alive = false, buildErr = '', api = null;
+    const stubs = {
+      orders, gramsBy, state: { pinchHintUsed: true }, saveGame: () => {}, app: {},
+      document: {
+        addEventListener: (type, fn) => { (listeners[type] = listeners[type] || []).push(fn); },
+        querySelectorAll: () => [], getElementById: () => null,
+      },
+      performance: { now: () => clock },
+      setInterval: fn => { tickFn = fn; alive = true; return 1; },
+      clearInterval: () => { alive = false; tickFn = null; },
+      addGrams: (cust, cat, delta) => { gramsBy[cust][cat] = Math.max(0, Math.round((gramsBy[cust][cat] || 0) + delta)); },
+      orderTotal: cust => Object.values(gramsBy[cust] || {}).reduce((s, v) => s + v, 0),
+      jitterScale: () => {}, refreshOrder: () => {}, sfx: () => {}, fxOn: () => false,
+      settleBubble: () => {}, showFloats: () => {},
+    };
+    try {
+      api = new Function(...Object.keys(stubs),
+        `${holdSrc33}\nreturn { startGrab, stopGrab, startPinch, getGrab: () => grab, getPinch: () => pinch };`)(...Object.values(stubs));
+    } catch (err) { buildErr = String((err && err.message) || err); }
+    const pt = (type, x, y, id = 1) => ({ type, clientX: x, clientY: y, pointerId: id, button: 0, preventDefault() {} });
+    const el = { dataset: { cust: 'c1', cat: 'T' }, classList: { add() {}, remove() {} }, setPointerCapture() {} };
+    return {
+      api, el, pt, buildErr,
+      grams: () => gramsBy.c1.T,
+      clock: () => clock,
+      timerOn: () => alive,
+      holdLive: () => !!api.getGrab() || !!api.getPinch(),
+      registered: () => listeners,
+      fire: (type, ev) => (listeners[type] || []).forEach(fn => fn(ev)),
+      hold: ms => { const end = clock + ms; while (clock < end) { clock += 16; if (alive && tickFn) tickFn(); } },
+    };
+  }
+  const DOWN = w => w.api.startGrab(w.pt('pointerdown', 100, 200), w.el);
+  const SLIDE = (w, dy) => w.fire('pointermove', w.pt('pointermove', 100, 200 + dy));
+
+  // 1) 接线与常量：阈值是 8–12 之间的整数、判别只挂在 pointermove 捕获这一层，曲线三数与 60→180 那行在段内逐字没动；
+  //    pointerdown 的两处绑定（抓菜 / 捏出）与 document 兜底那两条（pointerup / pointercancel）一根没新造、一根没删。
+  check('§33 施工单·接线：SWIPE_CANCEL_PX 是命名常量且取 8–12 的整值，滑屏判别只经 document 捕获阶段的 pointermove 一进入（全文一处），'
+      + '曲线那行 60 + 120 × min(1, (held − 150) / 1000) 与 HOLD_DELAY = 150 / 分段 5·1·20 逐字在原位，'
+      + '连加时钟全文仍只 setInterval 两处（grab / pinch），启停两头各绑一次 pointerdown、兜底两条一根没重复造',
+    missing33.length === 0 && px33 >= 8 && px33 <= 12 && Number.isInteger(px33)
+      && bind33(/document\.addEventListener\('pointermove', swipeHold, true\)/g) === 1
+      && /return 60 \+ 120 \* Math\.min\(1, \(held - HOLD_DELAY\) \/ 1000\);/.test(holdSrc33)
+      && /const HOLD_DELAY = 150;/.test(holdSrc33)
+      && bind33(/el\.addEventListener\('pointerdown', e => startGrab\(e, el\)\)/g) === 1
+      && bind33(/el\.addEventListener\('pointerdown', e => startPinch\(e, el\)\)/g) === 1
+      && bind33(/for \(const type of \['pointerup', 'pointercancel'\]\)/g) === 2   // P2-2 那道闸 + 称重兜底，都是旧的，本批没新造第三条
+      && bind33(/document\.addEventListener\(type, e => \{ if \(grab\) stopGrab\(e\); if \(pinch\) stopPinch\(e\); \}, true\);/g) === 1
+      && (mainRaw33.match(/setInterval\(/g) || []).length === 2,
+    `阈值 ${px33}px｜段内缺件[${missing33.join('、') || '无'}]`);
+
+  // 2) 单上验收 ①：按下未及启动即位移超阈值 ⇒ 本次按压连加零启动，且这一只手抬起时也不补轻点那一步
+  const wA = holdWorld33();
+  DOWN(wA); wA.hold(112);                       // 7 跳，还在 150 毫秒闸门内，克数本就该是 0
+  const aBefore = wA.grams();
+  SLIDE(wA, 40);                                // 往下划 40 像素（超过阈值）
+  wA.hold(1200);                                // 就算定时器白跑一整秒也不许再落一克
+  const aAfterSlide = wA.grams();
+  wA.fire('pointerup', wA.pt('pointerup', 100, 240));   // 抬手：滑屏那一下不算点按
+  const aAfterUp = wA.grams();
+  check('§33 施工单 ①·按下未及启动即滑走 ⇒ 连加零启动：150 毫秒闸门内划出阈值那一下，秤面从头到尾 0 克、连加时钟当场收（定时器已清、按压态已空），'
+      + '其后就算再跑 1.2 秒也一克不涨，抬手那一刻不补轻点的 +5（滑屏不是点按）',
+    wA.buildErr === '' && aBefore === 0 && aAfterSlide === 0 && aAfterUp === 0
+      && wA.timerOn() === false && wA.holdLive() === false,
+    `闸门内 ${aBefore}｜滑后 1.2 秒 ${aAfterSlide}｜抬手 ${aAfterUp}｜时钟 ${wA.timerOn() ? '还在跑' : '已收'}`);
+
+  // 3) 单上验收 ②：连加已启动后位移超阈值 ⇒ 停在当刻、其后不再增长，且已落进草稿的克数不回滚
+  const wB = holdWorld33();
+  DOWN(wB); wB.hold(400);
+  const bRunning = wB.grams();                  // >0 才证明连加确实在跑
+  SLIDE(wB, 15);
+  const bAtCancel = wB.grams();                 // 与滑走前同一枚数 ⇒ 没回滚
+  wB.hold(900);
+  const bLater = wB.grams();                    // 与定格那一刻同一枚 ⇒ 其后零增长
+  wB.fire('pointerup', wB.pt('pointerup', 100, 215));
+  const bAfterUp = wB.grams();
+  check('§33 施工单 ②·连加中滑走 ⇒ 停在当刻：划出阈值那一格克数当场定格（时钟收、按压态空），其后 0.9 秒零增长、抬手也不动；'
+      + '已经落进秤面的克数一克不回（屏上是什么就是什么，与 ± 步进「不许静默改数」同一原则）',
+    wB.buildErr === '' && bRunning > 0 && bAtCancel === bRunning && bLater === bAtCancel && bAfterUp === bLater
+      && wB.timerOn() === false && wB.holdLive() === false,
+    `滑走前 ${bRunning} 克｜定格 ${bAtCancel} 克｜+0.9 秒 ${bLater} 克｜抬手 ${bAfterUp} 克`);
+
+  // 4) 单上验收 ③：静止按住的行为与现状逐字一致；阈值之内那点微动（真手指必然抖几像素）不许把连加杀掉。
+  //    对照组是一整趟一根不动的同款跑法——两者逐克相等才算「没改行为」，差一克就是本批动了曲线。
+  const wC = holdWorld33();
+  DOWN(wC); wC.hold(300);
+  const cAt300 = wC.grams();
+  SLIDE(wC, 6);                                 // 6 像素，在阈值之内
+  wC.hold(300);
+  const cAt600 = wC.grams();
+  const wD = holdWorld33();
+  DOWN(wD); wD.hold(600);                       // 对照：全程静止按住
+  const dAt600 = wD.grams();
+  const wP = holdWorld33();                     // 边界：恰好等于阈值不杀、超一枚就杀
+  DOWN(wP); wP.hold(112); SLIDE(wP, px33); wP.hold(300);
+  const pExactAlive = wP.holdLive() && wP.grams() > 0;
+  const wQ = holdWorld33();
+  DOWN(wQ); wQ.hold(112); SLIDE(wQ, px33 + 1); wQ.hold(300);
+  const pOverKilled = wQ.holdLive() === false && wQ.grams() === 0;
+  check(`§33 施工单 ③·静止按住与阈值内微动照旧：按住 300 毫秒落 ${cAt300} 克、600 毫秒落 ${cAt600} 克（60→180 克/秒那条加速曲线读数没被本批动过），`
+      + `划 6 像素那一趟与全程一根不动的对照趟逐克相等（${cAt600} = ${dAt600}）⇒ 阈值之内不改变行为；边界两枚：位移恰好 ${px33} 像素连加照跑、${px33 + 1} 像素当场收`,
+    wC.buildErr === '' && cAt300 > 0 && cAt600 > cAt300 && cAt600 === dAt600
+      && cAt600 >= 34 && cAt600 <= 46 && pExactAlive && pOverKilled,
+    `300ms ${cAt300} 克｜600ms ${cAt600} 克｜静止对照 ${dAt600} 克｜6 像素对照差 ${Math.abs(cAt600 - dAt600)}`);
+
+  // 5) 单上那条「与 pressedBtn 推迟重绘闸共存」的硬指标：单击仍恰好落一次（抓 +5 / 捏 −5），一步不多一步不少
+  const wE = holdWorld33();
+  DOWN(wE); wE.hold(64);                        // 64 毫秒 < 150 毫秒闸门 ⇒ 轻点
+  wE.fire('pointerup', wE.pt('pointerup', 100, 202));   // 抬手前手指挪了 2 像素，仍在阈值之内
+  const eTap = wE.grams();
+  const wF = holdWorld33(200);
+  wF.api.startPinch(wF.pt('pointerdown', 100, 200), wF.el); wF.hold(64);
+  wF.fire('pointerup', wF.pt('pointerup', 100, 203));
+  const fTap = wF.grams();
+  check('§33 施工单·单击恰好一步：轻点抓菜落 +5（差 >20 克那档步长）、轻点捏出落 −5，两趟抬手都带两三像素的家常微动也没被误判成滑屏；'
+      + '本批没碰 pressedBtn 那一道推迟重绘闸（P2-2 首击不丢），单击语义一步不多一步不少',
+    eTap === 5 && fTap === 195 && wE.timerOn() === false && wF.timerOn() === false,
+    `轻点抓 ${eTap} 克｜轻点捏 ${fTap} 克（起 200）`);
+
+  // 6) 捏出连加走同一枚判据；单上第 4 条（pointercancel / 指针滑出控件）核实现状已有处理，本批不重复造
+  const wG = holdWorld33(200);
+  wG.api.startPinch(wG.pt('pointerdown', 100, 200), wG.el); wG.hold(400);
+  const gRunning = wG.grams();
+  SLIDE(wG, 30);
+  const gAtCancel = wG.grams();
+  wG.hold(900);
+  const wH = holdWorld33();
+  DOWN(wH); wH.hold(400);
+  const hRunning = wH.grams();
+  wH.fire('pointercancel', wH.pt('pointercancel', 100, 240));   // 系统收走指针：现成那条兜底
+  wH.hold(900);
+  check('§33 施工单 ⑤＋第 4 条·捏出同判据、系统收走指针照旧：长按捏出连减中途划出 30 像素当场定格（其后 0.9 秒不再减），'
+      + 'pointercancel 与按钮外抬起仍走本批之前那两条 document 捕获兜底（现成处理没重复造第二套）；'
+      + '这一段源码在 document 上登记的指针事件正好三条：pointerup / pointercancel 两根旧的在场、pointermove 本批新挂一根',
+    gRunning < 200 && gAtCancel === gRunning && wG.grams() === gAtCancel && wG.timerOn() === false
+      && hRunning > 0 && wH.grams() === hRunning && wH.timerOn() === false && wH.holdLive() === false
+      && Object.keys(wH.registered()).sort().join(',') === 'pointercancel,pointermove,pointerup'
+      && (wH.registered().pointerup || []).length === 1 && (wH.registered().pointercancel || []).length === 1,
+    `捏出连减 ${200 - gRunning} 克后定格｜系统收走 ${hRunning} 克后 ${wH.grams()} 克｜登记 ${Object.keys(wH.registered()).sort().join(' / ')}`);
+}
+
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
 // 而开学周是"全线 ×1.1 + 品类系数偏肉（MB1.3/MT1.2）"；附录 D.5 的 2.5 元/碗 锚点按固定品类占比算，不含这两项。
 function bowlMarginYuan(tier, priceTierId, weatherId, semesterDay) {

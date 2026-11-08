@@ -675,6 +675,9 @@ function openShop() {
 // 让大小目标通过刹车区的时间接近。精修步长分段：与目标差 > 20 克时轻点 +5 / 捏出 −5，≤ 20 克时 ±1；
 // 当前步长写在按钮上。长按捏出仍约 30 克/秒。判定带与结算全不动。
 const HOLD_DELAY = 150;
+// 滑屏误触判别（施工单 task-weigh-swipe-cancel-20261108）：按下之后指针位移超过这一枚就判为滑屏。
+// 它只杀连加的启停，已落进秤面的克数一律不回滚——与 ± 步进那条「不许静默改数」同一原则。
+const SWIPE_CANCEL_PX = 10;
 const BRAKE_GRAMS = 30;
 const BRAKE_SHARE = 0.15;
 const BRAKE_RATE = 40;
@@ -723,6 +726,7 @@ function startGrab(e, el) {
   try { el.setPointerCapture?.(e.pointerId); } catch { /* 指针已失效时照常按抓菜处理 */ }
   el.classList.add('on');
   grab = { cust: el.dataset.cust, cat: el.dataset.cat, el, t0: performance.now(), last: performance.now(), acc: 0, timer: 0,
+    pid: e.pointerId, sx: e.clientX, sy: e.clientY,
     g0: Number((gramsBy[el.dataset.cust] || {})[el.dataset.cat] || 0) };
   // 用定时器而不是 rAF：后台/隐藏页 rAF 会停，按住的手就白按了；16 毫秒一跳，前台观感一致
   grab.timer = setInterval(tickGrab, 16);
@@ -750,8 +754,8 @@ function stopGrab(e) {
   grab = null;
   clearInterval(g.timer);
   g.el.classList.remove('on');
-  // 轻点 = 抓起一小撮，按当前档位 +5 或 +1 克；指针被系统收走（pointercancel）不算点按
-  if (performance.now() - g.t0 < HOLD_DELAY && e?.type !== 'pointercancel') addGrams(g.cust, g.cat, stepFor(g.cust, g.cat));
+  // 轻点 = 抓起一小撮，按当前档位 +5 或 +1 克；指针被系统收走（pointercancel）不算点按；滑屏那一下同样不算（连加已被判别杀掉）
+  if (!g.swiped && performance.now() - g.t0 < HOLD_DELAY && e?.type !== 'pointercancel') addGrams(g.cust, g.cat, stepFor(g.cust, g.cat));
   refreshOrder(g.cust);
   // ② 抓菜落袋（音频单）：这一口真落了克才出声，指针被系统收走或空放不算
   const gave = Number((gramsBy[g.cust] || {})[g.cat] || 0);
@@ -772,6 +776,7 @@ function startPinch(e, el) {
   try { el.setPointerCapture?.(e.pointerId); } catch { /* 同上 */ }
   el.classList.add('on');
   pinch = { cust: el.dataset.cust, cat: el.dataset.cat, el, t0: performance.now(), last: performance.now(), acc: 0, flow: false, timer: 0,
+    pid: e.pointerId, sx: e.clientX, sy: e.clientY,
     total0: orderTotal(el.dataset.cust) };
   pinch.timer = setInterval(tickPinch, 16);
 }
@@ -796,7 +801,7 @@ function stopPinch(e) {
   pinch = null;
   clearInterval(p.timer);
   p.el.classList.remove('on');
-  if (!p.flow && e?.type !== 'pointercancel') addGrams(p.cust, p.cat, -stepFor(p.cust, p.cat));
+  if (!p.swiped && !p.flow && e?.type !== 'pointercancel') addGrams(p.cust, p.cat, -stepFor(p.cust, p.cat));
   usePinchHint();
   refreshOrder(p.cust);
   // 顿帧同一条规矩也挂在捏回收手这一格：只要这一趟真动了克就定一下（与抓菜共用同一个判据形状，不新造判定）
@@ -815,6 +820,17 @@ function usePinchHint() {
 for (const type of ['pointerup', 'pointercancel']) {
   document.addEventListener(type, e => { if (grab) stopGrab(e); if (pinch) stopPinch(e); }, true);
 }
+
+// 滑屏判别（施工单 task-weigh-swipe-cancel-20261108）：同一只指针位移超过阈值即判为滑屏，当场定格且这一次按压不再算轻点。
+// 挂在 document 捕获阶段：抓菜钮是 touch-action: none、指针又被 setPointerCapture 锁在按钮上，这一层不管落在哪个节点都收得到。
+function swipeHold(e) {
+  const h = grab || pinch;
+  if (!h || e.pointerId !== h.pid) return;
+  if (Math.abs(e.clientX - h.sx) <= SWIPE_CANCEL_PX && Math.abs(e.clientY - h.sy) <= SWIPE_CANCEL_PX) return;
+  h.swiped = true;
+  if (grab) stopGrab(e); else stopPinch(e);
+}
+document.addEventListener('pointermove', swipeHold, true);
 
 function addGrams(cust, cat, delta) {
   // 真机修复单 f39f692：秤面不许写出柜里没有的货。封顶 = 柜量 − 别单已称走的部分，
