@@ -428,7 +428,8 @@ function refreshForecast() {
 // 这里只改文字与「在用」那一圈描边，不换节点：换节点会把正在打字的那一格连同光标一起换掉（预检必修④那条教训）。
 function syncShelfForecast(f) {
   if (qtyBad.size) return;   // 驳回态：抬头那一眼跟着整块换掉的驳回话走，不摆半个算式配套的数
-  const bowls = f.capped.toFixed(0);
+  const d = f.display ?? f;
+  const bowls = d.capped.toFixed(0);
   app.querySelectorAll('[data-fc-bowls]').forEach(el => { el.textContent = bowls; });
   for (const el of app.querySelectorAll('input[data-qty]')) {
     const sku = el.closest('.sku');
@@ -1503,8 +1504,9 @@ function shelfRow(cat, forecast) {
   // 预检反馈 F7（0366bd6）：每碗耗汤份数 T 是与天气同级的情境参数（不是暗线），看不见就会拿 1 份/碗直算，
   // 于是「买 12 份卖 11 碗却报卖断」看起来就是 bug。T 进市场汤底行，也算得清那碗数从哪儿被封顶。
   const soupT = cat === 'SP' ? ` · 每碗耗 ${state.today.scenario.T} 份` : '';
+  const d = forecast.display ?? forecast;
   return `<div class="panel"><div class="row shelfhead"><h3>${CAT[cat].name}${cat === 'SP' ? '（份）' : '（斤）'}</h3>
-      <span class="muted">柜里 ${have}${cat === 'SP' ? ' 份' : ''}${soupT} · 试算今天能出 <span data-fc-bowls>${forecast.capped.toFixed(0)}</span> 碗</span>${delist}</div>
+      <span class="muted">柜里 ${have}${cat === 'SP' ? ' 份' : ''}${soupT} · 试算今天能出 <span data-fc-bowls>${d.capped.toFixed(0)}</span> 碗</span>${delist}</div>
     <div class="shelf">${list.map(s => skuCard(cat, s, forecast)).join('')}${absent ? absentCard(cat) : ''}</div></div>`;
 }
 
@@ -1566,11 +1568,14 @@ function footStrip(f) {
 // 需求侧与可供侧同时摆出来，缺口就是明天该多买多少——两个数都是引擎算好的公开项，界面不另立口径
 // 复现单 236307a 线索一：差额必须是「屏上那两个数相减」，不是那两个数底下的浮点相减。
 // capped 落在需求侧时是小数（min 的第一项就是 estBowls + 试吃加碗），原样进句子就成「差 0.029232665123752 碗」。
-function forecastBar(f) {
+function forecastBar(fRaw) {
+  const f = fRaw.display ?? fRaw;
   const need = Math.round(f.estBowls);
   const can = Number(f.capped.toFixed(0));
   const gap = need - can;
-  return `<div class="forecast"><div class="k">试算（只看明账）${f.lowConfidence ? ' <span class="low">头一天没有昨日实卖，客流侧按开业基础量估</span>' : ''}</div>
+  return `<div class="forecast"><div class="k">试算（只看明账）${f.floorApplied
+    ? ' <span class="low">昨日实卖太少，客流侧按基础量估</span>'
+    : f.lowConfidence ? ' <span class="low">头一天没有昨日实卖，客流侧按开业基础量估</span>' : ''}</div>
     <div class="grid3" style="margin-top:8px">
       <div><div class="k">按今天客流要</div><div class="v num">${need} 碗</div></div>
       <div><div class="k">这一篮只够出</div><div class="v num">${Math.round(f.supplyBowls)} 碗</div></div>

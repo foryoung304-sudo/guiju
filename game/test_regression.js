@@ -39,6 +39,7 @@ import { BUBBLE_MAX, FLOAT_MAX, takeBubbles, takeFloats, orderSay, praiseSay, gr
 import { morningRivals, priceWarReprice, sharesAndS, tallySuppression, rivalPriceCoef, previewShare } from './src/engine/competition.js';
 import { applyShadow, computeQ } from './src/engine/shadow.js';
 import { makeRng } from './src/engine/rng.js';
+import { priceCoefFor } from './src/engine/ops.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SEED = Number(process.argv[2] ?? 20261031);
@@ -850,6 +851,46 @@ for (const seed of [SEED, 7979, 36832]) {
       const f = previewBasket(ratio, [], 'qinmin').forecast;
       return f.lowConfidence === true && Number.isFinite(f.estBowls); })(),
     `回退式给 ${previewBasket(ratio, [], 'qinmin').forecast.estBowls.toFixed(2)} 碗并标低置信度`);
+
+  // 裁定单（2026-11-09 Orange 案 1）：试算地板灾难门与显示层解耦两针
+  {
+    const mkFloorTest = yBowls => {
+      const s = newGame(SEED);
+      beginDay(s);
+      s.YesterdayScenario = s.today.scenario;
+      s.YesterdayRamp = { 3: 0.4, 2: 0.6, 1: 0.8 }[s.RampDays] ?? 1.0;
+      s.PriceCoefYday = priceCoefFor(s, 'qinmin', s.today.scenario);
+      s.YesterdayF = s.F;
+      const estShare = previewShare(s, 19.8);
+      s.Share = [estShare, (1 - estShare) / 3, (1 - estShare) / 3, (1 - estShare) / 3];
+      s.YesterdaySoldBowls = yBowls;
+      return s;
+    };
+    const deadSt = mkFloorTest(1);
+    const deadF = previewBasket(deadSt, [], 'qinmin').forecast;
+    const expectedFloor = 0.6 * (deadSt.BaseSales * ({ 3: 0.4, 2: 0.6, 1: 0.8 }[deadSt.RampDays] ?? 1.0) * deadSt.today.scenario.trafficTotal
+      * priceCoefFor(deadSt, 'qinmin', deadSt.today.scenario) * deadSt.F * (0.75 + deadSt.P * 0.005)
+      * (previewShare(deadSt, 19.8) / COMPETITION.shareBase) + Math.round(deadSt.R * 0.5));
+
+    check('显示层地板①·死锚针：昨日实卖 1 碗、今日与昨日同情境同爬坡 → 显示值 = 0.6×baseEst 且地板提示案成立，标准 estBowls 保持比值式原值',
+      deadF.floorApplied === true
+      && deadF.display.floorApplied === true
+      && deadF.display.lowConfidence === false
+      && Math.abs(deadF.display.estBowls - expectedFloor) < 1e-9
+      && Math.abs(deadF.displayEstBowls - expectedFloor) < 1e-9
+      && deadF.estBowls === 1,
+      `显示值 ${deadF.display.estBowls.toFixed(2)} 碗（地板 0.6×baseEst = ${expectedFloor.toFixed(2)} 碗），标准 estBowls = ${deadF.estBowls} 碗，提示 = 昨日实卖太少`);
+
+    const healthSt = mkFloorTest(16);
+    const healthF = previewBasket(healthSt, [], 'qinmin').forecast;
+    check('显示层地板②·健康针：昨日实卖 16 碗、今日与昨日同情境同爬坡 → 显示值与比值式逐值相等、无提示，门外不吃地板',
+      healthF.floorApplied === false
+      && healthF.display.floorApplied === false
+      && healthF.display.lowConfidence === false
+      && healthF.display.estBowls === healthF.estBowls
+      && Math.abs(healthF.estBowls - 16) < 1e-9,
+      `显示值 ${healthF.display.estBowls.toFixed(2)} 碗逐值等同标准比值 ${healthF.estBowls.toFixed(2)} 碗，floorApplied = false`);
+  }
   const onClean = simulate(SEED, 10, STRATEGIES.clean, 'headless', { labor: false, competition: true, eventScope: 'm1' });
   const offClean = simulate(SEED, 10, STRATEGIES.clean, 'headless', M1);
   check('接线这两项要解决的问题：在场首日不再按「无竞争的需求」进货，第一天的报损与不在场逐分相等（差额登记在 delta §二十四.4）',

@@ -157,26 +157,38 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
   // 样段期无竞争（正文 3.14 第 7b `:265`「样段期无竞争，S ≡ 1」）时它俩恒为 1，M1 因此没有落点；竞争层在场就必须回来。
   // 关掉整层一律取 1（不是取算出的比值），已签发的 M1 带不引入浮点漂移。
   const estShare = competitionOn(state) ? previewShare(state, PRICE_TIERS[priceTierId].perJin) : null;
+  // 首日回退式：公开基础销量 × 爬坡 × 情境 × 定价系数 × F ×（口碑代理项）×（预估份额 ÷ 基准）+ 可见熟客到访量 R_v
+  // 回签审复 §一.2（实测问题 #3）：口碑代理项由 P÷100 改为与 3.14 第 7 步同式的 0.75 + P×0.005。
+  // 原式在 P=20 时给 0.2，低于第 7 步口碑项在任何一天可能的下界 0.75，首日试算因此把需求压到真实的 1/4；
+  // 用 P（而不是暗口碑 Rep）保持"试算只用玩家看得见的代理"这条红线不变
+  const baseEst = state.BaseSales * rampNow(state) * scenario.trafficTotal
+    * priceCoefFor(state, priceTierId, scenario) * state.F * (0.75 + state.P * 0.005)
+    * (estShare === null ? 1 : estShare / COMPETITION.shareBase)
+    + Math.round(state.R * 0.5);
   let estBowls;
   let lowConfidence = false;
+  let floorApplied = false;
+  let displayEstBowls;
+
   if (yBowls > 0 && ySc && state.Share[0] > 0) {
     // 比值式：昨日售出 × 情境比 × 爬坡比 × 定价系数比 × F 比 × 份额比 × next_day_traffic_mult
-    estBowls = yBowls * (scenario.trafficTotal / ySc.trafficTotal)
+    const ratioEst = yBowls * (scenario.trafficTotal / ySc.trafficTotal)
       * (rampNow(state) / state.YesterdayRamp)
       * (priceCoefFor(state, priceTierId, scenario) / state.PriceCoefYday)
       * (state.F / state.YesterdayF)
       * (estShare === null ? 1 : estShare / state.Share[0])
       * state.next_day_traffic_mult;
+    estBowls = ratioEst;
+    // 裁定（2026-11-09 Orange 案 1）：显示层地板＋灾难门。
+    // ratioEst < 0.25 * baseEst 判定死锚生效，显示值抬到 0.6 * baseEst；门外显示值 = 比值式原值，无提示。
+    // 标准 estBowls 保持纯比值不碰，供 sim、回归针、两带读，保证两带 diff 0。
+    const disaster = ratioEst < 0.25 * baseEst;
+    floorApplied = disaster;
+    displayEstBowls = disaster ? 0.6 * baseEst : ratioEst;
   } else {
-    // 首日回退式：公开基础销量 × 爬坡 × 情境 × 定价系数 × F ×（口碑代理项）×（预估份额 ÷ 基准）+ 可见熟客到访量 R_v
-    // 回签审复 §一.2（实测问题 #3）：口碑代理项由 P÷100 改为与 3.14 第 7 步同式的 0.75 + P×0.005。
-    // 原式在 P=20 时给 0.2，低于第 7 步口碑项在任何一天可能的下界 0.75，首日试算因此把需求压到真实的 1/4；
-    // 用 P（而不是暗口碑 Rep）保持"试算只用玩家看得见的代理"这条红线不变
     lowConfidence = true;
-    estBowls = state.BaseSales * rampNow(state) * scenario.trafficTotal
-      * priceCoefFor(state, priceTierId, scenario) * state.F * (0.75 + state.P * 0.005)
-      * (estShare === null ? 1 : estShare / COMPETITION.shareBase)
-      + Math.round(state.R * 0.5);
+    estBowls = baseEst;
+    displayEstBowls = baseEst;
   }
 
   const supply = basketSupply(state, basket, scenario);
@@ -185,30 +197,11 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
   const capBowls = Number.isFinite(cap) ? Math.floor(cap / scenario.avgJin) : Infinity;
   // 试吃转化单按正常订单进当日流水（正文 3.6 注），第 7 步并进需求，试算同口径抬一抬需求侧
   const convertBowls = tastingConvert(state.TastingCount);
-  const capped = Math.min(estBowls + convertBowls, supply.bowls, capBowls);
-  const bottleneck = capBowls < supply.bowls && capBowls <= estBowls ? 'cap' : supply.bottleneck;
   const perJin = PRICE_TIERS[priceTierId].perJin;
-  // 附录 C 显多秤项：预计流水 ×(1 + 0.08 × 自动层占比)。第 3 步还没抽亲手单，玩家看得见的优先层
-  // 只有熟客到访量与事件预订，其余一律记自动层 → 装上秤时这是一略偏高的上界（亲手单层通常不到 5% 碗数）
-  const priorityBowls = Math.min(capped, Math.round(state.R * 0.5) + state.event_reserve_bowls);
-  const autoShare = capped > 0 ? Math.max(0, (capped - priorityBowls) / capped) : 0;
-  const scaleMul = state.ScaleShowOn ? 1 + SCALE_DELTA_J_SHARE * autoShare : 1;
-  const estRevenueCents = toCents(capped * scenario.avgJin * perJin * scaleMul);
-
-  // 预计 COGS：按品类拆分后的预计售出量 ×（现有库存 + 本篮）混合均价 + 打包 + 掺量
   const blended = blendedAvgWithBasket(state, basket);
   const omega = {};
   for (const c of SOLID_CATS) omega[c] = CAT[c].share * scenario.catCoef[c];
   const Omega = SOLID_CATS.reduce((s, c) => s + omega[c], 0);
-  const estJin = capped * scenario.avgJin;
-  let estCogs = 0;
-  for (const c of SOLID_CATS) estCogs += (estJin * omega[c] / Omega) * blended[c] * 100;
-  estCogs += capped * scenario.T * blended.SP * 100;
-  estCogs += Math.round(capped) * PACKING[state.PackingTier] * 100;          // 与结算同口径：元/碗、取整碗数
-  estCogs += Math.round(capped) * additiveOf(state).perBowl * 100;           // 正文 3.12：按售出碗数即时计费
-
-  // 附录 C :453：预计经营净额 + 计划试吃账净额。第 3 步早于第 5 步定版，计划值取上一次定版留下的份数
-  //（没挂试吃角或未定版过 = 0）；单碗食材成本用本篮加进库存后的混合均价，与结算的批次成本同源
   const tastingN = state.TastingCount || 0;
   const perBowlCostYuan = scenario.avgJin * SOLID_CATS.reduce((s, c) => s + (omega[c] / Omega) * blended[c], 0)
     + scenario.T * blended.SP;
@@ -216,15 +209,66 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
   const tastingIncomeCents = tastingN * TASTING.incomeCentsPerPortion;
   const tastingNetCents = tastingIncomeCents - tastingCostCents;
   const laborCents = laborCostCents(state);
-
   const plan = planPayment(state, basket);
   const remainingCredit = Math.max(0, state.CreditCap - state.DebtSupplier - plan.creditUsed);
+
+  function evalMetrics(demand) {
+    const capped = Math.min(demand + convertBowls, supply.bowls, capBowls);
+    const bottleneck = capBowls < supply.bowls && capBowls <= demand ? 'cap' : supply.bottleneck;
+    const priorityBowls = Math.min(capped, Math.round(state.R * 0.5) + state.event_reserve_bowls);
+    const autoShare = capped > 0 ? Math.max(0, (capped - priorityBowls) / capped) : 0;
+    const scaleMul = state.ScaleShowOn ? 1 + SCALE_DELTA_J_SHARE * autoShare : 1;
+    const estRevenueCents = toCents(capped * scenario.avgJin * perJin * scaleMul);
+    const estJin = capped * scenario.avgJin;
+    let estCogs = 0;
+    for (const c of SOLID_CATS) estCogs += (estJin * omega[c] / Omega) * blended[c] * 100;
+    estCogs += capped * scenario.T * blended.SP * 100;
+    estCogs += Math.round(capped) * PACKING[state.PackingTier] * 100;          // 与结算同口径：元/碗、取整碗数
+    estCogs += Math.round(capped) * additiveOf(state).perBowl * 100;           // 正文 3.12：按售出碗数即时计费
+    const estCogsCents = Math.round(estCogs);
+    const estNetCents = estRevenueCents - estCogsCents - state.FixedCost - laborCents + tastingNetCents;
+    return {
+      capped,
+      bottleneck,
+      bottleneckBowls: bottleneck === 'cap' ? capBowls : supply.bottleneckBowls,
+      estRevenueCents,
+      estCogsCents,
+      scaleMul,
+      estNetCents,
+    };
+  }
+
+  const standard = evalMetrics(estBowls);
+  const disp = floorApplied ? evalMetrics(displayEstBowls) : standard;
+  const display = {
+    estBowls: displayEstBowls,
+    supplyBowls: supply.bowls,
+    capped: disp.capped,
+    lowConfidence: floorApplied ? false : lowConfidence,
+    floorApplied,
+    bottleneck: disp.bottleneck,
+    bottleneckBowls: disp.bottleneckBowls,
+    estRevenueCents: disp.estRevenueCents,
+    estCogsCents: disp.estCogsCents,
+    scaleMul: disp.scaleMul,
+    convertBowls,
+    laborCents,
+    tastingNetCents,
+    tastingIncomeCents,
+    tastingCostCents,
+    estNetCents: disp.estNetCents,
+    cashAfterCents: state.Cash - plan.cashUsed,
+    creditRemainingCents: remainingCredit,
+    plan,
+  };
+
   return {
-    estBowls, supplyBowls: supply.bowls, capped, lowConfidence,
-    bottleneck, bottleneckBowls: bottleneck === 'cap' ? capBowls : supply.bottleneckBowls,
-    estRevenueCents, estCogsCents: Math.round(estCogs), scaleMul, convertBowls,
+    estBowls, supplyBowls: supply.bowls, capped: standard.capped, lowConfidence, floorApplied,
+    displayEstBowls, display,
+    bottleneck: standard.bottleneck, bottleneckBowls: standard.bottleneckBowls,
+    estRevenueCents: standard.estRevenueCents, estCogsCents: standard.estCogsCents, scaleMul: standard.scaleMul, convertBowls,
     laborCents, tastingNetCents, tastingIncomeCents, tastingCostCents,
-    estNetCents: estRevenueCents - Math.round(estCogs) - state.FixedCost - laborCents + tastingNetCents,
+    estNetCents: standard.estNetCents,
     cashAfterCents: state.Cash - plan.cashUsed, creditRemainingCents: remainingCredit,
     plan,
   };
