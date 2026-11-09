@@ -1189,7 +1189,7 @@ const VIEWS = {
       ${preEvent ? `<div class="panel good"><h3>晨间情报</h3>
         <img class="inlineart" src="${eventArt(preEvent.id)}" alt="" />
         <p class="text">${esc(preEvent.text)}</p>
-        <p class="muted">市场页的标价已经按这个变了。</p></div>` : ''}
+        ${preEvent.id === 'evt_d_stockout' ? '<p class="muted">今儿多买正经、平价的粉面囤着，明天没货也能卖；清仓摊的陈货留不到明天，别贪便宜。</p>' : '<p class="muted">市场页的标价已经按这个变了。</p>'}</div>` : ''}
       <button class="go" data-act="toMarket">去市场</button>`;
   },
 
