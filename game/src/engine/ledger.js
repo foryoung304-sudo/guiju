@@ -212,9 +212,9 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
   const plan = planPayment(state, basket);
   const remainingCredit = Math.max(0, state.CreditCap - state.DebtSupplier - plan.creditUsed);
 
-  function evalMetrics(demand) {
-    const capped = Math.min(demand + convertBowls, supply.bowls, capBowls);
-    const bottleneck = capBowls < supply.bowls && capBowls <= demand ? 'cap' : supply.bottleneck;
+  function evalMetrics(demand, sup = supply) {
+    const capped = Math.min(demand + convertBowls, sup.bowls, capBowls);
+    const bottleneck = capBowls < sup.bowls && capBowls <= demand ? 'cap' : sup.bottleneck;
     const priorityBowls = Math.min(capped, Math.round(state.R * 0.5) + state.event_reserve_bowls);
     const autoShare = capped > 0 ? Math.max(0, (capped - priorityBowls) / capped) : 0;
     const scaleMul = state.ScaleShowOn ? 1 + SCALE_DELTA_J_SHARE * autoShare : 1;
@@ -230,7 +230,7 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
     return {
       capped,
       bottleneck,
-      bottleneckBowls: bottleneck === 'cap' ? capBowls : supply.bottleneckBowls,
+      bottleneckBowls: bottleneck === 'cap' ? capBowls : sup.bottleneckBowls,
       estRevenueCents,
       estCogsCents,
       scaleMul,
@@ -239,10 +239,20 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
   }
 
   const standard = evalMetrics(estBowls);
-  const disp = floorApplied ? evalMetrics(displayEstBowls) : standard;
+  // 乙5（试玩缺陷整批 2026-11-10）：净额试算校准＋预定计入。三条都只落在显示层——
+  // standard 与下面顶层返回逐字不动（案1 同一条护栏：sim 与两带读 estBowls / plan，不读 display）。
+  // ① 预定碗数进当日需求：结算 ops.js:49 的 D_pre 吃 event_reserve_bowls 与熟客顺延 reg_reserved_bowls，
+  //    原先试算只把 event_reserve_bowls 用在优先层切分上、没加进需求 ⇒ 背着单备货却看不见。
+  // ② 拿盆将就次日汤底上限减半：结算 ops.js:57 乘在汤底那一格上限上，原先 basketSupply 没乘 ⇒ 试算多报一倍碗数。
+  // ③ 隔夜报损：结算 ledger.js:35 的 netOpsCents 减 writeoff.cents，原先试算整项没有 ⇒ 净额虚高。
+  const reserveBowls = state.event_reserve_bowls + state.reg_reserved_bowls;
+  const displayDemand = displayEstBowls + reserveBowls;
+  const displaySupply = basketSupply(state, basket, scenario, state.today.soupHalf ? 0.5 : 1);
+  const disp = evalMetrics(displayDemand, displaySupply);
+  const estWriteoffCents = writeoffEstimate(state, basket, disp.capped, scenario, blended, omega, Omega);
   const display = {
-    estBowls: displayEstBowls,
-    supplyBowls: supply.bowls,
+    estBowls: displayDemand,
+    supplyBowls: displaySupply.bowls,
     capped: disp.capped,
     lowConfidence: floorApplied ? false : lowConfidence,
     floorApplied,
@@ -256,7 +266,10 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
     tastingNetCents,
     tastingIncomeCents,
     tastingCostCents,
-    estNetCents: disp.estNetCents,
+    reserveBowls,
+    soupHalf: !!state.today.soupHalf,
+    estWriteoffCents,
+    estNetCents: disp.estNetCents - estWriteoffCents,
     cashAfterCents: state.Cash - plan.cashUsed,
     creditRemainingCents: remainingCredit,
     plan,
@@ -280,7 +293,7 @@ function rampNow(state) {
 
 // 备货可供碗数：把本篮加进库存后，按第 7 步的品类拆分与汤底封顶模拟最多能出多少碗
 // 预检应修⑥：同时报出「卡在哪个品类」——试算只给一个总数，新手看不出是汤底拖住了还是主料不够
-function basketSupply(state, basket, scenario) {
+function basketSupply(state, basket, scenario, soupMul = 1) {
   const have = { SP: state.StockSoup };
   for (const c of SOLID_CATS) have[c] = state.StockSolid[c];
   for (const l of basket) {
@@ -296,9 +309,36 @@ function basketSupply(state, basket, scenario) {
     const perBowl = scenario.avgJin * omega[c] / Omega;
     if (perBowl > 0 && have[c] / perBowl < bowls) { bowls = have[c] / perBowl; bottleneck = c; }
   }
-  if (scenario.T > 0 && have.SP / scenario.T < bowls) { bowls = have.SP / scenario.T; bottleneck = 'SP'; }
+  if (scenario.T > 0 && have.SP / scenario.T * soupMul < bowls) { bowls = have.SP / scenario.T * soupMul; bottleneck = 'SP'; }
   const n = Number.isFinite(bowls) && bowls > 0 ? Math.floor(bowls) : 0;
   return { bowls: n, bottleneck, bottleneckBowls: n };
+}
+
+// 乙5：隔夜报损的试算估计。结算那一支（settleWriteoff）按「收摊时柜里还剩的全损货 × 当日批次均价」逐笔取成本池，
+// 试算时点还没卖、也还没选备菜档，所以只能估：剩货 = 本篮加库存 − 预计售出，全损货 = 汤底全部 + 非 keep 档的批次与篮子行，
+// 报损量取两者的小值（剩货里最多有多少是当日全损的货），价用 blendedAvgWithBasket 那一枚 projected 当日均价。
+// 洗切跳过那 +20% 不在这里估：备菜是第 4 步才选的，试算在第 3 步之前，界面另出一句提醒（差额逐项登记在回报里）。
+function writeoffEstimate(state, basket, capped, sc, blended, omega, Omega) {
+  const have = { SP: state.StockSoup };
+  const due = { SP: state.StockSoup };
+  for (const c of SOLID_CATS) { have[c] = state.StockSolid[c]; due[c] = 0; }
+  for (const b of state.Batches) {
+    if (b.cat !== 'SP' && !SKU_BY_ID[b.sku].keep) due[b.cat] += b.qty;
+  }
+  for (const l of basket) {
+    const sku = SKU_BY_ID[l.sku];
+    have[sku.cat] += l.qty;
+    if (sku.cat === 'SP') due.SP += l.qty;
+    else if (!sku.keep) due[sku.cat] += l.qty;
+  }
+  const estJin = capped * sc.avgJin;
+  let cents = 0;
+  for (const c of SOLID_CATS) {
+    const left = Math.max(0, have[c] - estJin * omega[c] / Omega);
+    cents += Math.min(left, due[c]) * blended[c] * 100;
+  }
+  cents += Math.min(Math.max(0, have.SP - capped * sc.T), due.SP) * blended.SP * 100;
+  return Math.round(cents);
 }
 
 function blendedAvgWithBasket(state, basket) {

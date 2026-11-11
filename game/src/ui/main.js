@@ -1552,7 +1552,8 @@ function skuCard(cat, s, forecast) {
 }
 
 // 实测反馈 #8：调上面货架时看不见总额 —— 汇总压成一条吸底跟随，明细仍留在页尾原处
-function footStrip(f) {
+function footStrip(fRaw) {
+  const f = fRaw.display ?? fRaw;   // 乙5：吸底条与试算面板读同一份显示值（案1 地板生效后两处原先会各说一个碗数）
   const { plan } = f;
   if (plan.submittable) {
     return `<span>这一篮 <b>${y(plan.total)}</b> 元</span>
@@ -1592,6 +1593,9 @@ function forecastBar(fRaw) {
         // 3.12 第 7g 步：卡的是出餐产能，不是菜——多买的货今天照样出不掉
         ? `灶上一天出到 ${f.bottleneckBowls} 碗就满了，多买的菜今天出不掉`
         : `${CAT[f.bottleneck].name}只够出 ${f.bottleneckBowls} 碗，先补这一类`}</div>` : ''}
+    ${f.reserveBowls > 0 ? `<div class="k" style="margin-top:6px">含今日预定 ${f.reserveBowls} 碗（社团那单与熟客顺延的预订，已经算进上面「按今天客流要」）</div>` : ''}
+    ${f.soupHalf ? '<div class="k" style="margin-top:6px">昨晚拿盆将就了：今儿汤底只能出一半的碗，上面「这一篮只够出」已经按减半算。</div>' : ''}
+    <div class="k" style="margin-top:6px">预计净额里已经扣了隔夜报损 ${y(f.estWriteoffCents)} 元——汤底隔夜全损，当天清的货卖不完也全损，这一笔按「这一篮卖完柜里还剩多少」估。洗切要是选了跳过，报损还会再多一笔。</div>
     <div class="k" style="margin-top:6px">现金 ${y(state.Cash)} · 走赊 ${y(f.plan.creditUsed)} · 现付 ${y(f.plan.cashUsed)}</div></div>`;
 }
 

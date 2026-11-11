@@ -4632,6 +4632,76 @@ for (const seed of [SEED, 7979, 36832]) {
     `捏出连减 ${200 - gRunning} 克后定格｜系统收走 ${hRunning} 克后 ${wH.grams()} 克｜登记 ${Object.keys(wH.registered()).sort().join(' / ')}`);
 }
 
+// ── §34 施工单 guiju-playtest-fixbatch-20261110（店主 2026-11-10 令，全批归 Yellow）乙5＋丙6–丙9 ──────────
+// 总边界：冻结数字一个不许动；结算本体（runBusiness / settleDay）零触碰；sweep 与 m3 两带 diff 0 为预期结果。
+// 乙5 的三条校准全部只落在 forecastBasket 的 display 那一层——standard 与顶层返回逐字不动（案1 同一条护栏：
+// sim.js 读 estBowls / plan.submittable，两带读不到 display），所以「校准试算」与「两带不漂」同时成立。
+{
+  const mainRaw34 = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const ledgerRaw34 = readFileSync(join(HERE, 'src/engine/ledger.js'), 'utf8');
+  const opsRaw34 = readFileSync(join(HERE, 'src/engine/ops.js'), 'utf8');
+
+  // ── 乙5-① 预定碗数计入试算的当日需求数（单上逐字要求），且顶层 estBowls 一格不动 ──
+  const mk34 = () => { const s = newGame(SEED); beginDay(s); return s; };
+  const s34a = mk34();
+  const base34 = previewBasket(s34a, [], 'qinmin').forecast;
+  s34a.event_reserve_bowls = 15;
+  const res34 = previewBasket(s34a, [], 'qinmin').forecast;
+  check('§34 乙5①·预定进需求：社团那 15 碗挂上之后，试算面板的「按今天客流要」恰好多 15 碗（display.estBowls = 原显示值 + 15），'
+      + 'display.reserveBowls 报出 15 供面板写「含今日预定 N 碗」；顶层 estBowls / displayEstBowls / capped 三个供 sim 与两带读的值逐值未动',
+    res34.display.reserveBowls === 15
+      && Math.abs(res34.display.estBowls - (base34.display.estBowls + 15)) < 1e-9
+      && res34.estBowls === base34.estBowls && res34.displayEstBowls === base34.displayEstBowls
+      && mainRaw34.includes('含今日预定 ${f.reserveBowls} 碗'),
+    `显示需求 ${base34.display.estBowls.toFixed(2)} → ${res34.display.estBowls.toFixed(2)} 碗｜顶层 estBowls ${res34.estBowls.toFixed(4)}（未动）`);
+
+  // 熟客顺延那一笔同样进需求（结算 ops.js:49 的 D_pre 吃的是 N_R_want + event_reserve_bowls，两支都得对得上）
+  const s34b = mk34(); s34b.reg_reserved_bowls = 4;
+  const reg34 = previewBasket(s34b, [], 'qinmin').forecast;
+  check('§34 乙5①b·熟客顺延预订同口径：reg_reserved_bowls = 4 时显示需求恰好多 4 碗（结算 D_pre 的 N_R_want 里含这一笔），顶层照旧不动',
+    Math.abs(reg34.display.estBowls - (base34.display.estBowls + 4)) < 1e-9 && reg34.estBowls === base34.estBowls,
+    `显示需求多 ${(reg34.display.estBowls - base34.display.estBowls).toFixed(2)} 碗`);
+
+  // ── 乙5-② 拿盆将就次日汤底上限减半：结算 ops.js:57 乘在汤底那一格，试算原先没乘 ──
+  const s34c = mk34();
+  s34c.StockSoup = 4; for (const c of SOLID_CATS) s34c.StockSolid[c] = 999;
+  const dry34 = previewBasket(s34c, [], 'qinmin').forecast;
+  s34c.today.soupHalf = true;
+  const half34 = previewBasket(s34c, [], 'qinmin').forecast;
+  check('§34 乙5②·拿盆将就减半：汤底是唯一瓶颈时（柜里 4 份、固体各 999 斤），显示侧「这一篮只够出」恰为原来的一半（向下取整），'
+      + 'display.soupHalf 报真供面板出提醒；顶层 supplyBowls 未动（两带读不到它，但案1 护栏要求顶层逐字不变）',
+    dry34.supplyBowls > 0 && half34.display.supplyBowls === Math.floor(dry34.display.supplyBowls / 2)
+      && half34.supplyBowls === dry34.supplyBowls && half34.display.soupHalf === true
+      && opsRaw34.includes('const soupCapBowls = state.StockSoup / sc.T * (t.soupHalf ? 0.5 : 1);'),
+    `可供 ${dry34.display.supplyBowls} → ${half34.display.supplyBowls} 碗｜顶层 ${dry34.supplyBowls}（未动）`);
+
+  // ── 乙5-③ 隔夜报损进试算净额：与结算同一个式子形状（净额 = 流水 − COGS − 报损 − 固定 − 人工 + 试吃净） ──
+  const s34d = mk34();
+  const picks34 = [{ sku: 'SP1', qty: 40 }];
+  const f34d = previewBasket(s34d, picks34, 'qinmin').forecast;
+  const d34 = f34d.display;
+  const shape34 = d34.estRevenueCents - d34.estCogsCents - d34.estWriteoffCents - s34d.FixedCost - d34.laborCents + d34.tastingNetCents;
+  check('§34 乙5③·报损进净额：多买汤底（40 份，隔夜全损）那一篮，display.estWriteoffCents > 0，'
+      + '且 display.estNetCents 逐分等于「流水 − COGS − 报损 − 固定支出 − 人工 + 试吃净额」——与结算 ledger.js:35 同一个式子形状；'
+      + '结算本体那一行逐字未动（引擎不碰）',
+    d34.estWriteoffCents > 0 && d34.estNetCents === shape34
+      && ledgerRaw34.includes('const netOpsCents = grossCents - writeoff.cents - state.FixedCost - state.LaborCost + tasting.netCents;'),
+    `报损 ${(d34.estWriteoffCents / 100).toFixed(2)} 元｜净额 ${(d34.estNetCents / 100).toFixed(2)} 元｜式子对平 ${d34.estNetCents === shape34}`);
+
+  // 报损估计的口径针：空柜只买汤底、需求压到 0 ⇒ 一份没卖出去，10 份隔夜全损，报损应等于这一篮汤底的全额成本
+  const s34e = mk34();
+  s34e.StockSoup = 0; for (const c of SOLID_CATS) s34e.StockSolid[c] = 0;
+  s34e.BaseSales = 0; s34e.R = 0; s34e.TastingCount = 0;
+  const f34e = previewBasket(s34e, [{ sku: 'SP1', qty: 10 }], 'qinmin').forecast;
+  check('§34 乙5③b·空柜只买 10 份汤底、当日需求为 0：预计能出 0 碗 ⇒ 报损估计恰等于这一篮的全额成本（汤底隔夜全损，一份没卖出去），'
+      + '而试算 COGS 为 0（COGS 只算卖出去的那一部分）——这正是店主实测「试算 +105.87 / 实际 +7.92」那一类劈叉的主项：报损整项原先不在试算里',
+    f34e.display.capped === 0 && f34e.display.estCogsCents === 0
+      && f34e.display.estWriteoffCents === f34e.plan.total && f34e.plan.total > 0
+      && f34e.display.estNetCents === -f34e.plan.total - s34e.FixedCost - f34e.display.laborCents,
+    `预计能出 ${f34e.display.capped} 碗｜COGS ${f34e.display.estCogsCents}｜报损 ${(f34e.display.estWriteoffCents / 100).toFixed(2)} 元 = 这一篮 ${(f34e.plan.total / 100).toFixed(2)} 元`);
+
+}
+
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
 // 而开学周是"全线 ×1.1 + 品类系数偏肉（MB1.3/MT1.2）"；附录 D.5 的 2.5 元/碗 锚点按固定品类占比算，不含这两项。
 function bowlMarginYuan(tier, priceTierId, weatherId, semesterDay) {
