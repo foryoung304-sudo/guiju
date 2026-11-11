@@ -28,6 +28,8 @@ import { introShouldPlay, showIntro } from './intro.js';
 import { windCard } from './wind.js';
 // 结算屏第二段那条播报 + 进出两组的合计（工单 task-ui-polish-20261105 第 7 条）：择句规则与词池都在这一层，引擎不认得它。
 import { broadcastLine, inoutTotals } from './settle-broadcast.js';
+// 事件选择落地后当场那一行（丙8）：只把公开效果翻人话，派生与词表都在这一层，引擎不认得它。
+import { choiceNote, resolvedOpenOps } from './choice-note.js';
 import { mergeSelloutNames } from './sellout.js';
 // 营业屏气泡 / 金色浮字 / 夜晚信封（视觉批 I，工单 task-ui-visual-20261105）：文案与上限都在 feedfx.js 那一层，
 // 它零引擎 import、不写 state、不掷随机、不留计时器（撤掉 = 删这一行 + 下面调用点 + theme.css 那两块）。
@@ -105,6 +107,8 @@ let tastingPick = 0;                 // 第 5 步⑤试吃份数（挂了试吃�
 let scalePick = false;               // 第 5 步⑥显多秤开关（秤在手才出现）
 let ledgerBack = 'morning';
 let clearArmed = false;            // 「清除存档」的游戏内二次确认：第一击只把按钮变成「确认清除？」
+let upgradeArmed = false;          // 丙6 升档二次确认：第一击只弹框，确认才扣款（会话态，不进存档）
+let choiceLines = [];              // 丙8 选择后那一行：会话态，跨日清空，不进 saveFlow / 不给引擎加字段
 let okRef = {};          // 本日每单是否已进入足称带（只在跨进那一刻震一次）
 let blanchBy = {};       // customerId → 夹出时的熟度读数；没这格 = 这单没下手（正文 3.11）
 let blanchRun = {};      // customerId → { t0, raf }：只在活着的那一屏存在，刷新即空（读数已落的走 blanchBy）
@@ -158,7 +162,8 @@ document.addEventListener('visibilitychange', () => {
 });
 const esc = s => String(s).replace(/[&<>"]/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[ch]));
 // 换屏就收回待确认：清除的二次确认只在「我的」这一屏有效，跳走就得重新点一遍
-const go = p => { phase = p; clearArmed = false; localStorage.setItem(PHASE_KEY, p); saveFlow(); render(); };
+// 丙8 那一行只在「这一天」里有意义：进结局屏 / 回开屏就收掉（跨日那一收在 newDay）
+const go = p => { phase = p; clearArmed = false; upgradeArmed = false; if (p === 'end' || p === 'boot') choiceLines = []; localStorage.setItem(PHASE_KEY, p); saveFlow(); render(); };
 // 实测问题 #7：买菜没有人说 1.476 斤，建议篮与缩量预填一律落到 0.1 斤
 const round01 = x => Math.round(x * 10) / 10;
 
@@ -221,7 +226,14 @@ function hud() {
     <span>欠款 <b class="num">${y(state.DebtSupplier)}</b></span>
     <span>可赊 <b class="num">${y(creditAvailable(state))}</b></span>
     <button class="mini ghost" data-nav="ledger">进货单</button>
-  </div>`;
+  </div>` + choiceNoteBar();
+}
+
+// 丙8：选择落地后当场那一行。挂在顶栏之后 ⇒ 玩家点完选项落回哪一屏（称重 / 夜屏 / 市场）都在第一眼看得见。
+// 只念 choice-note.js 翻好的公开效果，隐藏效果那一层根本不进这个函数。
+function choiceNoteBar() {
+  if (!choiceLines.length) return '';
+  return `<div class="panel good"><p class="muted">${choiceLines.map(esc).join(' · ')}</p></div>`;
 }
 
 // 预检反馈 F11（店主裁定 signoff-f11-tabbar-20261102）：五标签只挂 hub 屏，流程屏（备菜/定版/称重/结算/事件/结局）全屏无标签。
@@ -512,7 +524,9 @@ function act(host) {
     case 'next': return newDay();
     case 'sellout': return retireShop();
     case 'quit': return quitShop();
-    case 'upgrade': return buyNextTier();
+    case 'upgrade': upgradeArmed = true; return render();
+    case 'upgradeYes': upgradeArmed = false; return buyNextTier();
+    case 'upgradeNo': upgradeArmed = false; return render();
     case 'restart': clearSave(); return startNew((Date.now() % 100000) + 1);
     // 「我的」里的清除：不可逆，落回开屏前先问一句——问的是屏上的按钮，不是系统弹窗
     // （原生 confirm() 在托管页的 iframe 里会被吞掉：弹窗不开、直接返回 false，点了等于没点）
@@ -562,6 +576,7 @@ function newDay() {
   rng = makeRng(state);
   orders = []; gramsBy = {}; pendingEvent = null; draft = {};   // 昨天的亲手单、待选事件、组篮草稿不带进今天
   envState = {};                                                // 昨晚的信封重新封口（视觉批 I 第三件：这是会话态，不是账）
+  choiceLines = [];                                             // 丙8：昨天那一选的后果不带进今天
   blanchBy = {};                                                                // 昨天的熟度读数同样不带进今天
   beginDay(state);                          // 第 1 步：晨间结转
   syncProdPicks();
@@ -577,13 +592,21 @@ function newDay() {
 function defaultDraft() {
   // 附录 D.1 的默认值只是界面初值：照昨天卖掉的斤数起，卖断货的那天得自己往上加
   // 实测问题 #7：初值按 0.1 斤出（1.476 斤不像买菜）；汤底按份出整数
+  // 丙7（试玩缺陷整批 2026-11-10）：供应商改选当日该品类在售的最低价那一家（原来恒取档 1＝最贵的正经货，
+  // 新手照买必亏）。数量逻辑一字不动；「在售」与货架同一道闸 skuAvailable，价按当日 effectivePrice 比，
+  // 同价取表里靠前那家（档高的在前）。不取「上日复刻」：那会把旧默认的坑复制下去。
+  const cheapest = c => {
+    const onShelf = SKUS_BY_CAT[c].filter(s => skuAvailable(state, s, rng));
+    const pool = onShelf.length ? onShelf : SKUS_BY_CAT[c];
+    return pool.reduce((a, b) => effectivePrice(state, a) <= effectivePrice(state, b) ? a : b).sku;
+  };
   const out = {};
   for (const c of SOLID_CATS) {
     // spec-event-pool-6 §二.3：今天市场层不收的那一档，草稿也不给它预填（货架上根本没有这一行的按钮）
     if (c === state.today.delist) continue;
-    out[c + 1] = round01(state.YesterdaySoldJinByCat?.[c] || 0);
+    out[cheapest(c)] = round01(state.YesterdaySoldJinByCat?.[c] || 0);
   }
-  out.SP1 = Math.round(state.YesterdaySoup || 0);
+  out[cheapest('SP')] = Math.round(state.YesterdaySoup || 0);
   return out;
 }
 
@@ -1051,7 +1074,9 @@ function resolvePending(choice) {
   pendingEvent = null;
   stopVoice();   // 卡片一落定，这一段对白就收：扩写演完落回原选择点，出场句不许越过玩家的点选往后播
   if (ev.timing === 'morning') {
+    const destroyCents = ticketlessCostCents(state);   // 丙8：销毁一落地库存就没了，成本要在入账之前取
     const picked = resolveChoice(state, ev, choice);   // 第 6 步当场入账
+    choiceLines = choiceNote(state, resolvedOpenOps(ev, picked), ev.timing, destroyCents);
     // 结果句的晨间那一支（全覆盖单 §6.3：在 resolveChoice 之后、saveGame 之前取一次 today 的两处原文落点认句）。
     // 补遗 §一：同一拍再认「玩家实际点下的那个选项」——没原文可认的那一类（★18 句）就以 action id 为键，两条键法共用这一处调用。
     // 认不出＝当没这句；出声与否都不改 go(phase) 的时序。
@@ -1064,6 +1089,7 @@ function resolvePending(choice) {
 
 // ev 显式传入：晚间事件要等玩家点选才落地，抽到的那张不能在中途被清空
 function finishNight(choice, ev = pendingEvent) {
+  const destroyCents = ticketlessCostCents(state);   // 丙8：销毁在 nightClose 里落地，成本得先取（同上）
   const res = nightClose(state, rng, ev || null, choice ?? null);
   pendingEvent = null;
   saveGame(state);
@@ -1072,6 +1098,8 @@ function finishNight(choice, ev = pendingEvent) {
   // 键改从 choice.event.id 取——两条检查事件的 judgment.id 本来就是同一个 id，行为一字未变，日常事件因此才认得到句。
   // 补遗 §一：第三个参数是玩家点下的选项 id，专吃「选完没有结果文字」那一类（★18 句），同事件选别的选项不出声。
   const evening = res && res.evening ? res.evening.choice : null;
+  // 丙8：今晚没有事件就把晨间那一行收掉（它的效果今天已经走完了），有事件则换成今晚这一选的公开效果
+  choiceLines = evening ? choiceNote(state, resolvedOpenOps(evening.event, evening), evening.event.timing, destroyCents) : [];
   if (evening) playVoice(voiceResultLines(evening.event.id, resultTexts(state), evening.action ? evening.action.id : null));
   return go('night');
 }
@@ -1112,6 +1140,24 @@ function buyNextTier() {
   return go('shop');
 }
 
+// 丙6（试玩缺陷整批 2026-11-10）：升档是一次性不可逆支出，第一击只弹这张框，确认才走 buyNextTier。
+// 不用原生 confirm()：托管页 iframe 里它会被吞掉（同「清除存档」那条注），问的是屏上的框。
+// 三个数全部从 TIERS_STALL 现读，不另立口径；固定支出那一行是店主实测锚（三轮车 75/天 → 二手餐车 135/天）。
+function upgradeConfirmCard() {
+  const cur = TIERS_STALL[state.Tier - 1];
+  const next = TIERS_STALL[state.Tier];
+  if (!next || !cur.upgradePrice) return '';
+  return `<div class="overlay"><div class="event"><div class="body">
+    <span class="who">小店置办 · ${state.Tier === 5 ? '盘下对面铺子' : '升档'}</span>
+    <p class="text">换成<b>${esc(next.name)}</b>，一次性付 <b class="num">${y(cur.upgradePrice)}</b> 元。<br>
+      固定支出 ${y(cur.fixedCost)} 元/天 → <b>${y(next.fixedCost)} 元/天</b>。<br>
+      换档后头三天客流重新起坡，一天比一天有人来。</p>
+    <div class="acts">
+      <button class="go" data-act="upgradeYes">就换，付 ${y(cur.upgradePrice)} 元</button>
+      <button class="ghost" data-act="upgradeNo">再想想</button>
+    </div></div></div></div>`;
+}
+
 // 修复单 P2-1（凡扣款必有行）：固定支出与人工在收摊那一屏逐行列着，账本这张「逐日账」只有净额一列，
 // 拿它回头加一遍就差这两笔（第 1 天也在这张表上核过账）。数一格没新增——把当日扣的两笔与试吃净额写在同一格里。
 const deductCell = r => {
@@ -1135,9 +1181,10 @@ function envList(comments) {
     // 小修单 task-ui-fix-20261106 第一项：展开态里标题与正文归一后全等 ⇒ 标题行不再渲染，只留正文那一份。
     // 判重只发生在 open 这一格——封口与压平两态正文是藏着的，屏上只有标题那一行，本来就只有一份。
     // 正文长于标题的长留言两者不相等，标题 + 正文原样照旧（判据是 feedfx 的 isSameSay，这里不另立口径）。
-    return `<button class="env${open ? ' open' : st === 'read' ? ' read' : ''}" data-act="env" data-n="${i}">
+    return `<button class="env${open ? ' open' : st === 'read' ? ' read' : ''}" data-act="env" data-n="${i}" aria-expanded="${open}">
       ${open && isSameSay(say, c.text) ? '' : `<span class="envt">${esc(say)}</span>`}
-      <span class="envbody comment${c.kind === 'hot' ? ' hot' : ''}"${open ? '' : ' hidden'}>${esc(c.text)}</span></button>`;
+      <span class="envbody comment${c.kind === 'hot' ? ' hot' : ''}"${open ? '' : ' hidden'}>${esc(c.text)}</span>
+      ${open ? '<span class="envflag">已拆封 · 再点一下收好</span>' : ''}</button>`;
   };
   const idx = envOrder(comments.map((_, i) => envState[key(i)]));
   return idx.map(i => row(comments[i], i)).join('');
@@ -1207,7 +1254,7 @@ const VIEWS = {
   // 任何 hub 时点都「看得见」，但买与升的操作时点一个字没动——采购窗口之外一律置灰并给一句世界内的理由。
   // 批 B：六档逐行上图之后，页首那张借来的营业图撤了（施工单：撤留自决，但不许再挂营业图充数）。
   shop() {
-    return hud() + `${facilityRow()}`;
+    return hud() + `${facilityRow()}` + (upgradeArmed ? upgradeConfirmCard() : '');
   },
 
   // 「我的」只做存档状态只读 + 重开 + 清除 + 版本号。旧红线：Rep/Risk/C/H/L/Q 的数字一律不进这一屏，
@@ -1310,6 +1357,8 @@ const VIEWS = {
   },
 
   weigh() {
+    // 丙9③（试玩缺陷整批 2026-11-10）：公示文案不再说「一碗标准 500 克」——GRAMS_PER_JIN 是克↔斤的换算枚，
+    // 不是客人的要量；真实每碗要量按 CUSTOMERS 的 order/bowls 算是 225–450 克。引擎那枚 ÷500 一字未动。
     // 小修单 task-ui-fix-20261106 第四项：晨间这一弹原先整屏换掉出餐站，底页（场景图 + 亲手单）一个节点都没建，
     // .55 墨蓝遮罩直接压到奶油 body 上（theme.css:20/470），blend 出来就是店主截图里「顶栏之下大半屏平灰空面」。
     // 晚间那一支在预检反馈 F6（0366bd6）已改成「先把账排在屏上、弹层作覆盖层追加」，所以对照样本只晨间灰空。这里同一味：
@@ -1319,7 +1368,7 @@ const VIEWS = {
       <div class="panel accent">
       <div class="row"><h2>出餐站 · 亲手单 ${orders.length} 单</h2>
         <span class="whoimg"><img class="face" src="./img/chenshi.webp" alt="陈实" /><b>陈实 · 掌秤</b></span></div>
-      <p class="muted">先亮单子，再过称。轻点一下添一小撮，一下几克写在单子右边；想多要点就按住不松，松手定格；抓多了捏出一点。这一屏只用克，一碗标准 ${GRAMS_PER_JIN} 克，秤上是多少就收多少。${state.blanchOn ? '过完称，碗下烫锅。' : ''}</p>
+      <p class="muted">先亮单子，再过称。轻点一下添一小撮，一下几克写在单子右边；想多要点就按住不松，松手定格；抓多了捏出一点。这一屏只用克，一碗没有定数——客人胃口不一样，少的二百多克、多的四百多克，单子上要多少就称多少，秤上是多少就收多少。${state.blanchOn ? '过完称，碗下烫锅。' : ''}</p>
       <div class="stack" style="margin-top:10px">${orders.map(orderCard).join('')}</div>
       <button class="go" style="margin-top:14px" data-act="cook">下锅 · 开卖</button>
     </div>${overlay}`;
@@ -1924,6 +1973,10 @@ function streetPanel() {
 
 function eventOverlay() {
   const ev = pendingEvent;
+  // 丙9④：同一条事件第二次及以后抽到，换一句变体文案（施工单给的两种去重手法里取「变体文案」这一支）。
+  // 只换呈现层这一句：weight / cooldown / condition / 两颗按钮的 open 与 hidden 一格没动，抽取与数值轨零扰动。
+  // EventHistory 是上一回落地时写进去的（engine/events.js:184），所以此刻读到本 id 就是「重复触发」。
+  const say = ev.textRepeat && state.EventHistory.includes(ev.id) ? ev.textRepeat : ev.text;
   const acts = (ev.actions || []).length
     ? (ev.actions || []).map(a => {
       // 正文 :169「分支可用性写死」+ ui-spec UI-11：前置未满足 / 现金不足只置灰，按钮不藏起来
@@ -1952,7 +2005,7 @@ function eventOverlay() {
     ${dual ? `<div class="dual"><img class="art" src="${OWN_STALL_ART}" alt="" /><img class="art" src="${eventArt(ev.id)}" alt="" /></div>`
       : `<img class="art" src="${eventArt(ev.id)}" alt="" />`}
     <div class="body"><span class="who">${esc(ev.kind)} · ${ev.timing === 'evening' ? '打烊后' : '清早'}</span>
-      <p class="text">${fx === 'fx-person' ? typedHtml(ev.text) : esc(ev.text)}</p>
+      <p class="text">${fx === 'fx-person' ? typedHtml(say) : esc(say)}</p>
       ${deal ? `<p class="dealprice"><span class="muted">盘下对面铺子</span><b class="num">${y(BUYOUT_PRICE_CENTS)} 元</b></p>` : ''}
       ${risk ? `<p class="muted">按成本记，无票的货是 ${y(risk)}——销毁不动现金，动的是柜里的货。</p>` : ''}
       <div class="acts">${acts}</div></div>

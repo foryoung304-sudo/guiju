@@ -81,11 +81,17 @@ export const envKey = (day, i) => `${day}:${i}`;
 // 标题取法（单上要求回报）：现版留言没有标题字段，所以取正文首句 = 第一个句末标点之前的那一段；
 // 首句短到不成话（「还行吧。」那一类）就整条上标题，别截出一截没头没尾的字。超长才按 TITLE_MAX 收，
 // 收的只是显示用的标题行——留言本体一个字没动，展开读的还是原文。
+// 丙9②（试玩缺陷整批 2026-11-10）：超长那一刀原先硬切在第 20 字，老李那句就切成了
+// 「老李把新菜往你这边又推了推：『少拿点好，」——引号没闭合、话没说完。现在超长就整句不上标题、
+// 改上第一个分句（逗号 / 顿号 / 冒号之前那一段），天然停在引号外；分句不足 6 字或本身仍超长才退回原来那一刀。
+// 数据与配音键一个字没动，这一层照旧零计数器（§30 那枚「零 ++ / 零 +=」的针原样过）。
 const TITLE_MAX = 20;
 export function envelopeTitle(text) {
   const cut = String(text).split(/[。！？；…]/)[0].trim();
   const one = cut.length >= 6 ? cut : String(text).trim();
-  return one.length > TITLE_MAX ? one.slice(0, TITLE_MAX) : one;
+  if (one.length <= TITLE_MAX) return one;
+  const clause = one.split(/[，、：]/)[0];
+  return clause.length >= 6 && clause.length <= TITLE_MAX ? clause : one.slice(0, TITLE_MAX);
 }
 
 // 「标题这一行和正文是不是同一句」的判据（小修单 task-ui-fix-20261106 第一项）：

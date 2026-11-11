@@ -94,6 +94,12 @@ export function drawEvent(state, timing, rng) {
   return picked ? picked.ev : null;
 }
 
+// E.5 定金换算：明账入账与「选择后那一行」（ui/choice-note.js 丙8）读同一支，不许两处各写一份式子。
+// 纯换算、只读公开量（碗数 / 均碗斤数 / 当日每斤价 / 定金比例），抽出来这一笔数值一字未动。
+export function depositCents(state, dep) {
+  return toCents(dep.bowls * state.AvgJinPerBowl * state.PricePerJin * dep.rate);
+}
+
 // 声明式 op 入账。现金一律即时扣/收并记入当日事件账对应时点（晨间 → 第 6 步、晚间 → 第 11 步），
 // 第 11 步只按事件账净额累加 NP，不重复改现金。
 export function applyOps(state, ops, slot) {
@@ -113,7 +119,7 @@ export function applyOps(state, ops, slot) {
     }
     if (op.deposit !== undefined) {
       // E.5：定金 = round(15 × 均碗斤数 × 当日每斤价 × 20%)
-      const cents = toCents(op.deposit.bowls * state.AvgJinPerBowl * state.PricePerJin * op.deposit.rate);
+      const cents = depositCents(state, op.deposit);
       state.Cash += cents;
       state.today[slot] += cents;
     }

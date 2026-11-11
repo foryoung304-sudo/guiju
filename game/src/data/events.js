@@ -595,6 +595,11 @@ export const EVENTS = [
     condition: 'YesterdaySoldOut',
     cooldown: 3,
     text: '昨天排到跟前没吃上的那个学生，今儿带着俩同学，提前十分钟就站在摊前等你开火。',
+    // 丙9④（试玩缺陷整批 2026-11-10）：D3 与 D6 清早逐字重复。施工单给的两支去重手法里取「重复触发给变体文案」，
+    // 不取加冷却／只触发一次：m3 参考带跑 eventScope:'full'，这条 M2 行在带里，动 cooldown / condition / weight
+    // 就是动抽取轨 ⇒ 已签发带会漂。变体只活在呈现层（main.js 的 eventOverlay 按 EventHistory 认重复），
+    // 两颗按钮的 open 与 hidden、weight 20、cooldown 3、condition 一格没动。
+    textRepeat: '还是那个学生，昨天又排到跟前没吃上。今儿他来得比摊子还早，站在老位置等你开火，身后跟着的人比上回多。',
     actions: [
       { id: 'serve_first', label: '先给他们下', open: [{ eventDemandMult: 1.15 }], hidden: [{ Rep: 1 }] },
       { id: 'queue', label: '排队都一样', open: [{ forcedComment: '他耸耸肩排到队尾去了，倒也没走。' }], hidden: [] },

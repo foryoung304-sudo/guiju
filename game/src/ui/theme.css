@@ -459,7 +459,11 @@ td.r, th.r { text-align: right; }
 }
 .env.read { border-left-color: var(--ink-2); box-shadow: none; opacity: .62; }
 /* 拆封那一刻由一层阴影升成 .panel 那套二层硬阴影（已签的「抬起来」语言）：封口 → 抬起 → 压平，三态分得开 */
-.env.open { box-shadow: 4px 4px 0 var(--ink-2), 8px 8px 0 var(--cream-2); }
+/* 丙9①（试玩缺陷整批 2026-11-10）：51 句留言里 48 句是单句，§31 去重后展开态与封口态文字逐字相同，
+   首击只剩一层阴影差 ⇒ 真机读作「点了没反应」。拆封态再加一眼可辨的两件：左边条换已签的青、正文下多一行状态词。
+   封口与压平两态一个像素没动，色板零新值（走 var(--teal)），留言本体与去重口径照旧。 */
+.env.open { border-left-color: var(--teal); box-shadow: 4px 4px 0 var(--ink-2), 8px 8px 0 var(--cream-2); }
+.envflag { display: block; margin-top: 6px; font-size: 11px; letter-spacing: .04em; color: var(--teal); }
 .env:active { transform: translate(2px, 2px); }
 .envt { display: block; font-weight: 700; letter-spacing: .04em; line-height: 1.35; }
 .envbody { display: block; margin-top: 6px; }

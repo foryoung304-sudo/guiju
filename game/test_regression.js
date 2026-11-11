@@ -13,7 +13,7 @@ import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, PACKING_SPILL, CONFIG,
   COMPETITION, INSPECTION, FACILITIES, ENDING, BLANCH, TIERS_STALL, SUBSTREAMS,
   BUYOUT_PRICE_CENTS, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN, QUIT_VARIANT_NP_CENTS, QUIT_VARIANT_REP,
   QUALITY_BY_TIER, CHEAP_UNLOCK_CUE, CHEAP_TIER_WARNING } from './src/data/constants.js';
-import { SKU_BY_ID } from './src/data/skus.js';
+import { SKU_BY_ID, SKUS_BY_CAT } from './src/data/skus.js';
 import { scenarioOf, WEATHER } from './src/data/scenario.js';
 import { evalCondition, readVar } from './src/engine/dsl.js';
 import { EVENTS, EVENT_BY_ID, DRAW_GATE } from './src/data/events.js';
@@ -23,10 +23,11 @@ import { beginDay, morningPreEvent, submitBasket, previewBasket, commitPrep, loc
 import { additiveOf, additiveUnlocked, capacityJin, computeMBase, prepBudget, prepGridUsed, qTaste, washSkipped,
   xiaodouPresent, laborCapMul, laborCostCents, tastingConvert } from './src/engine/production.js';
 import { drawHandOrders, handOrderCount, stockGrams, gramsCeilingFor } from './src/engine/weigh.js';
-import { applyHidden, resolveChoice, weightOf, drawEvent, isActionAvailable, isActionAffordable } from './src/engine/events.js';
+import { applyHidden, resolveChoice, weightOf, drawEvent, isActionAvailable, isActionAffordable, depositCents } from './src/engine/events.js';
+import { choiceNote, resolvedOpenOps } from './src/ui/choice-note.js';
 import { inspectionScore, ticketlessCostCents, destroyTicketless, judgeBigInspection, judgeRoutineInspection } from './src/engine/inspection.js';
 import { blanchValueAt, judgeBlanch, signalTier } from './src/engine/blanch.js';
-import { REGULAR_LINES, regularLine, REGULAR_SLOTS } from './src/data/customers.js';
+import { REGULAR_LINES, regularLine, REGULAR_SLOTS, CUSTOMERS } from './src/data/customers.js';
 import { buildComments } from './src/engine/comments.js';
 import { COMMENT_POOLS } from './src/data/comments.js';
 import { WIND_ROWS } from './src/data/wind.js';
@@ -4310,10 +4311,14 @@ for (const seed of [SEED, 7979, 36832]) {
       && n30(/weighTick/g, mainC30) === 2,
     `weighTick 声明 1｜main 引用 ${n30(/weighTick/g, mainC30)}（import + 调用）`);
 
-  // 17) 降弹窗范围照单：常规反馈走气泡/浮字，屏上没有新增模态；特殊事件弹层与常客拍点的呈现一个字没动。
-  check('§30 第一件·降弹窗只降「常规反馈」这一档：main.js 全文 class="overlay 仍只 1 处（eventOverlay 那一层，单上写「特殊事件与常客拍点保持现版呈现，不许动」），本批没造第二层模态、没往 document 里插 div；常规反馈的出口是气泡 3 处挂载 + 浮字 2 处挂载',
-    n30(/class="overlay/g, mainRaw30) === 1
+  // 17) 降弹窗范围照单：常规反馈走气泡/浮字；特殊事件弹层与常客拍点的呈现一个字没动。
+  // 前值 1 → 后值 2（施工单 guiju-playtest-fixbatch-20261110 丙6，店主令）：升档是一次性不可逆支出，
+  // 单上明写「弹确认框…确认才扣款」，故新增 upgradeConfirmCard 这一层。原针「本批没造第二层模态」是视觉批 I 的
+  // 批次内断言，被这条更新的店主令取代；其余三项（气泡 3 处、不往 document 插 div、eventOverlay 在场）一字未动。
+  check('§30 第一件·降弹窗只降「常规反馈」这一档：main.js 全文 class="overlay 共 2 处（eventOverlay 那一层照旧「不许动」＋丙6 升档二次确认 upgradeConfirmCard），没往 document 里插 div；常规反馈的出口仍是气泡 3 处挂载 + 浮字 2 处挂载',
+    n30(/class="overlay/g, mainRaw30) === 2
       && /function eventOverlay\(\)/.test(mainC30)
+      && /function upgradeConfirmCard\(\)/.test(mainC30)
       && n30(/showBubbles\(/g, mainC30) === 3
       && !/createElement\('div'\)|insertAdjacentHTML/.test(mainC30 + feedC30),
     `overlay ${n30(/class="overlay/g, mainRaw30)}｜气泡挂载 ${n30(/showBubbles\(/g, mainC30)}｜浮字挂载 ${n30(/showFloats\(/g, mainC30)}`);
@@ -4356,7 +4361,7 @@ for (const seed of [SEED, 7979, 36832]) {
   const n31 = (re, s) => (s.match(re) || []).length;
   const pool31 = Object.values(COMMENT_POOLS).flat();
   const SHORT31 = '还行吧。';                                    // 短：首句不成话 ⇒ 批I 已签取法把整条放上标题 ⇒ 标题逐字 = 正文
-  const LONG31 = '有人把你家价目牌拍下来发群里了，配文就俩字：良心。';   // 长：标题只是正文前 20 字 ⇒ 两者不相等 ⇒ 两处都留
+  const LONG31 = '有人把你家价目牌拍下来发群里了，配文就俩字：良心。';   // 长：标题只是正文的一个短前缀 ⇒ 两者不相等 ⇒ 两处都留
   const dup31 = pool31.filter(s => isSameSay(envelopeTitle(s), s));
   const kept31 = pool31.filter(s => !isSameSay(envelopeTitle(s), s));
   const bad31 = [];
@@ -4374,7 +4379,7 @@ for (const seed of [SEED, 7979, 36832]) {
   }
 
   // 1) 判据本身（归一 = 去首尾空白与尾标点，两边都归一）：标点集合与 envelopeTitle 切首句同一枚，两处口径不许分家。
-  check('§31 第一项·判重口径逐字钉住：归一只去首尾空白与尾部句末标点（与标题切分同一枚集合），全等才算重复；台词池 51 句零个 HTML 待转义字符（恒等 esc 与屏上等价），按这条口径 48 句单句留言判为重复、3 句判不重复——那 3 句的标题都是正文的严格短前缀（两句式那一条切在第一句句末、超长那两条被 TITLE_MAX 收到 20 字），去重不许把话吃掉',
+  check('§31 第一项·判重口径逐字钉住：归一只去首尾空白与尾部句末标点（与标题切分同一枚集合），全等才算重复；台词池 51 句零个 HTML 待转义字符（恒等 esc 与屏上等价），按这条口径 48 句单句留言判为重复、3 句判不重复——那 3 句的标题都是正文的严格短前缀（两句式那一条切在第一句句末、超长那两条改上第一个分句〔丙9② 订正：原先硬切第 20 字；本枚断言式逐字未动，括号里的长度读数随之变，前值 8/15 20/23 20/25〕），去重不许把话吃掉',
     feedRaw31.includes('const TAIL_PUNCT = /[。！？；…,.!?]+$/;')
       && /export const isSameSay = \(title, body\) => String\(title\)\.trim\(\)\.replace\(TAIL_PUNCT, ''\)\.trim\(\)/.test(feedRaw31)
       && /=== String\(body\)\.trim\(\)\.replace\(TAIL_PUNCT, ''\)\.trim\(\);/.test(feedRaw31)
@@ -4385,7 +4390,7 @@ for (const seed of [SEED, 7979, 36832]) {
     `池 51｜重复 ${dup31.length}｜不重复 ${kept31.length}[${kept31.map(s => envelopeTitle(s).length + '/' + s.length).join(' ')}]`);
 
   // 2) 单上加针原话（一短一长，展开态）：短的那句屏上只剩一份，长的那句标题与正文都在。渲染器就是文件里那一段模板。
-  check('§31 第一项·加针原样办：短留言「还行吧。」展开态里标题 span 零枚、那句话只出现一次（去重前是两次）；长留言「有人把你家价目牌……」展开态标题一枚 + 正文一枚，标题在（它同时是正文的前 20 字，所以数到两次），正文一字不多。台词池 51 句 × 展开 / 封口 / 压平三态逐句过这一条，一句不漏',
+  check('§31 第一项·加针原样办：短留言「还行吧。」展开态里标题 span 零枚、那句话只出现一次（去重前是两次）；长留言「有人把你家价目牌……」展开态标题一枚 + 正文一枚，标题在（它同时是正文的一个短前缀，所以数到两次〔丙9② 订正：前值写「前 20 字」，现在收在句读上；断言式逐字未动〕），正文一字不多。台词池 51 句 × 展开 / 封口 / 压平三态逐句过这一条，一句不漏',
     !!row31 && seen31(draw31(SHORT31, 'open'), 'class="envt"') === 0
       && seen31(draw31(SHORT31, 'open'), envelopeTitle(SHORT31)) === 1
       && seen31(draw31(LONG31, 'open'), 'class="envt"') === 1
@@ -4432,13 +4437,19 @@ for (const seed of [SEED, 7979, 36832]) {
     `门禁 ${n32(/const overlay = pendingEvent \? eventOverlay\(\) : '';/g, mainRaw32)} 处｜段尾 ${/\$\{overlay\}`;/.test(weigh32)}`);
 
   // 2) 遮罩一格没改：不透明度与层级仍是各弹层现行那一枚（单上「属遮罩不透明就按其余弹层对齐」这一档不适用，也就没动它），
-  //    事件弹层仍是全文唯一一层 overlay——没有为了让底页露出来新造半透明壳子。
+  //    带 fx 类的事件弹层仍是全文唯一一层——没有为了让底页露出来新造半透明壳子。
+  //    针改动（施工单 guiju-playtest-fixbatch-20261110 丙6）：前值「class="overlay 全文 1 处」→ 后值「带 fx 的 1 处、全文 2 处」。
+  //    动因：丙6 要求升档点击先弹确认框，那一层沿用同一条 .overlay/.event 皮（逐字 <div class="overlay">，没换灰底颜色）；
+  //    §32 本批的意图是「不许为露底页另造壳子」，不是「全文只许有一层模态」——按意图收口，两处都钉住。
   check('§32 第四项·遮罩与层级按现行口径原样：.overlay 那一行逐字仍是 fixed + inset:0 + rgba(27, 42, 74, .55) + z-index:20，'
-      + 'main.js 里 class="overlay 仍只 eventOverlay 那一处（没新造第二层模态、没把灰底换个颜色糊过去）',
+      + 'main.js 里带 fx 的 class="overlay 仍只 eventOverlay 那一处（没为露底页新造第二层壳、没把灰底换个颜色糊过去）；'
+      + '全文 class="overlay 两处＝事件弹层 + 丙6 升档二次确认，后者逐字 <div class="overlay"><div class="event"> 沿用同一枚皮',
     cssRaw32.includes('  position: fixed; inset: 0; background: rgba(27, 42, 74, .55);')
       && /z-index: 20/.test(cssRaw32.slice(cssRaw32.indexOf('.overlay {'), cssRaw32.indexOf('.event {')))
-      && n32(/class="overlay /g, mainRaw32) === 1,
-    `overlay 层 ${n32(/class="overlay /g, mainRaw32)} 处`);
+      && n32(/class="overlay /g, mainRaw32) === 1
+      && n32(/class="overlay/g, mainRaw32) === 2
+      && n32(/<div class="overlay"><div class="event">/g, mainRaw32) === 1,
+    `带 fx 层 ${n32(/class="overlay /g, mainRaw32)} 处｜全文 ${n32(/class="overlay/g, mainRaw32)} 处`);
 
   // 3) 行为级：把 weigh() 模板体交出来跑（桩只替四个外部件：hud / sceneImg / orderCard / eventOverlay，形状照 main.js:65 与 1846）。
   const body32 = weigh32.slice(weigh32.indexOf('{') + 1);   // weigh32 已切在段尾分号，末尾那个 } 不在段内，不能再按 lastIndexOf 收
@@ -4640,6 +4651,13 @@ for (const seed of [SEED, 7979, 36832]) {
   const mainRaw34 = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
   const ledgerRaw34 = readFileSync(join(HERE, 'src/engine/ledger.js'), 'utf8');
   const opsRaw34 = readFileSync(join(HERE, 'src/engine/ops.js'), 'utf8');
+  const cssRaw34 = readFileSync(join(HERE, 'src/ui/theme.css'), 'utf8');
+  const feedRaw34 = readFileSync(join(HERE, 'src/ui/feedfx.js'), 'utf8');
+  const commentsRaw34 = readFileSync(join(HERE, 'src/data/comments.js'), 'utf8');
+  const eventsRaw34 = readFileSync(join(HERE, 'src/data/events.js'), 'utf8');
+  const voiceRaw34 = readFileSync(join(HERE, 'src/data/voice.js'), 'utf8');
+  const n34 = (re, s) => (s.match(re) || []).length;
+  const cut34 = (s, a, b) => { const i = s.indexOf(a); return i < 0 ? '' : s.slice(i, s.indexOf(b, i) < 0 ? s.length : s.indexOf(b, i)); };
 
   // ── 乙5-① 预定碗数计入试算的当日需求数（单上逐字要求），且顶层 estBowls 一格不动 ──
   const mk34 = () => { const s = newGame(SEED); beginDay(s); return s; };
@@ -4700,6 +4718,167 @@ for (const seed of [SEED, 7979, 36832]) {
       && f34e.display.estNetCents === -f34e.plan.total - s34e.FixedCost - f34e.display.laborCents,
     `预计能出 ${f34e.display.capped} 碗｜COGS ${f34e.display.estCogsCents}｜报损 ${(f34e.display.estWriteoffCents / 100).toFixed(2)} 元 = 这一篮 ${(f34e.plan.total / 100).toFixed(2)} 元`);
 
+  // ── 丙6 升档二次确认：未确认不扣款、取消后状态逐字段不变 ──
+  const cardSrc34 = cut34(mainRaw34, 'function upgradeConfirmCard() {', '\n}\n');
+  // cut34 已经按「顶格 }」切掉了函数收尾，这里只剥签名那一枚左花括号；
+  // 不能再按 lastIndexOf('}') 削尾——模板串里的 ${…} 与 for 块的右花括号都在收尾之前，削了就把函数体截断
+  const cardBody34 = cardSrc34.slice(cardSrc34.indexOf('{') + 1);
+  let cardFn34 = null, cardErr34 = '';
+  try {
+    cardFn34 = new Function('TIERS_STALL', 'state', 'y', 'esc', 'BUYOUT_PRICE_CENTS', cardBody34);
+  } catch (e) { cardErr34 = String((e && e.message) || e); }
+  const y34 = c => (c / 100).toFixed(2);
+  const card34 = tier => cardFn34 ? cardFn34(TIERS_STALL, { Tier: tier }, y34, s => String(s), BUYOUT_PRICE_CENTS) : '';
+  const c1to2 = card34(1);
+  check('§34 丙6·确认框三个数逐档现读 TIERS_STALL：三轮车 → 二手餐车那一屏同时写明目标档位名、一次性升级价 800.00 元、'
+      + '固定支出 75.00 元/天 → 135.00 元/天（店主实测锚逐字命中），两颗按钮分别是 upgradeYes / upgradeNo；'
+      + '第六档（无下一档）渲染空串，不留一颗按不动的确认框',
+    cardFn34 !== null && c1to2.includes('二手餐车') && c1to2.includes('800.00')
+      && c1to2.includes('75.00 元/天 → <b>135.00 元/天</b>')
+      && c1to2.includes('data-act="upgradeYes"') && c1to2.includes('data-act="upgradeNo"')
+      && card34(6) === '',
+    `渲染器 ${cardErr34 || 'OK'}｜固定支出行 ${c1to2.includes('75.00 元/天 → <b>135.00 元/天</b>')}`);
+
+  check('§34 丙6·未确认不扣款、取消无任何变化：dispatcher 里 case upgrade 只置 upgradeArmed 再 render（不叫 buyNextTier / upgradeStall），'
+      + 'case upgradeNo 只撤 armed 再 render，case upgradeYes 才走 buyNextTier；upgradeStall 在 main.js 里只被 buyNextTier 那一处调用，'
+      + 'go() 换屏即撤 armed（确认框不会跟着玩家跑到别的屏上再扣一次钱）',
+    /case 'upgrade': upgradeArmed = true; return render\(\);/.test(mainRaw34)
+      && /case 'upgradeNo': upgradeArmed = false; return render\(\);/.test(mainRaw34)
+      && /case 'upgradeYes': upgradeArmed = false; return buyNextTier\(\);/.test(mainRaw34)
+      && n34(/upgradeStall\(/g, mainRaw34) === 1
+      && /const go = p => \{ phase = p; clearArmed = false; upgradeArmed = false;/.test(mainRaw34),
+    `upgradeStall 调用点 ${n34(/upgradeStall\(/g, mainRaw34)} 处（只在 buyNextTier 里）`);
+
+  // ── 丙7 默认采购篮＝当日最低价组合（数量逻辑不动） ──
+  const ddSrc34 = cut34(mainRaw34, 'function defaultDraft() {', '\n}\n');
+  const ddBody34 = ddSrc34.slice(ddSrc34.indexOf('{') + 1);
+  let ddFn34 = null, ddErr34 = '';
+  try {
+    ddFn34 = new Function('SKUS_BY_CAT', 'skuAvailable', 'state', 'rng', 'effectivePrice', 'SOLID_CATS', 'round01', ddBody34);
+  } catch (e) { ddErr34 = String((e && e.message) || e); }
+  const s34f = mk34();
+  s34f.YesterdaySoldJinByCat = Object.fromEntries(SOLID_CATS.map(c => [c, 3.25]));
+  s34f.YesterdaySoup = 7;
+  const rng34 = makeRng(s34f);
+  const round0134 = x => Math.round(x * 10) / 10;
+  const draft34 = ddFn34 ? ddFn34(SKUS_BY_CAT, skuAvailable, s34f, rng34, effectivePrice, SOLID_CATS, round0134) : {};
+  const cats34 = [...SOLID_CATS, 'SP'];
+  const chosen34 = cats34.map(c => {
+    const entry = Object.entries(draft34).find(([k]) => SKU_BY_ID[k].cat === c);
+    return { c, sku: entry ? entry[0] : null, qty: entry ? entry[1] : null };
+  });
+  const minOf34 = c => {
+    const on = SKUS_BY_CAT[c].filter(s => skuAvailable(s34f, s, rng34));
+    const pool = on.length ? on : SKUS_BY_CAT[c];
+    return pool.reduce((a, b) => effectivePrice(s34f, a) <= effectivePrice(s34f, b) ? a : b);
+  };
+  const allMin34 = chosen34.every(x => x.sku === minOf34(x.c).sku);
+  const draftTotal34 = Object.entries(draft34).reduce((s, [k, q]) => s + toCents(effectivePrice(s34f, SKU_BY_ID[k]) * q), 0);
+  const handTotal34 = chosen34.reduce((s, x) => s + toCents(effectivePrice(s34f, minOf34(x.c)) * x.qty), 0);
+  check('§34 丙7·默认篮＝最低价组合：干净新档逐品类核一遍，六个品类（含汤底）默认选中的供应商都等于当日该品类在售最低价那一家；'
+      + '默认篮总价与手算最低价组合逐分相等；数量逻辑未动（固体照昨日售出落 0.1 斤＝3.3、汤底照昨日耗用落整份＝7）',
+    ddFn34 !== null && allMin34 && draftTotal34 === handTotal34
+      && chosen34.filter(x => x.c !== 'SP').every(x => x.qty === 3.3)
+      && chosen34.find(x => x.c === 'SP').qty === 7,
+    `渲染器 ${ddErr34 || 'OK'}｜逐品类最低价 ${allMin34}｜总价 ${(draftTotal34 / 100).toFixed(2)} = 手算 ${(handTotal34 / 100).toFixed(2)}`);
+
+  // ── 丙8 事件选择即时后果反馈行：两个逐字验收锚 + 隐藏效果零泄漏 ──
+  const noteState34 = mk34();
+  const ev31 = EVENT_BY_ID.evt_d_031, ev43 = EVENT_BY_ID.evt_d_043;
+  const res31 = resolveChoice(noteState34, ev31, 'accept');
+  const line31 = choiceNote(noteState34, resolvedOpenOps(ev31, res31), ev31.timing).join(' · ');
+  const dep31 = depositCents(noteState34, { bowls: 15, rate: 0.2 });
+  const res43 = resolveChoice(noteState34, ev43, 'accept');
+  const line43 = choiceNote(noteState34, resolvedOpenOps(ev43, res43), ev43.timing).join(' · ');
+  check('§34 丙8·两个验收锚逐字命中：evt_d_031 点「接单」那一行同时出现定金到账金额（与引擎 depositCents 同一支算出的数）与「明日预定 15 碗」；'
+      + 'evt_d_043 点「留八碗」同理出现「明日预定 8 碗」；隐藏效果（Rep ±1 那两笔）一个字不进这一行',
+    line31.includes(`定金到账 ${(dep31 / 100).toFixed(2)} 元`) && line31.includes('明日预定 15 碗')
+      && line43.includes('明日预定 8 碗')
+      && !/Rep|Risk|口碑|暗/.test(line31 + line43),
+    `031[${line31}]｜043[${line43}]`);
+
+  const noteRaw34 = readFileSync(join(HERE, 'src/ui/choice-note.js'), 'utf8');
+  const engineEvRaw34 = readFileSync(join(HERE, 'src/engine/events.js'), 'utf8');
+  const noteFnBody34 = cut34(noteRaw34, 'export function choiceNote(', '\n}\n');
+  const saveFlow34 = cut34(mainRaw34, 'function saveFlow() {', '\nfunction restoreFlow');
+  check('§34 丙8·口径不分家＋只读公开层：resolvedOpenOps 与 engine/events.js 的 resolveChoice 同一支读法（action || branch，取 set.open 否则 ev.open）；'
+      + '定金换算从引擎 depositCents 直接取（界面不自己算账），applyOps 那一支也改读同一个函数；'
+      + 'choiceNote 函数体里零 hidden / effect_hidden、零随机、零计时器、零对 state 的赋值；'
+      + '反馈行挂在 hud() 末尾（点完选项落回哪一屏都看得见），跨日与进结局/开屏各清一次，saveFlow 的键名单里没有它',
+    /const set = res\.action \|\| res\.branch;/.test(noteRaw34)
+      && /return \(set \? set\.open : ev\.open\) \|\| \[\];/.test(noteRaw34)
+      && /const set = action \|\| branch;/.test(engineEvRaw34)
+      && /const cents = depositCents\(state, op\.deposit\);/.test(engineEvRaw34)
+      && /import \{ depositCents \} from '\.\.\/engine\/events\.js';/.test(noteRaw34)
+      && !/hidden|effect_hidden|Math\.random|setTimeout|setInterval|state\.\w+\s*=[^=]/.test(noteFnBody34)
+      && mainRaw34.includes('</div>` + choiceNoteBar();')
+      && n34(/choiceLines = \[\];/g, mainRaw34) === 3
+      && !/choiceLines|choiceNote/.test(saveFlow34),
+    `公开层读法与引擎同形｜定金同一支｜choiceLines 空赋值 ${n34(/choiceLines = \[\];/g, mainRaw34)} 处（声明 1＋go 1＋newDay 1）｜saveFlow 零命中`);
+
+  // ── 丙9① 夜间留言按钮：修通（拆封态一眼可辨），不留死按钮 ──
+  const envSrc34 = cut34(mainRaw34, 'function envList(comments) {', '\nfunction toggleEnv');
+  check('§34 丙9①·夜间留言按钮修通不摘：handler 链逐字在场（data-act="env" → toggleEnv → 写 envState → go(night) 重绘），'
+      + '拆封态多出一行状态词「已拆封 · 再点一下收好」与一枚 aria-expanded，左边条换已签的青（var(--teal)，零新色值）；'
+      + '封口与压平两态的模板一个像素没动（状态词只在 open 为真时渲染），51 句里 48 句单句留言首击不再「看起来没反应」',
+    /case 'env': return toggleEnv\(d\.n\);/.test(mainRaw34)
+      && /envState\[k\] = envState\[k\] === 'open' \? 'read' : 'open';\s*\n\s*return go\('night'\);/.test(mainRaw34)
+      && envSrc34.includes('${open ? \'<span class="envflag">已拆封 · 再点一下收好</span>\' : \'\'}')
+      && envSrc34.includes('aria-expanded="${open}"')
+      && /\.env\.open \{ border-left-color: var\(--teal\);/.test(cssRaw34)
+      && /\.envflag \{[^}]*color: var\(--teal\);/.test(cssRaw34)
+      && !/#[0-9a-fA-F]{3,8}/.test(cut34(cssRaw34, '.envflag {', '\n}')),
+    `envflag 挂载 ${n34(/class="envflag"/g, mainRaw34)} 处（只在 open 态）`);
+
+  // ── 丙9② 两处截断文案补全 ──
+  const laoli34 = '老李把新菜往你这边又推了推：『少拿点好，菜这东西，新鲜才值钱。』';
+  const laoliTitle34 = envelopeTitle(laoli34);
+  check('§34 丙9②·两处补全：① portion[1] 由「分量挺实在，秤上的数比我嘴实话。」补成整句「分量挺实在，秤上的数比我嘴上说的更靠谱。」'
+      + '（池长仍 51、下标仍 1，夸/嘀咕没换边，仍是单句且首句 19 字 ≤ TITLE_MAX）；'
+      + '② 老李那句屏上未完的定位＝信封标题 20 字硬切（数据本身是整句），现在超长改上第一个分句，标题收在引号外、话说完；'
+      + '数据原文与 voice.js 的原文键逐字未动（配音挂载不漂）',
+    COMMENT_POOLS.portion[1] === '分量挺实在，秤上的数比我嘴上说的更靠谱。'
+      && Object.values(COMMENT_POOLS).flat().length === 51
+      && isSameSay(envelopeTitle(COMMENT_POOLS.portion[1]), COMMENT_POOLS.portion[1])
+      && laoliTitle34 === '老李把新菜往你这边又推了推'
+      && !/[『「“]$/.test(laoliTitle34) && !/[，、：]$/.test(laoliTitle34)
+      && eventsRaw34.includes(laoli34) && voiceRaw34.includes(laoli34)
+      && commentsRaw34.includes('分量挺实在，秤上的数比我嘴上说的更靠谱。'),
+    `老李标题[${laoliTitle34}]｜portion[1][${COMMENT_POOLS.portion[1]}]`);
+
+  // ── 丙9③ 称重页口径：公示文案与真实订单克数一致，引擎 ÷500 不动 ──
+  // 纪律类断言对剥掉注释的源码做（与 §30 同一枚 stripComments）：本项的施工注释里要写明「不再说一碗标准 500 克」，
+  // 拿原文数会把注释里的旧口径当成屏上还在公示，那是假阳性
+  const mainCode34 = mainRaw34.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ').replace(/[ \t]+\/\/[^\n]*$/gm, ' ');
+  const weighSrc34 = cut34(mainCode34, '  weigh() {', '\n  settle() {');
+  const grams34 = CUSTOMERS.map(c => Object.values(c.order).reduce((s, g) => s + g, 0) / c.bowls);
+  check('§34 丙9③·称重页不再公示「一碗标准 500 克」：weigh() 段里那句改成「一碗没有定数」并报出真实区间（少的二百多克、多的四百多克），'
+      + '与 CUSTOMERS 逐单克数对得上（每碗要量 225–450 克）；引擎那枚 GRAMS_PER_JIN = 500 与它在 main.js 的另外两处用量一字未动',
+    !weighSrc34.includes('一碗标准') && weighSrc34.includes('一碗没有定数')
+      && weighSrc34.includes('少的二百多克、多的四百多克')
+      && grams34.length > 0 && Math.min(...grams34) >= 200 && Math.max(...grams34) <= 500
+      && /export const GRAMS_PER_JIN = 500;/.test(readFileSync(join(HERE, 'src/engine/weigh.js'), 'utf8'))
+      && n34(/GRAMS_PER_JIN/g, mainCode34) === 3,
+    `每碗要量 ${Math.min(...grams34)}–${Math.max(...grams34)} 克｜GRAMS_PER_JIN 代码里 ${n34(/GRAMS_PER_JIN/g, mainCode34)} 处（import 1＋用量 2）`);
+
+  // ── 丙9④ 清早学生等待事件去重：取「重复触发给变体文案」，权重与效果一格不动 ──
+  const ev51 = EVENT_BY_ID.evt_d_051;
+  const ovSrc34 = cut34(mainRaw34, 'function eventOverlay() {', '\nfunction endPanel');
+  check('§34 丙9④·去重走变体文案这一支：evt_d_051 的 weight 20 / cooldown 3 / condition YesterdaySoldOut / timing morning / ship M2 与两颗按钮的 '
+      + 'open（eventDemandMult 1.15）与 hidden（Rep 1）逐字未动，只多了一个 textRepeat 字段；'
+      + 'eventOverlay 里 say 的门禁逐字是「有 textRepeat 且 EventHistory 已含本 id」才换句，typedHtml 与 esc 两支都读同一个 say；'
+      + '不取加冷却/只触发一次：m3 带跑 eventScope full，这条 M2 行在带里，动 eligibility 即漂带',
+    ev51.weight === 20 && ev51.cooldown === 3 && ev51.condition === 'YesterdaySoldOut'
+      && ev51.timing === 'morning' && ev51.ship === 'M2' && typeof ev51.textRepeat === 'string'
+      && ev51.textRepeat !== ev51.text
+      && JSON.stringify(ev51.actions) === JSON.stringify([
+        { id: 'serve_first', label: '先给他们下', open: [{ eventDemandMult: 1.15 }], hidden: [{ Rep: 1 }] },
+        { id: 'queue', label: '排队都一样', open: [{ forcedComment: '他耸耸肩排到队尾去了，倒也没走。' }], hidden: [] },
+      ])
+      && ovSrc34.includes("const say = ev.textRepeat && state.EventHistory.includes(ev.id) ? ev.textRepeat : ev.text;")
+      && ovSrc34.includes("typedHtml(say) : esc(say)")
+      && n34(/ev\.text\b/g, ovSrc34) === 1,
+    `变体 ${ev51.textRepeat.length} 字｜原句 ${ev51.text.length} 字｜say 门禁 1 处`);
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
