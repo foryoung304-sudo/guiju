@@ -12,9 +12,9 @@ import { ALL_CATS, CAT, SOLID_CATS, PRICE_TIERS, PACKING, PACKING_SPILL, CONFIG,
   ADDITIVE, PREP_LEVELS, LABOR, TASTING, TOOLS, SCALE_DELTA_J_SHARE, SCALE_C_PER_JIN, SCALE_RISK_PER_JIN,
   COMPETITION, INSPECTION, FACILITIES, ENDING, BLANCH, TIERS_STALL, SUBSTREAMS,
   BUYOUT_PRICE_CENTS, RETIRE_NP_CENTS, HEARTBURN_WMAX_JIN, QUIT_VARIANT_NP_CENTS, QUIT_VARIANT_REP,
-  QUALITY_BY_TIER, CHEAP_UNLOCK_CUE, CHEAP_TIER_WARNING } from './src/data/constants.js';
+  QUALITY_BY_TIER, CHEAP_UNLOCK_CUE, CHEAP_TIER_WARNING, DISPLAY_VERSION } from './src/data/constants.js';
 import { SKU_BY_ID, SKUS_BY_CAT } from './src/data/skus.js';
-import { scenarioOf, WEATHER } from './src/data/scenario.js';
+import { scenarioOf, WEATHER, CALENDAR } from './src/data/scenario.js';
 import { evalCondition, readVar } from './src/engine/dsl.js';
 import { EVENTS, EVENT_BY_ID, DRAW_GATE } from './src/data/events.js';
 import { windowOf, pushRecent, todaySignal } from './src/engine/recent.js';
@@ -25,6 +25,7 @@ import { additiveOf, additiveUnlocked, capacityJin, computeMBase, prepBudget, pr
 import { drawHandOrders, handOrderCount, stockGrams, gramsCeilingFor } from './src/engine/weigh.js';
 import { applyHidden, resolveChoice, weightOf, drawEvent, isActionAvailable, isActionAffordable, depositCents } from './src/engine/events.js';
 import { choiceNote, resolvedOpenOps } from './src/ui/choice-note.js';
+import { forecastChain, scenarioTalk, nextDayNotes } from './src/ui/forecast-chain.js';
 import { inspectionScore, ticketlessCostCents, destroyTicketless, judgeBigInspection, judgeRoutineInspection } from './src/engine/inspection.js';
 import { blanchValueAt, judgeBlanch, signalTier } from './src/engine/blanch.js';
 import { REGULAR_LINES, regularLine, REGULAR_SLOTS, CUSTOMERS } from './src/data/customers.js';
@@ -40,7 +41,7 @@ import { BUBBLE_MAX, FLOAT_MAX, takeBubbles, takeFloats, orderSay, praiseSay, gr
 import { morningRivals, priceWarReprice, sharesAndS, tallySuppression, rivalPriceCoef, previewShare } from './src/engine/competition.js';
 import { applyShadow, computeQ } from './src/engine/shadow.js';
 import { makeRng } from './src/engine/rng.js';
-import { priceCoefFor } from './src/engine/ops.js';
+import { priceCoefFor, runBusiness } from './src/engine/ops.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SEED = Number(process.argv[2] ?? 20261031);
@@ -4879,6 +4880,370 @@ for (const seed of [SEED, 7979, 36832]) {
       && ovSrc34.includes("typedHtml(say) : esc(say)")
       && n34(/ev\.text\b/g, ovSrc34) === 1,
     `变体 ${ev51.textRepeat.length} 字｜原句 ${ev51.text.length} 字｜say 门禁 1 处`);
+}
+
+// ── §35 补条 guiju-playtest-fixbatch-addendum-20261110（店主 2026-11-10 晚直推 `749b8d2`）＋追加 5–7 ＋裁定 8–12 ──
+// 总边界照旧：冻结数字一个不许动；结算本体（runBusiness / settleDay）零触碰；标准字段 estBowls 逐值不动，
+// sweep / m3 两带 diff 0 为预期结果。本批落点只有四处：ledger.js 的 display 那一层（eventMult / parts / soldOutLift）、
+// 新派生模块 ui/forecast-chain.js、constants.js 多一条展示串 DISPLAY_VERSION（SAVE_VERSION 一字未动）、comments.js 一行引用订正。
+{
+  const mainRaw35 = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const ledgerRaw35 = readFileSync(join(HERE, 'src/engine/ledger.js'), 'utf8');
+  const chainRaw35 = readFileSync(join(HERE, 'src/ui/forecast-chain.js'), 'utf8');
+  const stateRaw35 = readFileSync(join(HERE, 'src/engine/state.js'), 'utf8');
+  const simRaw35 = readFileSync(join(HERE, 'src/sim.js'), 'utf8');
+  const dayRaw35 = readFileSync(join(HERE, 'src/engine/day.js'), 'utf8');
+  const opsRaw35 = readFileSync(join(HERE, 'src/engine/ops.js'), 'utf8');
+  const marketRaw35 = readFileSync(join(HERE, 'src/engine/market.js'), 'utf8');
+  const constRaw35 = readFileSync(join(HERE, 'src/data/constants.js'), 'utf8');
+  const scenarioRaw35 = readFileSync(join(HERE, 'src/data/scenario.js'), 'utf8');
+  const dataComments35 = readFileSync(join(HERE, 'src/data/comments.js'), 'utf8');
+  const engComments35 = readFileSync(join(HERE, 'src/engine/comments.js'), 'utf8');
+  const voiceRaw35 = readFileSync(join(HERE, 'src/data/voice.js'), 'utf8');
+  const noteRaw35 = readFileSync(join(HERE, 'src/ui/choice-note.js'), 'utf8');
+  const n35 = (re, s) => (s.match(re) || []).length;
+  const code35 = s => s.replace(/\/\*[\s\S]*?\*\//g, ' ').replace(/^[ \t]*\/\/.*$/gm, ' ').replace(/[ \t]+\/\/[^\n]*$/gm, ' ');
+  const cut35 = (s, a, b) => { const i = s.indexOf(a); return i < 0 ? '' : s.slice(i, s.indexOf(b, i) < 0 ? s.length : s.indexOf(b, i)); };
+
+  // 对平夹具：六项比值全 1（同情境 / 爬坡 1 / 同定价系数 / 同 F / 无竞争 S≡1 / 无次日余波），
+  // 熟客・试吃・预定全 0，P = Rep（试算用公开代理、结算用暗口碑，两者取同值才可比）
+  // ⇒ 试算比值式的锚恰好等于结算 7a 的 D0，两边可以直接对平，不靠容差糊。
+  const aligned35 = () => {
+    const s = newGame(SEED);
+    beginDay(s);
+    const sc = scenarioOf('sunny', 10);
+    s.today.scenario = sc; s.YesterdayScenario = sc;
+    s.competitionOn = false;
+    s.RampDays = 0; s.YesterdayRamp = 1;
+    s.PriceTier = 'qinmin'; s.PriceCoefYday = priceCoefFor(s, 'qinmin', sc);
+    s.YesterdayF = s.F; s.P = s.Rep;
+    s.R = 0; s.R_v = 0; s.TastingCount = 0;
+    s.event_reserve_bowls = 0; s.reg_reserved_bowls = 0;
+    s.next_day_traffic_mult = 1; s.d0_buff_mult = 1; s.d0_buff_days = 0;
+    s.event_demand_mult = 1;
+    s.StockSoup = 400; for (const c of SOLID_CATS) s.StockSolid[c] = 400;
+    const D0 = s.BaseSales * sc.trafficTotal * priceCoefFor(s, 'qinmin', sc) * (0.75 + s.Rep * 0.005) * s.F;
+    s.YesterdaySoldBowls = D0; s.YesterdayD0 = D0; s.YesterdaySoldOut = false;
+    return { s, sc, D0 };
+  };
+  const baseEst35 = s => s.BaseSales * s.today.scenario.trafficTotal * priceCoefFor(s, 'qinmin', s.today.scenario)
+    * s.F * (0.75 + s.P * 0.005) + Math.round(s.R * 0.5);
+
+  // ── 补条 4：施工前枚举＝范围闸。全事件表写 eventDemandMult 的到底有哪几条、各自什么时点可知 ──
+  // 递归走整个事件对象（open / actions[].open / branch 都覆盖），顺带钉住「暗线里一条都没有」
+  const walk35 = (node, path, out) => {
+    if (Array.isArray(node)) { node.forEach((v, i) => walk35(v, `${path}[${i}]`, out)); return; }
+    if (node && typeof node === 'object') {
+      if (node.eventDemandMult !== undefined) out.push({ path, mult: node.eventDemandMult });
+      for (const [k, v] of Object.entries(node)) walk35(v, `${path}.${k}`, out);
+    }
+  };
+  const multRows35 = EVENTS.map(ev => { const hits = []; walk35(ev, ev.id, hits); return { ev, hits }; })
+    .filter(x => x.hits.length > 0);
+  const multIds35 = multRows35.map(x => x.ev.id).sort();
+  const ev41 = EVENT_BY_ID.evt_d_041, ev02 = EVENT_BY_ID.evt_d_002, ev51b = EVENT_BY_ID.evt_d_051;
+  check('§35 补条4·范围枚举（枚举外不扩）：全事件表写 eventDemandMult 的恰 3 条 —— evt_d_002（morning / M1 / 选项 rectify / 0.6）、'
+      + 'evt_d_041（morning_pre / M2 / 事件本体 open / 1.25）、evt_d_051（morning / M2 / 选项 serve_first / 1.15）；'
+      + '三条全在 open 里（hidden / effect_hidden 零命中 ⇒ 暗线不进试算）；morning_pre 只有 041 一条 ⇒ 本批进试算的就它一条；'
+      + 'evening 零条 ⇒ 单上「前夜玩家已选定的同类乘数」集合为空；evt_d_042 那类价格条走 priceMultToday，'
+      + '已被 effectivePrice 在标价上吃掉（market.js 那一支），不属本条范围',
+    multRows35.length === 3 && multIds35.join(' ') === 'evt_d_002 evt_d_041 evt_d_051'
+      && multRows35.every(x => x.hits.every(h => h.path.includes('.open')))
+      && ev02.timing === 'morning' && ev02.ship === 'M1'
+      && ev02.actions.find(a => a.id === 'rectify').open[0].eventDemandMult === 0.6
+      && ev41.timing === 'morning_pre' && ev41.ship === 'M2' && ev41.open[0].eventDemandMult === 1.25
+      && ev51b.timing === 'morning' && ev51b.ship === 'M2'
+      && ev51b.actions.find(a => a.id === 'serve_first').open[0].eventDemandMult === 1.15
+      && multRows35.filter(x => x.ev.timing === 'morning_pre').length === 1
+      && multRows35.filter(x => x.ev.timing === 'evening').length === 0
+      && !EVENT_BY_ID.evt_d_042.open?.some(o => o.eventDemandMult !== undefined)
+      && marketRaw35.includes('const evMult = state.today.priceMultToday[sku.cat];'),
+    `命中 ${multRows35.length} 条｜${multRows35.map(x => `${x.ev.id}(${x.ev.timing},${x.hits.map(h => h.mult).join('/')})`).join(' ')}`);
+
+  // ── 补条 1＋验收：041 命中档，试算显示需求 = 同状态无事件显示 ×1.25，取整口径与面板一致 ──
+  const A35 = aligned35();
+  const fA0 = previewBasket(A35.s, [], 'qinmin').forecast;
+  A35.s.event_demand_mult = ev41.open[0].eventDemandMult;
+  const fA1 = previewBasket(A35.s, [], 'qinmin').forecast;
+  const barSrc35 = cut35(mainRaw35, 'function forecastBar(fRaw) {', '\nfunction ');
+  check('§35 补条1·验收锚①：041 那 1.25 挂上之后，试算显示需求恰为同状态无事件显示 ×1.25（逐值 1e-9 内），'
+      + '面板取整口径与 forecastBar 的 need 同一支 Math.round（88 → 110 碗）；display.eventMult 与 parts.event 都报出这一份供说明行用；'
+      + '乘的位置与结算 ops.js:50 同层——乘在整个 D_pre（含预定与试吃转化）上，不是只乘客流那一头',
+    Math.abs(fA1.display.estBowls - fA0.display.estBowls * 1.25) < 1e-9
+      && Math.round(fA1.display.estBowls) === Math.round(fA0.display.estBowls * 1.25)
+      && fA1.display.eventMult === 1.25 && fA1.display.parts.event === 1.25
+      && barSrc35.includes('const need = Math.round(f.estBowls);')
+      && ledgerRaw35.includes('const disp = evalMetrics(displayDemand, displaySupply, eventMult);')
+      && ledgerRaw35.includes('const capped = Math.min((demand + convertBowls) * demandMul, sup.bowls, capBowls);')
+      && opsRaw35.includes('const D = D_pre * state.event_demand_mult;'),
+    `显示需求 ${fA0.display.estBowls.toFixed(4)} → ${fA1.display.estBowls.toFixed(4)} 碗｜面板 ${Math.round(fA0.display.estBowls)} → ${Math.round(fA1.display.estBowls)} 碗`);
+
+  // ── 验收：与同档结算需求对平（不是「差不多」，是逐值相等）──
+  const B35 = aligned35();
+  B35.s.event_demand_mult = 1.25;
+  const tB35 = runBusiness(B35.s, [], makeRng(B35.s));
+  check('§35 补条1·验收锚②（对平）：同一状态跑结算第 7 步，t.D 与试算显示需求逐值相等（差 < 1e-9），'
+      + 't.D0 与无事件档显示需求逐值相等 —— 即「告示 +25%」与「试算 +25%」与「结算真乘 1.25」三处同一个数；'
+      + '结算本体那一行未动（引擎不碰，本批只把试算漏掉的那一项补上）',
+    Math.abs(fA1.display.estBowls - tB35.D) < 1e-9
+      && Math.abs(fA0.display.estBowls - tB35.D0) < 1e-9
+      && Math.abs(tB35.D - tB35.D0 * 1.25) < 1e-9
+      && opsRaw35.includes('const D_pre = D0 * S + N_R_want + state.event_reserve_bowls + convertBowls;'),
+    `结算 D0 ${tB35.D0.toFixed(4)} → D ${tB35.D.toFixed(4)}｜试算显示 ${fA1.display.estBowls.toFixed(4)}｜差 ${Math.abs(fA1.display.estBowls - tB35.D).toExponential(2)}`);
+
+  // ── 补条 2：标准字段逐值不动（动到即停手回报的那条红线，这里用针钉住）──
+  check('§35 补条2·护栏：乘数只进 display，标准侧 estBowls / displayEstBowls / capped / supplyBowls / bottleneck / '
+      + 'estRevenueCents / estCogsCents / estNetCents / lowConfidence / floorApplied 十项逐值未动；'
+      + 'evalMetrics 第三参默认 1、standard 那一支恒不传乘数（全文件只 3 处叫它：定义 1＋standard 1＋display 1）；'
+      + '顶层 return 的首行逐字在场 —— sim.js 读 estBowls / plan.submittable，两带读不到 display，所以 diff 0 是结构性的',
+    fA1.estBowls === fA0.estBowls && fA1.displayEstBowls === fA0.displayEstBowls
+      && fA1.capped === fA0.capped && fA1.supplyBowls === fA0.supplyBowls
+      && fA1.bottleneck === fA0.bottleneck && fA1.bottleneckBowls === fA0.bottleneckBowls
+      && fA1.estRevenueCents === fA0.estRevenueCents && fA1.estCogsCents === fA0.estCogsCents
+      && fA1.estNetCents === fA0.estNetCents && fA1.lowConfidence === fA0.lowConfidence
+      && fA1.floorApplied === fA0.floorApplied
+      && ledgerRaw35.includes('function evalMetrics(demand, sup = supply, demandMul = 1) {')
+      && ledgerRaw35.includes('const standard = evalMetrics(estBowls);')
+      && ledgerRaw35.includes('estBowls, supplyBowls: supply.bowls, capped: standard.capped, lowConfidence, floorApplied,')
+      && n35(/evalMetrics\(/g, code35(ledgerRaw35)) === 3
+      && simRaw35.includes('const appc = previewBasket(state, [], strategy.price).forecast.estBowls;'),
+    `标准 estBowls ${fA1.estBowls.toFixed(6)}（未动）｜evalMetrics 调用 ${n35(/evalMetrics\(/g, code35(ledgerRaw35))} 处`);
+
+  // ── 验收：无事件档试算显示逐值不变 ──
+  const C35 = aligned35();
+  const fC0 = previewBasket(C35.s, [], 'qinmin').forecast;
+  C35.s.event_demand_mult = 1.0;
+  const fC1 = previewBasket(C35.s, [], 'qinmin').forecast;
+  check('§35 补条1·验收锚③（无事件档）：event_demand_mult = 1 时整个 forecast 对象逐字不变（JSON 全等，含 display 与 parts）；'
+      + '且显示需求退化为乙5 原式「显示锚 + 预定」（乘数 1 不引入任何浮点漂移）—— 没抽到事件的玩家看到的数与改前一模一样',
+    JSON.stringify(fC0) === JSON.stringify(fC1)
+      && Math.abs(fC0.display.estBowls - (fC0.displayEstBowls + fC0.display.reserveBowls)) < 1e-9
+      && fC0.display.eventMult === 1,
+    `显示需求 ${fC0.display.estBowls.toFixed(6)} 碗｜全对象逐字相等 ${JSON.stringify(fC0) === JSON.stringify(fC1)}`);
+
+  // ── 补条 1 范围闸：采购后才抽到的那两条照旧不进（排除理由是「玩家看不见」，不是「事件不该乘」）──
+  const iPre35 = mainRaw35.indexOf('preEvent = morningPreEvent(state, rng);');
+  const iBuy35 = mainRaw35.indexOf('const r = submitBasket(state, picksFromDraft(), rng);');
+  const iMorn35 = mainRaw35.indexOf("pendingEvent = drawEvent(state, 'morning', rng);");
+  check('§35 补条1·范围闸：main.js 里三步的先后逐字可核 —— 第 2 步 morningPreEvent（当场 resolveChoice 入账，采购前就公示）'
+      + ' < 第 3 步 submitBasket < 第 6 步 drawEvent(morning)（先亮出来、玩家点了才 resolveChoice）；'
+      + '所以 002 的 0.6 与 051 的 1.15 在采购时点还没落到 state.event_demand_mult 上（新档开局那一格恒为 1），试算读不到也就不该读到；'
+      + '041 走的是 morning_pre 那一支，第 2 步就入账 ⇒ 采购前已知悉，进试算',
+    iPre35 > 0 && iPre35 < iBuy35 && iBuy35 < iMorn35
+      && dayRaw35.includes("const ev = drawEvent(state, 'morning_pre', rng);\n  if (ev) resolveChoice(state, ev, null);")
+      && dayRaw35.includes("const ev = drawEvent(state, 'morning', rng);\n  if (ev && choose) resolveChoice(state, ev, choose(ev));")
+      && aligned35().s.event_demand_mult === 1
+      && newGame(SEED).event_demand_mult === 1,
+    `步序下标 晨间情报 ${iPre35} < 采购 ${iBuy35} < 晨间事件 ${iMorn35}`);
+
+  // ── 补条 3：分解公示行，格式钉死为一条链 ──
+  const D35 = aligned35();
+  D35.s.YesterdayScenario = scenarioOf('sunny', 23);   // 昨日考试周 → 今日平稳期：单上判例那一档
+  D35.s.event_demand_mult = 1.25;
+  const fD35 = previewBasket(D35.s, [], 'qinmin').forecast;
+  const chainD35 = forecastChain(fD35.display, D35.s.today.scenario, D35.s.YesterdayScenario, '食堂检修');
+  const expectD35 = `昨日实卖 ${Math.round(D35.s.YesterdaySoldBowls)} 碗 → 考试周结束，客流回落 → 食堂检修 +25% → 今日约 ${Math.round(fD35.display.estBowls)} 碗`;
+  check('§35 补条3·链格式逐字命中单上钉死的那一条：昨日实卖 X 碗 → 情境变化（人话）→ 事件加成（食堂检修 +25%）→ 今日约 N 碗，'
+      + '四段三箭头、顺序不许换；情境那一格考试周结束写「考试周结束，客流回落」（不是系数）；'
+      + '事件短名由调用方从采购前公示那条事件的信封标题取（main.js 传 envelopeTitle(preEvent.text)），引擎不出文案只出数',
+    chainD35 === expectD35 && n35(/→/g, chainD35) === 3
+      && scenarioTalk(D35.s.today.scenario, D35.s.YesterdayScenario) === '考试周结束，客流回落'
+      && mainRaw35.includes('preEvent ? envelopeTitle(preEvent.text) : null))}</div>')
+      && barSrc35.includes('${esc(forecastChain(f, state.today.scenario, state.YesterdayScenario,'),
+    `[${chainD35}]`);
+
+  // ── 补条 3 判例：估算比昨日低时必须点名拉低项，拉低项就是情境比时照实写、不许沉默 ──
+  const E35 = aligned35();
+  E35.s.YesterdayScenario = scenarioOf('sunny', 23);
+  E35.s.YesterdaySoldBowls = 200;
+  const fE35 = previewBasket(E35.s, [], 'qinmin').forecast;
+  const chainE35 = forecastChain(fE35.display, E35.s.today.scenario, E35.s.YesterdayScenario, null);
+  const E2 = aligned35();
+  E2.s.YesterdayScenario = scenarioOf('sunny', 23);
+  E2.s.YesterdaySoldBowls = 200; E2.s.PriceCoefYday = 2;   // 再叠一项：昨日价签系数更高
+  const fE2 = previewBasket(E2.s, [], 'qinmin').forecast;
+  const chainE2 = forecastChain(fE2.display, E2.s.today.scenario, E2.s.YesterdayScenario, null);
+  check('§35 补条3·判例（店主原话「明明昨天卖的好好的还有利润，结果第二天客流还少了」）：估算低于昨日实卖时链上必出「拉低的是…」，'
+      + '拉低项是情境比就点名情境那一格（上一格已照实写明「考试周结束，客流回落」，这里指认它，不重念也不沉默）；'
+      + '多项同时拉低就逐项列（情境 + 价签）；估算不低于昨日时这一段不出现（不无端吓玩家）',
+    Math.round(fE35.display.estBowls) < 200 && fE35.display.parts.traffic < 1
+      && chainE35.includes('拉低的是上面那条情境变化')
+      && chainE35.indexOf('考试周结束，客流回落') < chainE35.indexOf('拉低的是')
+      && chainE2.includes('拉低的是上面那条情境变化、价签比昨天高')
+      && !chainD35.includes('拉低的是')
+      && Math.round(fD35.display.estBowls) > Math.round(D35.s.YesterdaySoldBowls),
+    `回落档 [${chainE35}]｜叠价签 [${chainE2}]`);
+
+  // ── 补条 3：含预定 / 首日非比值式 / 无事件无加成时不留空段 ──
+  const F35 = aligned35();
+  F35.s.event_reserve_bowls = 15;
+  const fF35 = previewBasket(F35.s, [], 'qinmin').forecast;
+  const chainF35 = forecastChain(fF35.display, F35.s.today.scenario, F35.s.YesterdayScenario, null);
+  const G35 = newGame(SEED); beginDay(G35);
+  const fG35 = previewBasket(G35, [], 'qinmin').forecast;
+  const chainG35 = forecastChain(fG35.display, G35.today.scenario, G35.YesterdayScenario, null);
+  check('§35 补条3·另三档：有预定写「含预定 15 碗」（与乙5 那行「含今日预定」同一个数，两处口径不分家）；'
+      + '首日没有昨日实卖走非比值式那一支，照实说「头一天没有昨日实卖，客流侧按开业基础量估」，不编一个昨日数出来；'
+      + '无事件无预定时加成那一整段不出现（不留空箭头）；晴阴互转照实说「客流不变」，同情境说「平日无变化」',
+    chainF35.includes('含预定 15 碗') && fF35.display.reserveBowls === 15
+      && !chainF35.includes('%') && !chainF35.includes('→  →')
+      && chainG35 === `头一天没有昨日实卖，客流侧按开业基础量估 → 今日约 ${Math.round(fG35.display.estBowls)} 碗`
+      && fG35.display.parts.ratioForm === false
+      && scenarioTalk(scenarioOf('cloudy', 10), scenarioOf('sunny', 10)) === '晴转阴，客流不变'
+      && scenarioTalk(scenarioOf('sunny', 10), scenarioOf('sunny', 10)) === '平日无变化'
+      && scenarioTalk(scenarioOf('rain', 10), scenarioOf('sunny', 10)) === '今儿雨天'
+      && scenarioTalk(scenarioOf('sunny', 10), scenarioOf('rain', 10)) === '雨停了',
+    `预定 [${chainF35}]｜首日 [${chainG35}]`);
+
+  // ── 裁定 8：乘数原值永不进界面（已签红线 f6a8ebf §三.4 胜过单上举例的「×X.XX」）＋派生层护栏 ──
+  const H35 = aligned35();
+  H35.s.today.soupHalf = true; H35.s.today.delist = 'VG'; H35.s.next_day_traffic_mult = 0.85;
+  H35.s.d0_buff_days = 2; H35.s.d0_buff_mult = 0.9; H35.s.today.pricewarActive = true;
+  H35.s.R_frozen_days = 2; H35.s.XiaodouAbsentDays = 1; H35.s.today.copycatActive = true;
+  const notesH35 = nextDayNotes(H35.s);
+  const allTalk35 = [chainD35, chainE35, chainE2, chainF35, chainG35, ...notesH35].join('|');
+  check('§35 裁定8·全界面零系数：说明行与次日提醒行的全部输出里，乘数原值一个都不出现（1.25 / 0.85 / 0.6 / ×号 / x1. 全零命中），'
+      + '事件加成只出百分比增减（+25%），其余各项一律翻成词句；forecast-chain.js 是纯呈现派生 —— '
+      + '只 import data/constants 的品类名，零状态写字段、零随机、零计时器、零存档键，src/engine 与 src/data 对它全盲；'
+      + 'main.js 两个渲染点都过 esc()',
+    !/1\.25|0\.85|0\.6|×|\bx1\./.test(allTalk35)
+      && chainD35.includes('食堂检修 +25%')
+      && n35(/^import /gm, chainRaw35) === 1
+      && chainRaw35.includes("import { CAT } from '../data/constants.js';")
+      && !/\bstate\.[A-Za-z_$][\w$]*\s*=[^=]|\bt\.[A-Za-z_$][\w$]*\s*=[^=]/.test(code35(chainRaw35))
+      && !/Math\.random|setTimeout|setInterval|localStorage|SAVE_VERSION/.test(code35(chainRaw35))
+      && barSrc35.includes('${esc(forecastChain(f,')
+      && barSrc35.includes('${nextDayNotes(state).map(n => `<div class="k" style="margin-top:6px">${esc(n)}</div>`).join(\'\')}'),
+    `系数零命中｜次日提醒 ${notesH35.length} 行｜输出样本 [${chainD35}]`);
+
+  // ── 裁定 10：次日生效的惩罚双公示（事件当场那一行 + 次日试算说明行），不许第二天开局才发现被砍 ──
+  const pot35 = EVENT_BY_ID.evt_d_pot;
+  const S35 = aligned35();
+  const resPot35 = resolveChoice(S35.s, pot35, 'improvise');
+  const linePot35 = choiceNote(S35.s, resolvedOpenOps(pot35, resPot35), pot35.timing).join(' · ');
+  const T35 = aligned35(); T35.s.today.soupHalf = true;
+  const notesT35 = nextDayNotes(T35.s);
+  check('§35 裁定10·双公示：① 事件当场——「拿盆将就」点下去，丙8 反馈行逐字出「明儿汤底只能出一半的碗」（公开效果含次日项）；'
+      + '② 次日——试算说明行再带一句「今儿汤底只能出一半的碗」，并指认上面「这一篮只够出」已按减半算（乙5② 那一格）；'
+      + '次日提醒共覆盖 8 类惩罚（汤底减半 / 品类下架 / 次日客流减 / d0 减 / 对面降价 / 老主顾冻结 / 小豆不来 / 山寨摊），'
+      + '天数一律不报（各计数器递减时点不同：第 1 步 / 第 7 步 / 第 9 步，采购时点报「还剩 N 天」会各差一天，准确天数当场那一行已报过）',
+    linePot35.includes('明儿汤底只能出一半的碗')
+      && notesT35.length === 1 && notesT35[0].includes('今儿汤底只能出一半的碗')
+      && notesH35.length === 8 && !/\d/.test(notesH35.join(''))
+      && noteRaw35.includes("if (op.soupHalfNext) out.push('明儿汤底只能出一半的碗');")
+      && chainRaw35.includes("if (t.soupHalf) out.push('昨晚拿盆将就了：今儿汤底只能出一半的碗，上面「这一篮只够出」已经按减半算。');")
+      && barSrc35.includes('nextDayNotes(state).map')
+      && mainRaw35.includes('</div>` + choiceNoteBar();'),
+    `当场 [${linePot35}]｜次日 ${notesH35.length} 类｜天数零命中`);
+
+  // ── 追加 5：D6 低锚先定性 → 夹具 D5 确为卖断日 ⇒ 借 sim.js:71 既有守卫同构落地，加针钉住 ──
+  const K35 = aligned35();
+  K35.s.YesterdaySoldOut = true; K35.s.YesterdaySoldBowls = 40; K35.s.YesterdayD0 = 120;
+  const fK35 = previewBasket(K35.s, [], 'qinmin').forecast;
+  const chainK35 = forecastChain(fK35.display, K35.s.today.scenario, K35.s.YesterdayScenario, null);
+  const M35 = aligned35();
+  M35.s.YesterdaySoldOut = true; M35.s.YesterdaySoldBowls = 1; M35.s.YesterdayD0 = 2;
+  const fM35 = previewBasket(M35.s, [], 'qinmin').forecast;
+  const N35 = aligned35();
+  N35.s.YesterdaySoldOut = true; N35.s.YesterdaySoldBowls = 1; N35.s.YesterdayD0 = 200;
+  const fN35 = previewBasket(N35.s, [], 'qinmin').forecast;
+  check('§35 追加5·卖断日托底（与 sim.js:71 同构，只抬显示值）：昨日卖断且昨日需求侧 D0 > 昨日实卖时，'
+      + '显示锚抬到「昨日实卖 × D0/实卖」再走那六项比值折算（40 → 120 碗），标准 estBowls 仍是 40 逐值不动、floorApplied 不被误置；'
+      + '灾难门与托底同时命中取较高的一支（0.6×baseEst 52.79 胜过托底 2；托底 200 胜过 52.79）；'
+      + '非卖断日 soldOutLift 恒 1、显示值与改前逐值相同；链上把托底说出来（「卖断了，按昨日客流 120 碗托底」），'
+      + '否则两头对不上玩家自己会算的账',
+    Math.abs(fK35.displayEstBowls - 120) < 1e-9 && fK35.estBowls === 40
+      && fK35.display.parts.soldOutLift === 3 && fK35.floorApplied === false
+      && fM35.floorApplied === true && Math.abs(fM35.displayEstBowls - 0.6 * baseEst35(M35.s)) < 1e-9
+      && fM35.estBowls === 1
+      && fN35.floorApplied === true && Math.abs(fN35.displayEstBowls - 200) < 1e-9
+      && fA0.display.parts.soldOutLift === 1 && fA0.displayEstBowls === fA0.estBowls
+      && chainK35.includes('昨日实卖 40 碗（卖断了，按昨日客流 120 碗托底）')
+      && simRaw35.includes('if (state.YesterdaySoldOut) return Math.max(appc, state.YesterdayD0 || appc);')
+      && ledgerRaw35.includes('soldOutLift = state.YesterdaySoldOut && (state.YesterdayD0 || 0) > yBowls')
+      && ledgerRaw35.includes('displayEstBowls = Math.max(disaster ? 0.6 * baseEst : ratioEst, ratioEst * soldOutLift);'),
+    `托底 ${fK35.estBowls.toFixed(2)} → 显示 ${fK35.displayEstBowls.toFixed(2)}｜灾难门档 ${fM35.displayEstBowls.toFixed(4)} / ${fN35.displayEstBowls.toFixed(4)}`);
+
+  // ── 裁定 9：SAVE_VERSION 是冻结的存档兼容尺，一字不动；界面版本改读独立展示串 ──
+  const store35 = new Map();
+  globalThis.localStorage = {
+    getItem: k => (store35.has(k) ? store35.get(k) : null),
+    setItem: (k, v) => store35.set(k, String(v)),
+    removeItem: k => store35.delete(k),
+  };
+  const save35 = newGame(SEED);
+  store35.set(STORAGE_KEY, JSON.stringify(save35));
+  const okLoad35 = loadGame();
+  store35.set(STORAGE_KEY, JSON.stringify({ ...save35, saveVersion: DISPLAY_VERSION }));
+  const badLoad35 = loadGame();
+  delete globalThis.localStorage;
+  check('§35 裁定9·两根轴分开：SAVE_VERSION 仍是 v4.9.3-cal.2（一字未动，改了等于废玩家存档），'
+      + '新增独立展示串 DISPLAY_VERSION = v4.9.4，界面那一行改读它、main.js 代码里不再叫 SAVE_VERSION（注释里的转述不算，同 §30 剥注释口径）；'
+      + '存档三处（写入 / 载入闸 / 迁移后升版）仍逐字读 SAVE_VERSION；'
+      + '把展示串当存档版本写进档里会被载入闸拒掉（证明两根轴没串线）；今后正本升版只动展示串',
+    SAVE_VERSION === 'v4.9.3-cal.2' && DISPLAY_VERSION === 'v4.9.4'
+      && constRaw35.includes("export const SAVE_VERSION = 'v4.9.3-cal.2';")
+      && constRaw35.includes("export const DISPLAY_VERSION = 'v4.9.4';")
+      && mainRaw35.includes('规则版本 ${DISPLAY_VERSION}')
+      && n35(/SAVE_VERSION/g, code35(mainRaw35)) === 0
+      && stateRaw35.includes('saveVersion: SAVE_VERSION,')
+      && stateRaw35.includes('if (parsed.saveVersion !== SAVE_VERSION && !MIGRATABLE_SAVE_VERSIONS.includes(parsed.saveVersion)) return null;')
+      && stateRaw35.includes('parsed.saveVersion = SAVE_VERSION;')
+      && !!okLoad35 && okLoad35.saveVersion === SAVE_VERSION && badLoad35 === null,
+    `兼容尺 ${SAVE_VERSION}｜展示串 ${DISPLAY_VERSION}｜冒用展示串的档 ${badLoad35 === null ? '被拒（对）' : '被载入（错）'}`);
+
+  // ── 追加 7：comments.js:4 过期引用顺手订正（实指 engine/comments.js:27–28）──
+  const engLines35 = engComments35.split(/\r?\n/);
+  const dataLines35 = dataComments35.split(/\r?\n/);
+  check('§35 追加7·引用订正：data/comments.js 第 4 行那条「按 portion 下标直取」的出处由 comments.js:27–28 订正为 '
+      + 'engine/comments.js:27–28（同目录自指是错的，那两条直取在引擎侧）；被引的那两行逐字仍是 portion[2] / portion[1] 的直取，'
+      + '池长 51 与下标一对没动 ⇒ 夸/嘀咕没换边、随机抽中的下标没漂',
+    dataLines35[3].includes('engine/comments.js:27–28')
+      && engLines35[26].includes("push('regular', COMMENT_POOLS.portion[2]);")
+      && engLines35[27].includes("push('regular', COMMENT_POOLS.portion[1]);")
+      && Object.values(COMMENT_POOLS).flat().length === 51,
+    `第 4 行 [${dataLines35[3].trim()}]`);
+
+  // ── 裁定 12：甲组结论入仓所依据的事实，在这里钉住（事实若变，第 9–11 条裁定自动重开）──
+  const srcRoot35 = join(HERE, 'src');
+  const srcFiles35 = [];
+  (function walk(dir) {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p); else if (e.name.endsWith('.js')) srcFiles35.push(p);
+    }
+  })(srcRoot35);
+  const srcText35 = srcFiles35.map(f => readFileSync(f, 'utf8')).join('\n');
+  const potLine35 = cut35(opsRaw35, "takeStock(state, 'SP'", '\n');
+  check('§35 裁定12·甲组结论的事实基础（入仓文件 guiju-jia-group-conclusions-20261111.md）：'
+      + '甲2 —— 全 src 对 receivable / 应收 / 顾客欠 / CustomerDebt 零命中，顶栏「欠款」读的是 state.DebtSupplier（只记供应商货款），'
+      + '所以「记账 −54 但欠款 0.00」是设计事实不是写入断链，病在文案许了一个永远不立的账；'
+      + '甲1 —— 汤底每碗耗 T 份（无按克、无锅损一格），T 只取天气段（scenarioOf 只读 weather.T），'
+      + 'CALENDAR.holiday.T = 0.8 是死字段（全仓零读取）⇒ 假期汤底耗量按天气走不按校历走',
+    !/receivable|应收|顾客欠|CustomerDebt/.test(srcText35)
+      && mainRaw35.includes('<span>欠款 <b class="num">${y(state.DebtSupplier)}</b></span>')
+      && opsRaw35.includes("takeStock(state, 'SP', Math.min(state.StockSoup, bowls * sc.T), consumed)")
+      && scenarioRaw35.includes('T: weather.T,')
+      && n35(/CALENDAR\.holiday\.T|holiday\.T\b/g, srcText35) === 0
+      && CALENDAR.holiday.T === 0.8,
+    `顾客应收零命中｜汤底那一行 [${potLine35.trim()}]`);
+
+  // ── 裁定 11：改词只拟稿、本批不落地（结果文案活在 sha 钉死的录音里，改字必须重录，待店主回签＋单独授权）──
+  const ev01 = EVENT_BY_ID.evt_d_001;
+  check('§35 裁定11·本批未落地（拟稿待回签）：evt_d_001 的正文、两颗按钮的 label / cooldown / open / hidden 逐字未动，'
+      + '配音挂载也一字未动（开场 vo_tab_01/02/03 三行、结果按选项键 record→vo_tab_04 / settle_now→vo_tab_05 两行）—— '
+      + '「记账／欠款」框架的改词稿只进回报（改前改后全文），不进仓：结果文案同时活在按原文与 sha 钉死的录音里，'
+      + '改字＝重录＋冻结稿修订，属另一笔授权，本批不顺手做',
+    ev01.text === '赵大妈插队抓了一把串，抹嘴就说"后生，先记到账上"。斜对面王老板抬了下眼皮。'
+      && JSON.stringify(ev01.actions) === JSON.stringify([
+        { id: 'record', label: '记账', cooldown: 2, open: [{ cash: -5400 }], hidden: [] },
+        { id: 'settle_now', label: '当场要钱', cooldown: 3, open: [{ nextDayTrafficMult: 0.85 }], hidden: [] },
+      ])
+      && voiceRaw35.includes("{ f: 'vo_tab_02', who: '赵大妈' },")
+      && voiceRaw35.includes("{ pick: 'record', f: 'vo_tab_04' },")
+      && voiceRaw35.includes("{ pick: 'settle_now', f: 'vo_tab_05' },")
+      && VOICE_INTRO.evt_d_001.length === 3 && VOICE_RESULT.evt_d_001.length === 2,
+    `正文 ${ev01.text.length} 字｜选项 ${ev01.actions.map(a => a.label).join(' / ')}（未动）`);
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，

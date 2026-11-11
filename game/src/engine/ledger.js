@@ -169,6 +169,7 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
   let lowConfidence = false;
   let floorApplied = false;
   let displayEstBowls;
+  let soldOutLift = 1;
 
   if (yBowls > 0 && ySc && state.Share[0] > 0) {
     // 比值式：昨日售出 × 情境比 × 爬坡比 × 定价系数比 × F 比 × 份额比 × next_day_traffic_mult
@@ -184,7 +185,13 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
     // 标准 estBowls 保持纯比值不碰，供 sim、回归针、两带读，保证两带 diff 0。
     const disaster = ratioEst < 0.25 * baseEst;
     floorApplied = disaster;
-    displayEstBowls = disaster ? 0.6 * baseEst : ratioEst;
+    // 追加 5（补条 2026-11-11，Orange 签收时下达）：卖断日托底，与 sim.js:71 同构。
+    // 昨日卖断时「昨日实卖」是被昨日篮子封顶的数，拿它当锚会自我复制成单调下坡（sim 的买货政策因此改用昨日 D0 托底）。
+    // 显示层同构落法：锚抬到 max(昨日实卖, 昨日需求侧 D0)，再走上面那六项比值折算到今日 —— 即单上「昨日需求侧口径折算值」。
+    // 只抬显示值：ratioEst / estBowls 逐字不动，两带读不到这一支。灾难门与托底同时命中时取两者较高的一支。
+    soldOutLift = state.YesterdaySoldOut && (state.YesterdayD0 || 0) > yBowls
+      ? state.YesterdayD0 / yBowls : 1;
+    displayEstBowls = Math.max(disaster ? 0.6 * baseEst : ratioEst, ratioEst * soldOutLift);
   } else {
     lowConfidence = true;
     estBowls = baseEst;
@@ -212,8 +219,8 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
   const plan = planPayment(state, basket);
   const remainingCredit = Math.max(0, state.CreditCap - state.DebtSupplier - plan.creditUsed);
 
-  function evalMetrics(demand, sup = supply) {
-    const capped = Math.min(demand + convertBowls, sup.bowls, capBowls);
+  function evalMetrics(demand, sup = supply, demandMul = 1) {
+    const capped = Math.min((demand + convertBowls) * demandMul, sup.bowls, capBowls);
     const bottleneck = capBowls < sup.bowls && capBowls <= demand ? 'cap' : sup.bottleneck;
     const priorityBowls = Math.min(capped, Math.round(state.R * 0.5) + state.event_reserve_bowls);
     const autoShare = capped > 0 ? Math.max(0, (capped - priorityBowls) / capped) : 0;
@@ -246,12 +253,35 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
   // ② 拿盆将就次日汤底上限减半：结算 ops.js:57 乘在汤底那一格上限上，原先 basketSupply 没乘 ⇒ 试算多报一倍碗数。
   // ③ 隔夜报损：结算 ledger.js:35 的 netOpsCents 减 writeoff.cents，原先试算整项没有 ⇒ 净额虚高。
   const reserveBowls = state.event_reserve_bowls + state.reg_reserved_bowls;
+  // 补条（guiju-playtest-fixbatch-addendum-20261110 §1-2，Orange 2026-11-10 晚定案）：采购前已知悉的事件乘数进试算显示。
+  // 结算 ops.js:50 逐字是 `const D = D_pre * state.event_demand_mult;`——乘在**整个** D_pre 上（含预定与试吃转化），
+  // 所以这里同位同层：evalMetrics 的 demandMul 吃它，display.estBowls 也吃它。标准侧恒传 1，estBowls 逐值不动。
+  // 范围只到「玩家此刻看得见」的那一份：morning_pre 在第 2 步当场入账（day.js:70-74），采购前就公示了；
+  // timing='morning' 的两条（evt_d_002 rectify 0.6 / evt_d_051 serve_first 1.15）在第 6 步才落地，采购后才抽到 ⇒ 不进。
+  const eventMult = state.event_demand_mult;
   const displayDemand = displayEstBowls + reserveBowls;
   const displaySupply = basketSupply(state, basket, scenario, state.today.soupHalf ? 0.5 : 1);
-  const disp = evalMetrics(displayDemand, displaySupply);
+  const disp = evalMetrics(displayDemand, displaySupply, eventMult);
   const estWriteoffCents = writeoffEstimate(state, basket, disp.capped, scenario, blended, omega, Omega);
+  // 补条 §3 分解公示行要的各因子：与上面比值式那六项逐字同源（只读派生，不参与任何标准字段）。
+  // 界面拿它翻人话、并在估算低于昨日时点名拉低项——引擎不出文案，只出数。
+  const parts = {
+    ratioForm: yBowls > 0 && !!ySc && state.Share[0] > 0,
+    yBowls,
+    traffic: ySc ? scenario.trafficTotal / ySc.trafficTotal : 1,
+    ramp: state.YesterdayRamp ? rampNow(state) / state.YesterdayRamp : 1,
+    price: state.PriceCoefYday ? priceCoefFor(state, priceTierId, scenario) / state.PriceCoefYday : 1,
+    f: state.YesterdayF ? state.F / state.YesterdayF : 1,
+    share: estShare === null ? 1 : (state.Share[0] > 0 ? estShare / state.Share[0] : 1),
+    nextDay: state.next_day_traffic_mult,
+    event: eventMult,
+    reserve: reserveBowls,
+    floorApplied,
+    soldOutLift,
+    yD0: state.YesterdayD0 || 0,
+  };
   const display = {
-    estBowls: displayDemand,
+    estBowls: displayDemand * eventMult,
     supplyBowls: displaySupply.bowls,
     capped: disp.capped,
     lowConfidence: floorApplied ? false : lowConfidence,
@@ -267,6 +297,8 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
     tastingIncomeCents,
     tastingCostCents,
     reserveBowls,
+    eventMult,
+    parts,
     soupHalf: !!state.today.soupHalf,
     estWriteoffCents,
     estNetCents: disp.estNetCents - estWriteoffCents,

@@ -2,7 +2,7 @@
 // 红线照正本 3.1 / 3.4 / 九：不许出现品质数字、不许出现道德标签、不许有一句劝善或劝坏的话。
 import { CAT, SOLID_CATS, ALL_CATS, PRICE_TIERS, FACILITIES, ENDING, CONFIG, TIERS_STALL, START_CASH_CENTS, START_CREDIT_CAP_CENTS,
   PACKING, PACKING_NAMES, PREP_STATIONS, PREP_LEVELS, ADDITIVE, FLAVOR_DIMS, FLAVOR_DIM_NAMES, CLIENT_MIX,
-  TASTING, TOOLS, SCALE_AUTO_MUL, BLANCH, RETIRE_NP_CENTS, BUYOUT_PRICE_CENTS, SAVE_VERSION, CHEAP_TIER_WARNING } from '../data/constants.js';
+  TASTING, TOOLS, SCALE_AUTO_MUL, BLANCH, RETIRE_NP_CENTS, BUYOUT_PRICE_CENTS, DISPLAY_VERSION, CHEAP_TIER_WARNING } from '../data/constants.js';
 import { SKUS_BY_CAT, SKU_BY_ID } from '../data/skus.js';
 import { newGame, loadGame, saveGame, clearSave, makeRng, roundJin, centsToYuan } from '../index.js';
 import {
@@ -30,6 +30,7 @@ import { windCard } from './wind.js';
 import { broadcastLine, inoutTotals } from './settle-broadcast.js';
 // 事件选择落地后当场那一行（丙8）：只把公开效果翻人话，派生与词表都在这一层，引擎不认得它。
 import { choiceNote, resolvedOpenOps } from './choice-note.js';
+import { forecastChain, nextDayNotes } from './forecast-chain.js';
 import { mergeSelloutNames } from './sellout.js';
 // 营业屏气泡 / 金色浮字 / 夜晚信封（视觉批 I，工单 task-ui-visual-20261105）：文案与上限都在 feedfx.js 那一层，
 // 它零引擎 import、不写 state、不掷随机、不留计时器（撤掉 = 删这一行 + 下面调用点 + theme.css 那两块）。
@@ -1277,7 +1278,7 @@ const VIEWS = {
         <div><div class="muted">欠着</div><div class="num">${y(state.DebtSupplier)} 元</div></div>
         <div><div class="muted">可赊</div><div class="num">${y(creditAvailable(state))} 元</div></div>
       </div>
-      <p class="muted">存档存在这台设备的这个浏览器里，换浏览器或清浏览器数据就带不走。规则版本 ${SAVE_VERSION}。</p>
+      <p class="muted">存档存在这台设备的这个浏览器里，换浏览器或清浏览器数据就带不走。规则版本 ${DISPLAY_VERSION}。</p>
       <div class="row" style="margin-top:10px">
         <button class="ghost" data-act="mute">${isMuted() ? '声音：关' : '声音：开'}</button>
         <button class="ghost" data-act="intro">重看开场</button>
@@ -1626,6 +1627,8 @@ function forecastBar(fRaw) {
   return `<div class="forecast"><div class="k">试算（只看明账）${f.floorApplied
     ? ' <span class="low">昨日实卖太少，客流侧按基础量估</span>'
     : f.lowConfidence ? ' <span class="low">头一天没有昨日实卖，客流侧按开业基础量估</span>' : ''}</div>
+    <div class="k" style="margin-top:6px">${esc(forecastChain(f, state.today.scenario, state.YesterdayScenario,
+      preEvent ? envelopeTitle(preEvent.text) : null))}</div>
     <div class="grid3" style="margin-top:8px">
       <div><div class="k">按今天客流要</div><div class="v num">${need} 碗</div></div>
       <div><div class="k">这一篮只够出</div><div class="v num">${Math.round(f.supplyBowls)} 碗</div></div>
@@ -1643,7 +1646,7 @@ function forecastBar(fRaw) {
         ? `灶上一天出到 ${f.bottleneckBowls} 碗就满了，多买的菜今天出不掉`
         : `${CAT[f.bottleneck].name}只够出 ${f.bottleneckBowls} 碗，先补这一类`}</div>` : ''}
     ${f.reserveBowls > 0 ? `<div class="k" style="margin-top:6px">含今日预定 ${f.reserveBowls} 碗（社团那单与熟客顺延的预订，已经算进上面「按今天客流要」）</div>` : ''}
-    ${f.soupHalf ? '<div class="k" style="margin-top:6px">昨晚拿盆将就了：今儿汤底只能出一半的碗，上面「这一篮只够出」已经按减半算。</div>' : ''}
+    ${nextDayNotes(state).map(n => `<div class="k" style="margin-top:6px">${esc(n)}</div>`).join('')}
     <div class="k" style="margin-top:6px">预计净额里已经扣了隔夜报损 ${y(f.estWriteoffCents)} 元——汤底隔夜全损，当天清的货卖不完也全损，这一笔按「这一篮卖完柜里还剩多少」估。洗切要是选了跳过，报损还会再多一笔。</div>
     <div class="k" style="margin-top:6px">现金 ${y(state.Cash)} · 走赊 ${y(f.plan.creditUsed)} · 现付 ${y(f.plan.cashUsed)}</div></div>`;
 }
