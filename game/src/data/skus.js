@@ -19,7 +19,7 @@ export const SKUS = [
   { sku: 'BF3', cat: 'BF', tier: 3, supplier: '清仓摊', price: 4.5, unit: '斤', q: QUALITY_BY_TIER[3], receipt: 'none', credit: false, keep: false, desc: '散装菌菇，产地不明，纸箱是别人家的' },
   { sku: 'BF6', cat: 'BF', tier: 6, supplier: '强哥', price: 2.8, unit: '斤', q: QUALITY_BY_TIER[6], receipt: 'none', credit: false, keep: false, desc: '碎豆渣压的块，泡水里涨得很快' },
   { sku: 'SP1', cat: 'SP', tier: 1, supplier: '自家后厨', price: 1.2, unit: '份', q: QUALITY_BY_TIER[1], receipt: 'excluded', credit: false, keep: false, desc: '牛骨头今早熬上的，锅里看得见浮油；一熬就是一整天' },
-  { sku: 'SP2', cat: 'SP', tier: 2, supplier: '批发市场', price: 0.8, unit: '份', q: QUALITY_BY_TIER[2], receipt: 'draw', credit: false, keep: false, desc: '品牌料包，撕开倒进去，一包兑一锅' },
+  { sku: 'SP2', cat: 'SP', tier: 2, supplier: '批发市场', price: 0.8, unit: '份', q: QUALITY_BY_TIER[2], receipt: 'draw', credit: true, keep: false, desc: '品牌料包，撕开倒进去，一包兑一锅' },
   { sku: 'SP3', cat: 'SP', tier: 3, supplier: '清仓摊', price: 0.4, unit: '份', q: QUALITY_BY_TIER[3], receipt: 'none', credit: false, keep: false, desc: '摊上挂着"老汤"牌子的桶装汤底，桶壁有旧油垢，没日期' },
   { sku: 'SP6', cat: 'SP', tier: 6, supplier: '强哥', price: 0.25, unit: '份', q: QUALITY_BY_TIER[6], receipt: 'none', credit: false, keep: false, desc: '强哥自己兑的浓汤宝，一勺能推半条街的香' },
   { sku: 'NS1', cat: 'NS', tier: 1, supplier: '粉坊', price: 5, unit: '斤', q: QUALITY_BY_TIER[1], receipt: 'auto', credit: true, keep: true, desc: '手工粉，切得不齐，煮久了也不浑汤' },

@@ -1557,6 +1557,8 @@ function shelfRow(cat, forecast) {
   const d = forecast.display ?? forecast;
   return `<div class="panel"><div class="row shelfhead"><h3>${CAT[cat].name}${cat === 'SP' ? '（份）' : '（斤）'}</h3>
       <span class="muted">柜里 ${have}${cat === 'SP' ? ' 份' : ''}${soupT} · 试算今天能出 <span data-fc-bowls>${d.capped.toFixed(0)}</span> 碗</span>${delist}</div>
+    ${cat === 'SP' ? `<p class="muted" data-soup-credit-rule>汤底里只有批发市场料包能赊账，自家熬的、清仓摊的、强哥的都只收现钱。</p>
+      ${state.Cash < 10000 ? `<p class="negv" data-soup-cash-warning>现金只剩 ${y(state.Cash)} 元——汤底（料包除外）得留现钱买，别花光。</p>` : ''}` : ''}
     <div class="shelf">${list.map(s => skuCard(cat, s, forecast)).join('')}${absent ? absentCard(cat) : ''}</div></div>`;
 }
 
@@ -1651,18 +1653,18 @@ function forecastBar(fRaw) {
     <div class="k" style="margin-top:6px">现金 ${y(state.Cash)} · 走赊 ${y(f.plan.creditUsed)} · 现付 ${y(f.plan.cashUsed)}</div></div>`;
 }
 
-// 实测问题 #4：赊账没有开关，触发条件是「现钱不够时才自动走赊，且只走熟人正经货」，
-// 屏上必须写明这条并让本篮逐笔看出哪行走赊、哪行走现钱（汤底与非熟人货只收现金）
+// 实测问题 #4：赊账没有开关，现钱不够时才自动走赊，逐笔拆分与付款计划同源。
+// 汤底单 2026-11-12：SP2 料包也可赊，付款提示不再把所有汤底都说成只收现金。
 function buyPanel(f) {
   const { plan } = f;
   if (plan.submittable) {
     return `<div class="panel good">
       <button class="go" data-act="submit">就这一篮，付钱</button>
       ${basketSplit(plan)}
-      <p class="muted" style="margin-top:6px">现钱够就全走现钱；现钱不够的那一截才自动挂到熟人账上（只走带信用关系的正经货，${y(creditAvailable(state))} 元额度以内）。</p></div>`;
+      <p class="muted" style="margin-top:6px">现钱够就全走现钱；现钱不够的那一截才自动赊账（只走标着「可赊」的货，含批发市场汤底料包，${y(creditAvailable(state))} 元额度以内）。</p></div>`;
   }
   return `<div class="panel accent">
-    <p class="negv">这一篮付不齐：现钱要出 ${y(plan.cashUsed)}，手上 ${y(Math.max(0, state.Cash))}；可赊 ${y(creditAvailable(state))} 只走熟人正经货（汤底和别家货只收现金）。柜里的钱不会自己变多。整篮驳回，不自动减量——点「照手上的钱缩一缩」那一颗。</p>
+    <p class="negv">这一篮付不齐：现钱要出 ${y(plan.cashUsed)}，手上 ${y(Math.max(0, state.Cash))}；可赊 ${y(creditAvailable(state))} 只走标着「可赊」的货（汤底只有批发市场料包能赊，其余汤底只收现钱）。柜里的钱不会自己变多。整篮驳回，不自动减量——点「照手上的钱缩一缩」那一颗。</p>
     ${basketSplit(plan)}
     <div class="row" style="margin-top:8px">
       <button class="ghost" data-act="shrink">照手上的钱缩一缩</button>

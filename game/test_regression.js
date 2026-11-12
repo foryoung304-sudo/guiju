@@ -160,6 +160,61 @@ for (const key of ['clean', 'mid', 'cheap']) {
     p3.submittable === false && p3.shortfallCents > 0, `合计 ${p3.total} 现钱 100.00 缺口 ${p3.shortfallCents}`);
 }
 
+// ── 3b.1. 汤底单 2026-11-12：只放开 SP2，规则常驻汤底货架、现金 <100 元才预警 ──
+{
+  check('汤底赊购·数据：SP2 可赊，SP1 / SP3 / SP6 仍只收现钱',
+    SKU_BY_ID.SP2.credit === true
+      && ['SP1', 'SP3', 'SP6'].every(id => SKU_BY_ID[id].credit === false));
+  const s = newGame(SEED);
+  beginDay(s);
+  s.Cash = 0; s.DebtSupplier = 0;
+  const plan = picks => planPayment(s, buildBasket(s, picks));
+  const pack = plan([{ sku: 'SP2', qty: 10 }]);
+  check('汤底赊购·现金 0：纯料包篮可提交，汤底全额走赊、现付为 0',
+    pack.total > 0 && pack.submittable === true && pack.creditUsed === pack.total
+      && pack.cashUsed === 0 && pack.lines[0].credit === pack.total,
+    `合计 ${pack.total} 走赊 ${pack.creditUsed} 现付 ${pack.cashUsed}`);
+  const home = plan([{ sku: 'SP1', qty: 10 }]);
+  check('汤底赊购·现金 0：自家汤底篮不可提交，不挪用可用额度',
+    home.submittable === false && home.creditUsed === 0 && home.shortfallCents === home.total,
+    `合计 ${home.total} 走赊 ${home.creditUsed} 缺口 ${home.shortfallCents}`);
+  const mixed = plan([{ sku: 'SP2', qty: 10 }, { sku: 'SP1', qty: 1 }]);
+  check('汤底赊购·混篮不绕过现钱门：料包走赊，自家汤底仍缺现钱，整篮驳回',
+    mixed.submittable === false && mixed.lines[0].credit === mixed.lines[0].cost
+      && mixed.lines[1].credit === 0 && mixed.shortfallCents === mixed.lines[1].cost);
+  s.DebtSupplier = s.CreditCap;
+  const exhausted = plan([{ sku: 'SP2', qty: 10 }]);
+  check('汤底赊购·额度用尽不能超赊：现金 0 的料包篮也驳回',
+    exhausted.submittable === false && exhausted.creditUsed === 0);
+
+  // 沿用 §31 的真实模板执行法；不复制显示逻辑、不为测试给产品添加入口。
+  const mainRaw = readFileSync(join(HERE, 'src/ui/main.js'), 'utf8');
+  const start = mainRaw.indexOf('function shelfRow(cat, forecast) {');
+  const shelfSrc = mainRaw.slice(start, mainRaw.indexOf('\nfunction absentCard(', start));
+  const draw = new Function('state', 'rng', 'SKUS_BY_CAT', 'skuAvailable', 'CAT', 'skuCard', 'absentCard', 'y',
+    `${shelfSrc}; return shelfRow;`)(s, makeRng(s), SKUS_BY_CAT, skuAvailable, CAT,
+      (_cat, sku) => `<button data-test-buy="${sku.sku}"></button>`, () => '', c => (c / 100).toFixed(2));
+  const rule = '汤底里只有批发市场料包能赊账，自家熬的、清仓摊的、强哥的都只收现钱。';
+  const samples = [-100, 0, 9999, 10000, 10001].map(cash => {
+    s.Cash = cash;
+    return { cash, html: draw('SP', { capped: 0 }) };
+  });
+  check('汤底公示·各现金档常驻且位于汤底购买按钮之前，不藏在付钱之后',
+    samples.every(({ html }) => html.split(rule).length === 2
+      && html.indexOf('data-soup-credit-rule') < html.indexOf('data-test-buy="SP1"')));
+  check('汤底预警·负数 / 0 / 99.99 元显示实际余额，100 / 100.01 元不显示',
+    samples.every(({ cash, html }) => cash < 10000
+      ? html.includes(`现金只剩 ${(cash / 100).toFixed(2)} 元——汤底（料包除外）得留现钱买，别花光。`)
+      : !html.includes('data-soup-cash-warning')));
+  s.Cash = 0;
+  check('汤底公示·只在 SP 区出现，不在其他五类货架重复',
+    SOLID_CATS.every(cat => !/data-soup-credit-rule|data-soup-cash-warning/.test(draw(cat, { capped: 0 }))));
+  check('汤底公示·付款区同步承认料包可赊，不残留全部汤底只收现金的旧说法',
+    mainRaw.includes('只走标着「可赊」的货，含批发市场汤底料包')
+      && mainRaw.includes('汤底只有批发市场料包能赊，其余汤底只收现钱')
+      && !mainRaw.includes('汤底和别家货只收现金'));
+}
+
 // ── 3c. 附录 A 条件 DSL 的设施/事件探针：挂过牌就不该再被同一件事追着 ──
 {
   const s = newGame(SEED);
