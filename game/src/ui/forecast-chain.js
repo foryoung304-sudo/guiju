@@ -75,7 +75,15 @@ const PULL_ORDER = ['traffic', 'ramp', 'price', 'f', 'share', 'nextDay', 'buff',
 const NEAR_ONE = 0.999;   // 浮点尾巴不算拉低（净化口径同 §复现单：只清尾巴，不改判定）
 
 function pullers(p) {
-  return PULL_ORDER.filter(k => p[k] < NEAR_ONE).map(k => PULL_TALK[k]);
+  return PULL_ORDER.filter(k => p[k] < NEAR_ONE).map(k => k === 'buff' ? buffPullTalk(p) : PULL_TALK[k]);
+}
+
+// 文案修补单（2026-11-14）：buff 拉低项按今值动态选词，不再只看 delta 符号。
+// 今值<1＝余波压着客流／今值>1＝提振的劲儿弱了／今值=1 走静态默认「提振的劲儿过了」（提振结束）。
+function buffPullTalk(p) {
+  if (p.buffToday < 1) return '余波压着客流';
+  if (p.buffToday > 1) return '提振的劲儿弱了';
+  return PULL_TALK.buff;
 }
 
 // 一条链，纯文本（HTML 由调用方包）。f = forecast.display，sc/ySc = 今日/昨日情境，evTitle = 采购前公示那条事件的短名。
@@ -99,7 +107,12 @@ export function forecastChain(f, sc, ySc, evTitle) {
     const pct = Math.round((f.eventMult - 1) * 100);
     bonus.push(`${evTitle || '今儿这件事'} ${pct > 0 ? '+' : '−'}${Math.abs(pct)}%`);
   }
-  if (p && p.buff > 1) bonus.push('提振的劲儿还在');
+  if (p && p.buff > 1) {
+    // 文案修补单（2026-11-14）：bonus 段按今值分情形——今值=1 是余波解除，今值>1 才是提振生效/增强
+    if (p.buffToday === 1) bonus.push('余波散了');
+    else if (p.buffToday > 1) bonus.push('提振的劲儿还在');
+    // 今值<1（余波上叠提振、仍压客流）：情形表未覆盖，沉默不念，登记 §111 待 Orange 裁
+  }
   if (f.reserveBowls > 0) bonus.push(`含预定 ${f.reserveBowls} 碗`);
   if (bonus.length) segs.push(bonus.join('，'));
   if (ratioForm && need < Math.round(p.yBowls)) {

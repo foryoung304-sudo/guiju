@@ -5385,8 +5385,8 @@ for (const seed of [SEED, 7979, 36832]) {
   const fw2a = previewBasket(W2.s, [], 'qinmin').forecast;
   W2.s.YesterdayD0Buff = 0.85;
   const fw2b = previewBasket(W2.s, [], 'qinmin').forecast;
-  check('§36 针4b·余波末日：昨 0.85、今 1 时 display＝同锚未除值 ÷0.85（回升），delta=1/0.85≈1.176 按单上机械规则进 bonus 段；'
-      + '「提振的劲儿还在」用于余波回升的语义贴合度只登记回报、不自行改词（两句为 Orange 定稿）',
+  check('§36 针4b·余波末日：昨 0.85、今 1 时 display＝同锚未除值 ÷0.85（回升），delta=1/0.85≈1.176>1 进 bonus 段；'
+      + '文案修补单（2026-11-14）裁定：今值=1 属余波解除，bonus 念「余波散了」而非「提振的劲儿还在」（数值断言不动，选词见 §37）',
     Math.abs(fw2b.display.estBowls * 0.85 - fw2a.display.estBowls) < 1e-9
       && Math.abs(fw2b.display.parts.buff - 1 / 0.85) < 1e-9 && fw2b.estBowls === fw2a.estBowls,
     `未除 ${fw2a.display.estBowls.toFixed(4)} → 除后 ${fw2b.display.estBowls.toFixed(4)} 碗｜delta ${fw2b.display.parts.buff.toFixed(4)}`);
@@ -5508,6 +5508,122 @@ for (const seed of [SEED, 7979, 36832]) {
       && simRaw36.includes('.forecast.estBowls') && simRaw36.includes('.forecast.plan.submittable')
       && chainRaw36.includes("const PULL_ORDER = ['traffic', 'ramp', 'price', 'f', 'share', 'nextDay', 'buff', 'event'];"),
     '四处落点原文在场｜标准侧与 sim 读取未动');
+}
+
+// ── §37 试算提振文案修补单 guiju-forecast-buff-wording-fix-20261114（Orange §一百一十验收附带裁定）──
+// 数字与判定全冻结，只改链上 buff 一格选词：按（今值 buffToday，delta）分情形，不再只看 delta 符号。
+// 情形表：delta>1 今>1→bonus「提振的劲儿还在」／delta>1 今=1→bonus「余波散了」／
+//         delta<1 今<1→拉低「余波压着客流」／delta<1 今=1→拉低「提振的劲儿过了」／delta<1 今>1→拉低「提振的劲儿弱了」。
+// delta=1 两侧沉默。今值<1 且 delta>1（余波上叠提振、仍压客流）情形表未覆盖→沉默不念，登记 §111 待裁。
+{
+  const chainRaw37 = readFileSync(join(HERE, 'src/ui/forecast-chain.js'), 'utf8');
+  const ledgerRaw37 = readFileSync(join(HERE, 'src/engine/ledger.js'), 'utf8');
+
+  // 对平夹具同 §36：六项比值全 1、P=Rep ⇒ 比值式锚＝结算 7a 的 D0；昨日实卖锚照昨日真实 buff 抬过
+  const aligned37 = () => {
+    const s = newGame(SEED);
+    beginDay(s);
+    const sc = scenarioOf('sunny', 10);
+    s.today.scenario = sc; s.YesterdayScenario = sc;
+    s.competitionOn = false;
+    s.RampDays = 0; s.YesterdayRamp = 1;
+    s.PriceTier = 'qinmin'; s.PriceCoefYday = priceCoefFor(s, 'qinmin', sc);
+    s.YesterdayF = s.F; s.P = s.Rep;
+    s.R = 0; s.R_v = 0; s.TastingCount = 0;
+    s.event_reserve_bowls = 0; s.reg_reserved_bowls = 0;
+    s.next_day_traffic_mult = 1; s.d0_buff_mult = 1; s.d0_buff_days = 0;
+    s.event_demand_mult = 1;
+    s.StockSoup = 400; for (const c of SOLID_CATS) s.StockSolid[c] = 400;
+    const D0 = s.BaseSales * sc.trafficTotal * priceCoefFor(s, 'qinmin', sc) * (0.75 + s.Rep * 0.005) * s.F;
+    s.YesterdaySoldBowls = D0; s.YesterdayD0 = D0; s.YesterdaySoldOut = false;
+    return { s, sc, D0 };
+  };
+  const chainOf = s => forecastChain(previewBasket(s, [], 'qinmin').forecast.display, s.today.scenario, s.YesterdayScenario, null);
+  const setBuff = (s, yBuff, today, days, anchorMul) => {
+    const D0 = s.BaseSales * s.today.scenario.trafficTotal * priceCoefFor(s, 'qinmin', s.today.scenario) * (0.75 + s.Rep * 0.005) * s.F;
+    s.YesterdayD0Buff = yBuff; s.d0_buff_mult = today; s.d0_buff_days = days;
+    s.YesterdaySoldBowls = D0 * anchorMul; s.YesterdayD0 = D0 * anchorMul;
+    return D0;
+  };
+
+  // ── 针 1：余波末日（昨 0.85、今 1）bonus 念「余波散了」，不念「提振的劲儿还在」──
+  const A37 = aligned37();
+  setBuff(A37.s, 0.85, 1, 1, 0.85);
+  const fa37 = previewBasket(A37.s, [], 'qinmin').forecast;
+  const ca37 = chainOf(A37.s);
+  check('§37 针1·余波末日：delta=1/0.85>1 且今值=1 → bonus 段含「余波散了」、不含「提振的劲儿还在」；parts.buffToday=1/buffYday=0.85',
+    ca37.includes('余波散了') && !ca37.includes('提振的劲儿还在')
+      && fa37.display.parts.buffToday === 1 && fa37.display.parts.buffYday === 0.85
+      && Math.abs(fa37.display.parts.buff - 1 / 0.85) < 1e-9,
+    `[${ca37}]`);
+
+  // ── 针 2：余波首日（昨 1、今 0.85，估算低于昨日）拉低项念「余波压着客流」，不念「提振的劲儿过了」──
+  const B37 = aligned37();
+  setBuff(B37.s, 1, 0.85, 2, 1);
+  const fb37 = previewBasket(B37.s, [], 'qinmin').forecast;
+  const cb37 = chainOf(B37.s);
+  check('§37 针2·余波首日：delta=0.85<1 且今值<1、估算低于昨日 → 拉低项含「余波压着客流」、不含「提振的劲儿过了」；parts.buffToday=0.85',
+    cb37.includes('余波压着客流') && !cb37.includes('提振的劲儿过了')
+      && fb37.display.parts.buffToday === 0.85 && fb37.display.parts.buffYday === 1
+      && Math.round(fb37.display.estBowls) < Math.round(B37.s.YesterdaySoldBowls),
+    `[${cb37}]`);
+
+  // ── 针 3：提振减弱（昨 1.3225=1.15×1.15、今 1.15）拉低项念「提振的劲儿弱了」──
+  const C37 = aligned37();
+  setBuff(C37.s, 1.3225, 1.15, 2, 1.3225);
+  const fc37 = previewBasket(C37.s, [], 'qinmin').forecast;
+  const cc37 = chainOf(C37.s);
+  check('§37 针3·提振减弱：delta=1.15/1.3225<1 且今值>1、估算低于昨日 → 拉低项含「提振的劲儿弱了」、不含「余波压着客流」；parts.buffToday=1.15',
+    cc37.includes('提振的劲儿弱了') && !cc37.includes('余波压着客流')
+      && fc37.display.parts.buffToday === 1.15 && Math.abs(fc37.display.parts.buffYday - 1.3225) < 1e-9,
+    `[${cc37}]`);
+
+  // ── 针 4：提振首日／末日原两句复核不回退（对 §36 针 3／针 8 的链侧再验一遍）──
+  const D37 = aligned37(); setBuff(D37.s, 1, 1.15, 3, 1);
+  const E37 = aligned37(); setBuff(E37.s, 1.15, 1, 1, 1.15);
+  const cd37 = chainOf(D37.s), ce37 = chainOf(E37.s);
+  check('§37 针4·原两句不回退：提振首日（今 1.15>1）bonus 仍「提振的劲儿还在」；提振末日（今=1、delta<1）拉低仍「提振的劲儿过了」',
+    cd37.includes('提振的劲儿还在') && !cd37.includes('余波散了')
+      && ce37.includes('提振的劲儿过了') && !ce37.includes('余波压着客流'),
+    `首 [${cd37}]｜末 [${ce37}]`);
+
+  // ── 针 5：delta=1 持续日两侧沉默（靠锚带入，不许误报任何一句）──
+  const F37 = aligned37(); setBuff(F37.s, 1.15, 1.15, 2, 1.15);
+  const cf37 = chainOf(F37.s);
+  check('§37 针5·持续日沉默：昨=今=1.15 delta=1，五句 buff 文案一律不出现',
+    !['提振的劲儿还在', '提振的劲儿过了', '提振的劲儿弱了', '余波散了', '余波压着客流'].some(t => cf37.includes(t)),
+    `[${cf37}]`);
+
+  // ── 针 6：未覆盖格（余波上叠提振、仍压客流：昨 0.85、今 0.9775=0.85×1.15）delta>1 今<1 → 沉默不念，登记待裁 ──
+  const G37 = aligned37(); const D0g = setBuff(G37.s, 0.85, 0.9775, 2, 0.85);
+  const fg37 = previewBasket(G37.s, [], 'qinmin').forecast;
+  const cg37 = chainOf(G37.s);
+  check('§37 针6·未覆盖格沉默：delta=0.9775/0.85=1.15>1 但今值 0.9775<1，情形表无此格 → bonus/拉低都不念 buff（不自创文案，登记 §111）；数值仍＝锚×delta',
+    fg37.display.parts.buff > 1 && fg37.display.parts.buffToday < 1
+      && !['提振的劲儿还在', '余波散了'].some(t => cg37.includes(t))
+      && Math.abs(fg37.display.estBowls - D0g * 0.9775) < 1e-6,
+    `[${cg37}]｜delta ${fg37.display.parts.buff.toFixed(4)} 今 ${fg37.display.parts.buffToday}`);
+
+  // ── 针 7：非比值式 buffYday 按 1 报（与 buffDelta 既有口径同源），今值>1 仍念「还在」──
+  const H37 = aligned37();
+  H37.s.YesterdaySoldBowls = 0; H37.s.YesterdayScenario = null;
+  H37.s.d0_buff_mult = 1.15; H37.s.d0_buff_days = 3;
+  const fh37 = previewBasket(H37.s, [], 'qinmin').forecast;
+  check('§37 针7·非比值式派生：无昨日时 parts.buffYday=1、buffToday=1.15、buff=buffToday；lowConfidence 不被改写',
+    fh37.display.parts.buffYday === 1 && fh37.display.parts.buffToday === 1.15
+      && fh37.display.parts.buff === 1.15 && fh37.display.lowConfidence === true,
+    `buffYday ${fh37.display.parts.buffYday}｜buffToday ${fh37.display.parts.buffToday}`);
+
+  // ── 针 8：结构护栏——三句新文案定稿在场、静态默认保留（§36 针8 raw 断言不回退）、其余因子文案与顺序未动、nextDayNotes 未动 ──
+  check('§37 针8·结构护栏：「余波散了」「余波压着客流」「提振的劲儿弱了」三句定稿在场；PULL_TALK.buff 静态默认与 bonus「还在」串保留；'
+      + 'PULL_ORDER 及其余因子文案逐字未动；ledger 只增 buffToday/buffYday 两枚派生、buff(delta) 计算行未动',
+    chainRaw37.includes('余波散了') && chainRaw37.includes('余波压着客流') && chainRaw37.includes('提振的劲儿弱了')
+      && chainRaw37.includes("buff: '提振的劲儿过了'") && chainRaw37.includes("bonus.push('提振的劲儿还在')")
+      && chainRaw37.includes("const PULL_ORDER = ['traffic', 'ramp', 'price', 'f', 'share', 'nextDay', 'buff', 'event'];")
+      && chainRaw37.includes("traffic: '上面那条情境变化'") && chainRaw37.includes("event: '今儿这件事压了客流'")
+      && ledgerRaw37.includes('buffToday,') && ledgerRaw37.includes('buffYday:')
+      && ledgerRaw37.includes('const buffToday = state.d0_buff_mult || 1;') && ledgerRaw37.includes('displayEstBowls *= buffDelta;'),
+    '三句定稿在场｜静态默认与其余因子未动｜数值计算行未动');
 }
 
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，

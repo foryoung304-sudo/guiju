@@ -282,6 +282,9 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
     share: estShare === null ? 1 : (state.Share[0] > 0 ? estShare / state.Share[0] : 1),
     nextDay: state.next_day_traffic_mult,
     buff: buffDelta,
+    // 文案修补单（2026-11-14）：buff 一格选词要看今值/昨值，不只 delta 符号；两枚只读派生，数值不参与任何标准字段
+    buffToday,
+    buffYday: (yBowls > 0 && ySc && state.Share[0] > 0) ? (state.YesterdayD0Buff || 1) : 1,
     event: eventMult,
     reserve: reserveBowls,
     floorApplied,
