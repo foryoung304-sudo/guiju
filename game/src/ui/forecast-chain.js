@@ -111,7 +111,8 @@ export function forecastChain(f, sc, ySc, evTitle) {
     // 文案修补单（2026-11-14）：bonus 段按今值分情形——今值=1 是余波解除，今值>1 才是提振生效/增强
     if (p.buffToday === 1) bonus.push('余波散了');
     else if (p.buffToday > 1) bonus.push('提振的劲儿还在');
-    // 今值<1（余波上叠提振、仍压客流）：情形表未覆盖，沉默不念，登记 §111 待 Orange 裁
+    // 补句单（2026-11-14）：今值<1＝余波未散但比昨日轻（层到期/叠提振两成因都成立），只描状态不猜成因；情形表至此全覆盖
+    else bonus.push('余波轻了些');
   }
   if (f.reserveBowls > 0) bonus.push(`含预定 ${f.reserveBowls} 碗`);
   if (bonus.length) segs.push(bonus.join('，'));

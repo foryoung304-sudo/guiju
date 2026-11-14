@@ -5594,13 +5594,16 @@ for (const seed of [SEED, 7979, 36832]) {
     !['提振的劲儿还在', '提振的劲儿过了', '提振的劲儿弱了', '余波散了', '余波压着客流'].some(t => cf37.includes(t)),
     `[${cf37}]`);
 
-  // ── 针 6：未覆盖格（余波上叠提振、仍压客流：昨 0.85、今 0.9775=0.85×1.15）delta>1 今<1 → 沉默不念，登记待裁 ──
+  // ── 针 6：补句单改判（昨 0.85、今 0.9775=0.85×1.15）delta>1 今<1 → bonus 念「余波轻了些」，情形表全覆盖 ──
   const G37 = aligned37(); const D0g = setBuff(G37.s, 0.85, 0.9775, 2, 0.85);
   const fg37 = previewBasket(G37.s, [], 'qinmin').forecast;
   const cg37 = chainOf(G37.s);
-  check('§37 针6·未覆盖格沉默：delta=0.9775/0.85=1.15>1 但今值 0.9775<1，情形表无此格 → bonus/拉低都不念 buff（不自创文案，登记 §111）；数值仍＝锚×delta',
+  check('§37 针6·补句单改判：delta=0.9775/0.85=1.15>1 且今值 0.9775<1（余波未散但比昨日轻）→ bonus 含「余波轻了些」、不含其余五句 buff 文案；'
+      + '数值断言不动（显示＝锚×delta）；「余波轻了些」为 Orange 定稿照落（§111 登记的未覆盖格至此全覆盖）',
     fg37.display.parts.buff > 1 && fg37.display.parts.buffToday < 1
-      && !['提振的劲儿还在', '余波散了'].some(t => cg37.includes(t))
+      && cg37.includes('余波轻了些')
+      && !['提振的劲儿还在', '提振的劲儿过了', '提振的劲儿弱了', '余波散了', '余波压着客流'].some(t => cg37.includes(t))
+      && chainRaw37.includes('余波轻了些')
       && Math.abs(fg37.display.estBowls - D0g * 0.9775) < 1e-6,
     `[${cg37}]｜delta ${fg37.display.parts.buff.toFixed(4)} 今 ${fg37.display.parts.buffToday}`);
 
