@@ -5301,6 +5301,215 @@ for (const seed of [SEED, 7979, 36832]) {
     `正文 ${ev01.text.length} 字｜选项 ${ev01.actions.map(a => a.label).join(' / ')}（未动）`);
 }
 
+// ── §36 试算提振显示单 guiju-forecast-buff-display-order-20261113（Orange 2026-11-13 夜读码定罪、店主拍板「修」）──
+// 标准侧冻结：estBowls / ratioEst / baseEst 逐字不动，sim 与两带只读标准侧；四处落点＝ops 被动记录（归 1 前）／
+// day 第 12 步滚动 YesterdayD0Buff／ledger 显示侧 buffDelta（地板/托底取舍之后、只乘估算分量）／chain 两句定稿文案。
+{
+  const ledgerRaw36 = readFileSync(join(HERE, 'src/engine/ledger.js'), 'utf8');
+  const opsRaw36 = readFileSync(join(HERE, 'src/engine/ops.js'), 'utf8');
+  const dayRaw36 = readFileSync(join(HERE, 'src/engine/day.js'), 'utf8');
+  const chainRaw36 = readFileSync(join(HERE, 'src/ui/forecast-chain.js'), 'utf8');
+  const simRaw36 = readFileSync(join(HERE, 'src/sim.js'), 'utf8');
+
+  // 对平夹具同 §35：六项比值全 1、熟客/试吃/预定全 0、P=Rep ⇒ 比值式锚＝结算 7a 的 D0
+  const aligned36 = () => {
+    const s = newGame(SEED);
+    beginDay(s);
+    const sc = scenarioOf('sunny', 10);
+    s.today.scenario = sc; s.YesterdayScenario = sc;
+    s.competitionOn = false;
+    s.RampDays = 0; s.YesterdayRamp = 1;
+    s.PriceTier = 'qinmin'; s.PriceCoefYday = priceCoefFor(s, 'qinmin', sc);
+    s.YesterdayF = s.F; s.P = s.Rep;
+    s.R = 0; s.R_v = 0; s.TastingCount = 0;
+    s.event_reserve_bowls = 0; s.reg_reserved_bowls = 0;
+    s.next_day_traffic_mult = 1; s.d0_buff_mult = 1; s.d0_buff_days = 0;
+    s.event_demand_mult = 1;
+    s.StockSoup = 400; for (const c of SOLID_CATS) s.StockSolid[c] = 400;
+    const D0 = s.BaseSales * sc.trafficTotal * priceCoefFor(s, 'qinmin', sc) * (0.75 + s.Rep * 0.005) * s.F;
+    s.YesterdaySoldBowls = D0; s.YesterdayD0 = D0; s.YesterdaySoldOut = false;
+    return { s, sc, D0 };
+  };
+  const baseEst36 = s => s.BaseSales * s.today.scenario.trafficTotal * priceCoefFor(s, 'qinmin', s.today.scenario)
+    * s.F * (0.75 + s.P * 0.005) + Math.round(s.R * 0.5);
+
+  // ── 针 1：提振首日（昨 buff=1、今 1.15）显示 ×1.15，标准逐值不变 ──
+  const F36 = aligned36();
+  const f0 = previewBasket(F36.s, [], 'qinmin').forecast;
+  F36.s.d0_buff_mult = 1.15; F36.s.d0_buff_days = 3;
+  const f1 = previewBasket(F36.s, [], 'qinmin').forecast;
+  check('§36 针1·提振首日：昨 buff=1、今 1.15 时 display.estBowls＝原显示 ×1.15（1e-9 内），parts.buff 报 1.15 供翻人话；'
+      + '同条件标准 estBowls 逐值不变（sim/两带读不到这一支）',
+    Math.abs(f1.display.estBowls - f0.display.estBowls * 1.15) < 1e-9
+      && Math.abs(f1.displayEstBowls - f0.displayEstBowls * 1.15) < 1e-9
+      && f1.display.parts.buff === 1.15 && f1.estBowls === f0.estBowls,
+    `显示 ${f0.display.estBowls.toFixed(4)} → ${f1.display.estBowls.toFixed(4)} 碗｜标准 ${f1.estBowls.toFixed(4)}（未动）`);
+
+  // ── 针 2：持续日（昨=今=1.15）delta=1，显示与原口径逐值一致 ──
+  const C36 = aligned36();
+  C36.s.YesterdayD0Buff = 1.15; C36.s.d0_buff_mult = 1.15; C36.s.d0_buff_days = 2;
+  const f2 = previewBasket(C36.s, [], 'qinmin').forecast;
+  check('§36 针2·提振持续日：昨=今=1.15 时 buffDelta=1，display 与无 buff 原口径逐值一致，持续期靠昨日实卖锚带入',
+    f2.display.parts.buff === 1 && f2.display.estBowls === f0.display.estBowls && f2.estBowls === f0.estBowls,
+    `delta ${f2.display.parts.buff}｜显示 ${f2.display.estBowls.toFixed(4)} 碗`);
+
+  // ── 针 3：末日（昨 1.15、今 1）显示 ÷1.15，且低于昨日实卖时链点名「提振的劲儿过了」──
+  const L36 = aligned36();
+  L36.s.YesterdaySoldBowls = L36.D0 * 1.15; L36.s.YesterdayD0 = L36.D0 * 1.15;
+  L36.s.d0_buff_mult = 1; L36.s.d0_buff_days = 1;
+  L36.s.YesterdayD0Buff = 1;
+  const f3a = previewBasket(L36.s, [], 'qinmin').forecast;
+  L36.s.YesterdayD0Buff = 1.15;
+  const f3b = previewBasket(L36.s, [], 'qinmin').forecast;
+  const chain3 = forecastChain(f3b.display, L36.s.today.scenario, L36.s.YesterdayScenario, null);
+  check('§36 针3·提振末日：昨 1.15、今 1 时 display＝同锚未除值 ÷1.15；display 低于昨日实卖时链文本点名含「提振的劲儿过了」，'
+      + '标准 estBowls 仍是被 1.15 抬过的昨日锚折算值、逐值不动',
+    Math.abs(f3b.display.estBowls * 1.15 - f3a.display.estBowls) < 1e-9
+      && f3b.estBowls === f3a.estBowls
+      && Math.round(f3b.display.estBowls) < Math.round(L36.s.YesterdaySoldBowls)
+      && chain3.includes('提振的劲儿过了'),
+    `未除 ${f3a.display.estBowls.toFixed(4)} → 除后 ${f3b.display.estBowls.toFixed(4)} 碗｜链 [${chain3}]`);
+
+  // ── 针 4：余波侧 0.85 首日／末日同构各一针 ──
+  const W1 = aligned36();
+  W1.s.d0_buff_mult = 0.85; W1.s.d0_buff_days = 2;
+  const fw1 = previewBasket(W1.s, [], 'qinmin').forecast;
+  check('§36 针4a·余波首日：昨 1、今 0.85 时 display＝原显示 ×0.85，parts.buff=0.85，标准逐值不变',
+    Math.abs(fw1.display.estBowls - f0.display.estBowls * 0.85) < 1e-9
+      && fw1.display.parts.buff === 0.85 && fw1.estBowls === f0.estBowls,
+    `显示 ${fw1.display.estBowls.toFixed(4)} 碗（原 ${f0.display.estBowls.toFixed(4)} ×0.85）`);
+  const W2 = aligned36();
+  W2.s.YesterdaySoldBowls = W2.D0 * 0.85; W2.s.YesterdayD0 = W2.D0 * 0.85;
+  W2.s.d0_buff_mult = 1; W2.s.d0_buff_days = 1;
+  W2.s.YesterdayD0Buff = 1;
+  const fw2a = previewBasket(W2.s, [], 'qinmin').forecast;
+  W2.s.YesterdayD0Buff = 0.85;
+  const fw2b = previewBasket(W2.s, [], 'qinmin').forecast;
+  check('§36 针4b·余波末日：昨 0.85、今 1 时 display＝同锚未除值 ÷0.85（回升），delta=1/0.85≈1.176 按单上机械规则进 bonus 段；'
+      + '「提振的劲儿还在」用于余波回升的语义贴合度只登记回报、不自行改词（两句为 Orange 定稿）',
+    Math.abs(fw2b.display.estBowls * 0.85 - fw2a.display.estBowls) < 1e-9
+      && Math.abs(fw2b.display.parts.buff - 1 / 0.85) < 1e-9 && fw2b.estBowls === fw2a.estBowls,
+    `未除 ${fw2a.display.estBowls.toFixed(4)} → 除后 ${fw2b.display.estBowls.toFixed(4)} 碗｜delta ${fw2b.display.parts.buff.toFixed(4)}`);
+
+  // ── 针 5：非 ratioForm（首日/无昨日）buff 生效时 display＝baseEst 显示值 ×buffToday ──
+  const G36 = aligned36();
+  G36.s.YesterdaySoldBowls = 0; G36.s.YesterdayScenario = null;
+  const g0 = previewBasket(G36.s, [], 'qinmin').forecast;
+  G36.s.d0_buff_mult = 1.15; G36.s.d0_buff_days = 3;
+  const g1 = previewBasket(G36.s, [], 'qinmin').forecast;
+  check('§36 针5·非比值式：无昨日实卖时 buffDelta=buffToday，display＝baseEst 显示值 ×1.15，lowConfidence 不被 buff 改写',
+    Math.abs(g1.display.estBowls - g0.display.estBowls * 1.15) < 1e-9
+      && Math.abs(g0.display.estBowls - baseEst36(G36.s)) < 1e-9
+      && g1.display.parts.buff === 1.15 && g1.display.lowConfidence === true && g1.estBowls === g0.estBowls,
+    `baseEst ${g0.display.estBowls.toFixed(4)} → ${g1.display.estBowls.toFixed(4)} 碗`);
+
+  // ── 预定不乘 buff：与结算同构（ops 里 buff 只乘 D0，不乘预定与熟客层）──
+  const V36 = aligned36();
+  V36.s.d0_buff_mult = 1.15; V36.s.d0_buff_days = 3; V36.s.event_reserve_bowls = 15;
+  const fv = previewBasket(V36.s, [], 'qinmin').forecast;
+  check('§36 护栏·预定不乘：buff 只乘估算分量，display.estBowls＝displayEstBowls(已乘)＋预定 15，结构不变',
+    Math.abs(fv.display.estBowls - (fv.displayEstBowls + 15)) < 1e-9
+      && Math.abs(fv.displayEstBowls - f0.displayEstBowls * 1.15) < 1e-9 && fv.display.reserveBowls === 15,
+    `显示 ${fv.display.estBowls.toFixed(4)} ＝ ${fv.displayEstBowls.toFixed(4)} ＋ 15`);
+
+  // ── 针 6：老档无 YesterdayD0Buff 读入不炸，buff 按昨=1 处理 ──
+  const store36 = new Map();
+  globalThis.localStorage = {
+    getItem: k => (store36.has(k) ? store36.get(k) : null),
+    setItem: (k, v) => store36.set(k, String(v)),
+    removeItem: k => store36.delete(k),
+  };
+  const save36 = newGame(SEED);
+  store36.set(STORAGE_KEY, JSON.stringify(save36));
+  const old36 = loadGame();
+  delete globalThis.localStorage;
+  let oldOk36 = false, oldBuff36 = NaN;
+  if (old36) {
+    beginDay(old36);
+    old36.YesterdayScenario = old36.today.scenario;
+    old36.YesterdaySoldBowls = 60; old36.YesterdayD0 = 60;
+    old36.YesterdayRamp = 1; old36.YesterdayF = old36.F;
+    old36.PriceCoefYday = priceCoefFor(old36, old36.PriceTier, old36.today.scenario);
+    old36.d0_buff_mult = 1.15; old36.d0_buff_days = 3;
+    oldBuff36 = previewBasket(old36, [], old36.PriceTier).forecast.display.parts.buff;
+    oldOk36 = true;
+  }
+  check('§36 针6·老档缺省：存档无 YesterdayD0Buff 字段时 loadGame 不炸（saveVersion 闸不变），'
+      + '比值式下 buff 按昨=1 处理（delta=buffToday=1.15），SAVE_VERSION 不动',
+    oldOk36 && !('YesterdayD0Buff' in save36) && oldBuff36 === 1.15 && SAVE_VERSION === 'v4.9.3-cal.2',
+    `老档读入 ${oldOk36 ? ' ok' : '炸'}｜delta ${oldBuff36}`);
+
+  // ── 针 7：记录针——第 7 步后 today.d0Buff＝当日 D0 实际所乘之值，含末日（步内 mult 已归 1，记录仍 1.15）──
+  const R36 = aligned36();
+  R36.s.d0_buff_mult = 1.15; R36.s.d0_buff_days = 1;
+  const tR36 = runBusiness(R36.s, [], makeRng(R36.s));
+  const D0base36 = R36.s.BaseSales * R36.sc.trafficTotal * priceCoefFor(R36.s, 'qinmin', R36.sc) * (0.75 + R36.s.Rep * 0.005) * R36.s.F;
+  check('§36 针7a·末日记录：当日仍乘 1.15、步内天数递减归 1 后，t.d0Buff 必须是 1.15（归 1 之前的值），t.D0＝基础 D0×1.15',
+    tR36.d0Buff === 1.15 && R36.s.d0_buff_mult === 1 && R36.s.d0_buff_days === 0
+      && Math.abs(tR36.D0 - D0base36 * 1.15) < 1e-9,
+    `记录 ${tR36.d0Buff}｜步后 mult ${R36.s.d0_buff_mult}/${R36.s.d0_buff_days} 日｜D0 ${tR36.D0.toFixed(4)}`);
+  const R2 = aligned36();
+  R2.s.d0_buff_mult = 1.15; R2.s.d0_buff_days = 3;
+  const tR2 = runBusiness(R2.s, [], makeRng(R2.s));
+  nightClose(R2.s, makeRng(R2.s), null, null);
+  const R3 = aligned36();
+  const tR3 = runBusiness(R3.s, [], makeRng(R3.s));
+  check('§36 针7b·滚动与缺省：持续日步后 mult 仍 1.15、记录 1.15，第 12 步滚出 YesterdayD0Buff=1.15；无 buff 日记录 1',
+    tR2.d0Buff === 1.15 && R2.s.d0_buff_mult === 1.15 && R2.s.YesterdayD0Buff === 1.15 && tR3.d0Buff === 1,
+    `持续日记录 ${tR2.d0Buff}｜滚动 ${R2.s.YesterdayD0Buff}｜无 buff 日 ${tR3.d0Buff}`);
+
+  // ── 针 8：链文案——首日 bonus 含「提振的劲儿还在」，持续日不出现（delta=1 不许误报）──
+  const chain1 = forecastChain(f1.display, F36.s.today.scenario, F36.s.YesterdayScenario, null);
+  const chain2 = forecastChain(f2.display, C36.s.today.scenario, C36.s.YesterdayScenario, null);
+  check('§36 针8·链文案：首日链 bonus 段含「提振的劲儿还在」且不含「过了」；持续日两句都不出现；两句逐字为 Orange 定稿',
+    chain1.includes('提振的劲儿还在') && !chain1.includes('提振的劲儿过了')
+      && !chain2.includes('提振的劲儿还在') && !chain2.includes('提振的劲儿过了')
+      && chainRaw36.includes("buff: '提振的劲儿过了'") && chainRaw36.includes("bonus.push('提振的劲儿还在')"),
+    `首日 [${chain1}]｜持续 [${chain2}]`);
+
+  // ── 灾难门判定用未乘原值：地板与 buff 同命中时，先取舍后乘 ──
+  const X36 = aligned36();
+  X36.s.YesterdaySoldBowls = 1; X36.s.YesterdayD0 = 1;
+  X36.s.d0_buff_mult = 1.15; X36.s.d0_buff_days = 3;
+  const fx = previewBasket(X36.s, [], 'qinmin').forecast;
+  check('§36 护栏·灾难门顺序：ratioEst=1 触发地板（判定用未乘原值），显示＝0.6×baseEst 之后再 ×1.15，floorApplied 不被 buff 改写',
+    fx.floorApplied === true && fx.estBowls === 1
+      && Math.abs(fx.display.estBowls - 0.6 * baseEst36(X36.s) * 1.15) < 1e-9,
+    `地板×buff ${fx.display.estBowls.toFixed(4)} 碗｜标准 ${fx.estBowls}`);
+
+  // ── nextDayNotes 核对：d0<1 那句「已经算进去了」修后首日靠 delta、持续期靠锚，两段都成立；原句逐字未改 ──
+  const N1 = aligned36();
+  N1.s.d0_buff_mult = 0.85; N1.s.d0_buff_days = 2;
+  const fn1 = previewBasket(N1.s, [], 'qinmin').forecast;
+  const N2 = aligned36();
+  N2.s.YesterdayD0Buff = 0.85; N2.s.YesterdaySoldBowls = N2.D0 * 0.85; N2.s.YesterdayD0 = N2.D0 * 0.85;
+  N2.s.d0_buff_mult = 0.85; N2.s.d0_buff_days = 1;
+  const fn2 = previewBasket(N2.s, [], 'qinmin').forecast;
+  const noteSent36 = '这几天来的人都少些（前儿那件事的余波），上面「按今天客流要」已经算进去了。';
+  check('§36 核对·nextDayNotes：余波首日 display 已 ×0.85（delta 计入）、持续日 display＝被压锚本身（锚计入），'
+      + '「已经算进去了」两段都成立；原句逐字在场、本批未改词',
+    nextDayNotes(N1.s).includes(noteSent36) && nextDayNotes(N2.s).includes(noteSent36)
+      && Math.abs(fn1.display.estBowls - f0.display.estBowls * 0.85) < 1e-9
+      && Math.abs(fn2.display.estBowls - N2.s.YesterdaySoldBowls) < 1e-9
+      && chainRaw36.includes(noteSent36),
+    `首日 ${fn1.display.estBowls.toFixed(4)}｜持续 ${fn2.display.estBowls.toFixed(4)}（锚 ${N2.s.YesterdaySoldBowls.toFixed(4)}）`);
+
+  // ── 针 9：结构护栏——四处落点原文在场、记录在归 1 前、乘在取舍后、标准返回与 sim 读取逐字未动 ⇒ 两带 diff 0 结构性 ──
+  check('§36 针9·结构护栏：ops 记录行在递减块之前；day 滚动行在 YesterdayD0 同段；ledger 乘行在 Math.max 取舍之后、'
+      + 'standard 仍 evalMetrics(estBowls)、顶层 return 首行逐字；sim 仍只读 forecast.estBowls / plan；PULL_ORDER 在 nextDay 后 event 前插 buff',
+    opsRaw36.includes('t.d0Buff = state.d0_buff_mult;')
+      && opsRaw36.indexOf('t.d0Buff = state.d0_buff_mult;') < opsRaw36.indexOf('if (state.d0_buff_days > 0)')
+      && dayRaw36.includes('state.YesterdayD0Buff = state.today.d0Buff ?? 1;')
+      && ledgerRaw36.includes('const buffToday = state.d0_buff_mult || 1;')
+      && ledgerRaw36.includes('displayEstBowls *= buffDelta;')
+      && ledgerRaw36.indexOf('displayEstBowls = Math.max(disaster ? 0.6 * baseEst : ratioEst, ratioEst * soldOutLift);') < ledgerRaw36.indexOf('displayEstBowls *= buffDelta;')
+      && ledgerRaw36.includes('const standard = evalMetrics(estBowls);')
+      && ledgerRaw36.includes('estBowls, supplyBowls: supply.bowls, capped: standard.capped, lowConfidence, floorApplied,')
+      && simRaw36.includes('.forecast.estBowls') && simRaw36.includes('.forecast.plan.submittable')
+      && chainRaw36.includes("const PULL_ORDER = ['traffic', 'ramp', 'price', 'f', 'share', 'nextDay', 'buff', 'event'];"),
+    '四处落点原文在场｜标准侧与 sim 读取未动');
+}
+
 // ① 落区间外时给算术证据：正文 3.10 学期循环第 1–5 天必为开学·社团活动周，
 // 而开学周是"全线 ×1.1 + 品类系数偏肉（MB1.3/MT1.2）"；附录 D.5 的 2.5 元/碗 锚点按固定品类占比算，不含这两项。
 function bowlMarginYuan(tier, priceTierId, weatherId, semesterDay) {

@@ -243,6 +243,7 @@ export function nightClose(state, rng, ev, actionId) {
     || (state.today.handRefused || 0) > 0;
   // 第 7 步 D0 是公开项：卖断货那天玩家看得见门口排了多长的队，次日就照这个数加量
   state.YesterdayD0 = state.today.D0 || 0;
+  state.YesterdayD0Buff = state.today.d0Buff ?? 1;
   if (state.RampDays > 0) state.RampDays -= 1;
   state.event_demand_mult = 1.0;
   return { evening, ending };

@@ -25,6 +25,8 @@ export function runBusiness(state, handResults, rng) {
   const ramp = rampCoef(state);
   const D0 = state.BaseSales * ramp * sc.trafficTotal * priceCoefFor(state)
     * (0.75 + state.Rep * 0.005) * state.F * state.next_day_traffic_mult * state.d0_buff_mult;
+  // 提振显示单：被动记录当日 D0 实际所乘之值，必须在下面递减归 1 之前取
+  t.d0Buff = state.d0_buff_mult;
   state.next_day_traffic_mult = 1.0;
   if (state.d0_buff_days > 0) {
     state.d0_buff_days -= 1;

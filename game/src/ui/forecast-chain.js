@@ -68,9 +68,10 @@ const PULL_TALK = {
   f: '摊上的家伙什',
   share: '对面摊子抢了客',
   nextDay: '昨天那件事的余波',
+  buff: '提振的劲儿过了',
   event: '今儿这件事压了客流',
 };
-const PULL_ORDER = ['traffic', 'ramp', 'price', 'f', 'share', 'nextDay', 'event'];
+const PULL_ORDER = ['traffic', 'ramp', 'price', 'f', 'share', 'nextDay', 'buff', 'event'];
 const NEAR_ONE = 0.999;   // 浮点尾巴不算拉低（净化口径同 §复现单：只清尾巴，不改判定）
 
 function pullers(p) {
@@ -98,6 +99,7 @@ export function forecastChain(f, sc, ySc, evTitle) {
     const pct = Math.round((f.eventMult - 1) * 100);
     bonus.push(`${evTitle || '今儿这件事'} ${pct > 0 ? '+' : '−'}${Math.abs(pct)}%`);
   }
+  if (p && p.buff > 1) bonus.push('提振的劲儿还在');
   if (f.reserveBowls > 0) bonus.push(`含预定 ${f.reserveBowls} 碗`);
   if (bonus.length) segs.push(bonus.join('，'));
   if (ratioForm && need < Math.round(p.yBowls)) {

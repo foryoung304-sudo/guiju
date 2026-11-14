@@ -198,6 +198,13 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
     displayEstBowls = baseEst;
   }
 
+  // 提振显示单（2026-11-13）：d0_buff 只进显示层，标准侧逐字不动；
+  // 乘在地板/托底取舍之后，灾难门判定仍用未乘原值；只乘估算分量、不乘预定（与结算同构）
+  const buffToday = state.d0_buff_mult || 1;
+  const buffDelta = (yBowls > 0 && ySc && state.Share[0] > 0)
+    ? buffToday / (state.YesterdayD0Buff || 1) : buffToday;
+  displayEstBowls *= buffDelta;
+
   const supply = basketSupply(state, basket, scenario);
   // 附录 C + 3.12：备货可供碗数之外还要过出餐产能这道闸（斤/日 × 备菜连乘 × 小豆在场，折成碗数）
   const cap = capacityJin(state);
@@ -274,6 +281,7 @@ export function forecastBasket(state, basket, priceTierId, scenario) {
     f: state.YesterdayF ? state.F / state.YesterdayF : 1,
     share: estShare === null ? 1 : (state.Share[0] > 0 ? estShare / state.Share[0] : 1),
     nextDay: state.next_day_traffic_mult,
+    buff: buffDelta,
     event: eventMult,
     reserve: reserveBowls,
     floorApplied,
